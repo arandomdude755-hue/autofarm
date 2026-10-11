@@ -42,6 +42,30 @@ function FeatureManager:Dispatch(actionId, payload)
         return true
     end
 
+    if actionId == "farm.weaponCategory.cycle" then
+        local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+        local categories = farmSettings and farmSettings.WeaponCategories
+        if type(categories) ~= "table" or #categories == 0 then
+            self.State:SetStatus("Weapon category settings are unavailable.", "error")
+            return false, "Weapon category settings are unavailable"
+        end
+
+        local currentIndex
+        for index, category in ipairs(categories) do
+            if category == farmSettings.WeaponCategory then
+                currentIndex = index
+                break
+            end
+        end
+        local nextIndex = currentIndex and (currentIndex % #categories + 1) or 1
+        farmSettings.WeaponCategory = categories[nextIndex]
+        self.State:SetStatus(
+            "Weapon category: " .. tostring(farmSettings.WeaponCategory),
+            "success"
+        )
+        return true
+    end
+
     for _, featureModule in ipairs(self.Modules) do
         local ok, handled = pcall(
             featureModule.Handle,

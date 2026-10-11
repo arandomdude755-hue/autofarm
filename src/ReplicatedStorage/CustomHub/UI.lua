@@ -147,6 +147,9 @@ function UI:_Refresh(snapshot)
         elseif entry.Control.Kind == "settingToggle" then
             enabled = snapshot.compact
             entry.Label.Text = enabled and "On" or "Off"
+        elseif entry.Control.Kind == "settingCycle" then
+            local farmSettings = self.Config.FarmSettings or {}
+            entry.Label.Text = tostring(farmSettings[entry.Control.Setting] or "Unset")
         end
     end
 
@@ -193,7 +196,9 @@ end
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
-    local hasToggle = control.Kind == "featureToggle" or control.Kind == "settingToggle"
+    local hasToggle = control.Kind == "featureToggle"
+        or control.Kind == "settingToggle"
+        or control.Kind == "settingCycle"
     local reservedTitleSpace = hasToggle and (layout.ToggleValueWidth + layout.ToggleGap) or 0
     local row = create("TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
@@ -251,7 +256,9 @@ function UI:_AddControl(control)
             Size = UDim2.fromOffset(layout.ToggleValueWidth, layout.ToggleValueHeight),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
-            Text = "Off",
+            Text = control.Kind == "settingCycle"
+                and tostring((self.Config.FarmSettings or {})[control.Setting] or "Unset")
+                or "Off",
             TextColor3 = theme.Accent,
             TextSize = theme.TextSizes.Detail,
             TextXAlignment = Enum.TextXAlignment.Right,

@@ -37,6 +37,7 @@ local Config = {
     },
     FarmSettings = {
         -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
+        WeaponCategories = { "Melee", "Sword", "Blox Fruit" },
         WeaponCategory = "Melee",
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
@@ -129,6 +130,13 @@ local Config = {
                     Label = "Main Farm",
                     Detail = "Selects a level quest, confirms it, then finds and engages its target.",
                     Action = "farm.main",
+                },
+                {
+                    Kind = "settingCycle",
+                    Label = "Weapon category",
+                    Detail = "Tap to cycle through Melee, Sword, and Blox Fruit.",
+                    Action = "farm.weaponCategory.cycle",
+                    Setting = "WeaponCategory",
                 },
             },
         },
@@ -460,6 +468,30 @@ function FeatureManager:Dispatch(actionId, payload)
         return true
     end
 
+    if actionId == "farm.weaponCategory.cycle" then
+        local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+        local categories = farmSettings and farmSettings.WeaponCategories
+        if type(categories) ~= "table" or #categories == 0 then
+            self.State:SetStatus("Weapon category settings are unavailable.", "error")
+            return false, "Weapon category settings are unavailable"
+        end
+
+        local currentIndex
+        for index, category in ipairs(categories) do
+            if category == farmSettings.WeaponCategory then
+                currentIndex = index
+                break
+            end
+        end
+        local nextIndex = currentIndex and (currentIndex % #categories + 1) or 1
+        farmSettings.WeaponCategory = categories[nextIndex]
+        self.State:SetStatus(
+            "Weapon category: " .. tostring(farmSettings.WeaponCategory),
+            "success"
+        )
+        return true
+    end
+
     for _, featureModule in ipairs(self.Modules) do
         local ok, handled = pcall(
             featureModule.Handle,
@@ -648,6 +680,9 @@ function UI:_Refresh(snapshot)
         elseif entry.Control.Kind == "settingToggle" then
             enabled = snapshot.compact
             entry.Label.Text = enabled and "On" or "Off"
+        elseif entry.Control.Kind == "settingCycle" then
+            local farmSettings = self.Config.FarmSettings or {}
+            entry.Label.Text = tostring(farmSettings[entry.Control.Setting] or "Unset")
         end
     end
 
@@ -694,7 +729,9 @@ end
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
-    local hasToggle = control.Kind == "featureToggle" or control.Kind == "settingToggle"
+    local hasToggle = control.Kind == "featureToggle"
+        or control.Kind == "settingToggle"
+        or control.Kind == "settingCycle"
     local reservedTitleSpace = hasToggle and (layout.ToggleValueWidth + layout.ToggleGap) or 0
     local row = create("TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
@@ -752,7 +789,9 @@ function UI:_AddControl(control)
             Size = UDim2.fromOffset(layout.ToggleValueWidth, layout.ToggleValueHeight),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
-            Text = "Off",
+            Text = control.Kind == "settingCycle"
+                and tostring((self.Config.FarmSettings or {})[control.Setting] or "Unset")
+                or "Off",
             TextColor3 = theme.Accent,
             TextSize = theme.TextSizes.Detail,
             TextXAlignment = Enum.TextXAlignment.Right,

@@ -8,6 +8,7 @@ local Config = {
     },
     FarmSettings = {
         -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
+        WeaponCategories = { "Melee", "Sword", "Blox Fruit" },
         WeaponCategory = "Melee",
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
@@ -100,6 +101,13 @@ local Config = {
                     Label = "Main Farm",
                     Detail = "Selects a level quest, confirms it, then finds and engages its target.",
                     Action = "farm.main",
+                },
+                {
+                    Kind = "settingCycle",
+                    Label = "Weapon category",
+                    Detail = "Tap to cycle through Melee, Sword, and Blox Fruit.",
+                    Action = "farm.weaponCategory.cycle",
+                    Setting = "WeaponCategory",
                 },
             },
         },
