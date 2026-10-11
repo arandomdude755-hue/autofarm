@@ -40,24 +40,30 @@ if orphanedGui then
 end
 
 local Theme = {
-    Background = Color3.fromRGB(24, 26, 30),
-    Panel = Color3.fromRGB(32, 35, 40),
-    Control = Color3.fromRGB(40, 44, 50),
-    Selected = Color3.fromRGB(54, 81, 103),
-    Border = Color3.fromRGB(62, 67, 75),
+    Background = Color3.fromRGB(18, 21, 28),
+    Header = Color3.fromRGB(23, 27, 36),
+    TabBar = Color3.fromRGB(20, 24, 32),
+    Panel = Color3.fromRGB(22, 26, 34),
+    Control = Color3.fromRGB(27, 32, 42),
+    Selected = Color3.fromRGB(30, 36, 48),
+    Border = Color3.fromRGB(43, 49, 62),
+    AccentBorder = Color3.fromRGB(69, 117, 190),
     Text = Color3.fromRGB(237, 239, 243),
-    MutedText = Color3.fromRGB(165, 172, 181),
-    Accent = Color3.fromRGB(111, 166, 204),
-    Success = Color3.fromRGB(128, 190, 151),
+    MutedText = Color3.fromRGB(157, 165, 177),
+    Accent = Color3.fromRGB(79, 139, 224),
+    Success = Color3.fromRGB(106, 190, 145),
     Warning = Color3.fromRGB(222, 184, 105),
     Error = Color3.fromRGB(224, 116, 108),
     Font = Enum.Font.Gotham,
     StrongFont = Enum.Font.GothamSemibold,
+    MonoFont = Enum.Font.Code,
 }
 
 local Tabs = { "Main", "Farm", "Player", "Teleport", "Settings" }
 local Pages = {
     Main = {
+        Section = "Hub Overview",
+        Meta = "LOCAL UI",
         Description = "Hub status and safe UI checks.",
         Controls = {
             {
@@ -65,10 +71,13 @@ local Pages = {
                 Label = "Run UI self-check",
                 Detail = "Checks this shell only; no gameplay action.",
                 Action = "main.selfCheck",
+                Badge = "CHECK",
             },
         },
     },
     Farm = {
+        Section = "Farm Preview",
+        Meta = "DISCONNECTED",
         Description = "Farm controls are UI-only previews.",
         Controls = {
             {
@@ -80,6 +89,8 @@ local Pages = {
         },
     },
     Player = {
+        Section = "Player Tools",
+        Meta = "PLACEHOLDER",
         Description = "Player utilities are not connected.",
         Controls = {
             {
@@ -87,10 +98,13 @@ local Pages = {
                 Label = "Character status",
                 Detail = "Placeholder; no character data is read or changed.",
                 Action = "player.status",
+                Badge = "INFO",
             },
         },
     },
     Teleport = {
+        Section = "Travel",
+        Meta = "PLACEHOLDER",
         Description = "Travel actions are not connected.",
         Controls = {
             {
@@ -98,10 +112,13 @@ local Pages = {
                 Label = "Travel status",
                 Detail = "Placeholder; no movement or remote is invoked.",
                 Action = "teleport.status",
+                Badge = "INFO",
             },
         },
     },
     Settings = {
+        Section = "Interface & Display",
+        Meta = "LOCAL",
         Description = "These settings affect only this local UI.",
         Controls = {
             {
@@ -115,6 +132,7 @@ local Pages = {
                 Label = "Reset UI settings",
                 Detail = "Restores local presentation defaults.",
                 Action = "settings.reset",
+                Badge = "RESET",
             },
         },
     },
@@ -137,6 +155,7 @@ local root
 local scroll
 local content
 local contentLayout
+local titlebar
 local statusLabel
 local tabButtons = {}
 local toggleEntries = {}
@@ -144,6 +163,10 @@ local closeRegistry
 local isCleaned = true
 local selfTestRunning = true
 local selfTestCancelled = false
+local dragging = false
+local dragInput
+local dragStart
+local dragOrigin
 
 local function create(className, properties, parent)
     local object = Instance.new(className)
@@ -201,6 +224,10 @@ local function setStatus(message, kind)
         else
             statusLabel.TextColor3 = Theme.MutedText
         end
+        local dot = statusLabel.Parent and statusLabel.Parent:FindFirstChild("StatusDot")
+        if dot then
+            dot.BackgroundColor3 = statusLabel.TextColor3
+        end
     end
 end
 
@@ -209,25 +236,43 @@ local function updateSize()
         return
     end
 
-    if state.compact then
-        root.Size = touchEnabled and UDim2.fromScale(0.92, 0.78) or UDim2.fromScale(0.72, 0.78)
-    else
-        root.Size = UDim2.fromScale(0.96, 0.88)
-    end
+    local camera = workspace.CurrentCamera
+    local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+    local landscape = viewport.X > viewport.Y
+    local widthScale = state.compact and (touchEnabled and 0.92 or 0.72) or 0.96
+    local heightScale = state.compact and (landscape and 0.84 or 0.78) or 0.9
+    local maxWidth = landscape and 760 or 500
+    local maxHeight = landscape and 360 or 740
+    local width = math.min(viewport.X * widthScale, maxWidth, math.max(280, viewport.X - 16))
+    local height = math.min(viewport.Y * heightScale, maxHeight, math.max(320, viewport.Y - 32))
+    root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
 end
 
 local function updateIndicators()
     for tabName, button in pairs(tabButtons) do
         local selected = tabName == state.selectedTab
-        button.BackgroundColor3 = selected and Theme.Selected or Theme.Control
+        button.BackgroundColor3 = selected and Theme.Selected or Theme.TabBar
         button.TextColor3 = selected and Theme.Text or Theme.MutedText
+        local stroke = button:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            stroke.Color = selected and Theme.AccentBorder or Theme.Border
+            stroke.Transparency = selected and 0.18 or 0.72
+        end
+        local marker = button:FindFirstChild("ActiveMarker")
+        if marker then
+            marker.Visible = selected
+        end
     end
 
     for _, entry in ipairs(toggleEntries) do
         if entry.Action == "preview.farm" then
-            entry.Value.Text = state.farmPreview and "Preview ON" or "Preview OFF"
+            entry.Value.Text = state.farmPreview and "ON" or "OFF"
+            entry.Value.BackgroundColor3 = state.farmPreview and Theme.Accent or Theme.TabBar
+            entry.Value.TextColor3 = state.farmPreview and Theme.Text or Theme.MutedText
         elseif entry.Action == "settings.compact" then
-            entry.Value.Text = state.compact and "On" or "Off"
+            entry.Value.Text = state.compact and "ON" or "OFF"
+            entry.Value.BackgroundColor3 = state.compact and Theme.Accent or Theme.TabBar
+            entry.Value.TextColor3 = state.compact and Theme.Text or Theme.MutedText
         end
     end
 end
@@ -300,55 +345,96 @@ renderTab = function(tabName)
 
     create("TextLabel", {
         Name = "PageDescription",
-        Size = UDim2.new(1, 0, 0, 46),
+        Size = UDim2.new(1, 0, 0, 38),
         BackgroundTransparency = 1,
         Font = Theme.Font,
         Text = page.Description,
         TextColor3 = Theme.MutedText,
-        TextSize = 13,
+        TextSize = 12,
         TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
+        TextYAlignment = Enum.TextYAlignment.Center,
         LayoutOrder = 1,
     }, content)
 
+    local section = create("Frame", {
+        Name = "SectionHeader",
+        Size = UDim2.new(1, -2, 0, 26),
+        BackgroundColor3 = Theme.Panel,
+        BorderSizePixel = 0,
+        LayoutOrder = 2,
+    }, content)
+    addCorner(section, 3)
+    create("Frame", {
+        Name = "AccentBar",
+        Position = UDim2.fromOffset(7, 6),
+        Size = UDim2.new(0, 3, 1, -12),
+        BackgroundColor3 = Theme.Accent,
+        BorderSizePixel = 0,
+    }, section)
+    create("TextLabel", {
+        Name = "SectionName",
+        Position = UDim2.fromOffset(17, 0),
+        Size = UDim2.new(1, -124, 1, 0),
+        BackgroundTransparency = 1,
+        Font = Theme.MonoFont,
+        Text = string.upper(page.Section),
+        TextColor3 = Theme.Text,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, section)
+    create("TextLabel", {
+        Name = "SectionMeta",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 0),
+        Size = UDim2.fromOffset(92, 26),
+        BackgroundTransparency = 1,
+        Font = Theme.MonoFont,
+        Text = page.Meta,
+        TextColor3 = Theme.MutedText,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, section)
+
     for index, control in ipairs(page.Controls) do
         local hasValue = control.Kind == "previewToggle" or control.Kind == "settingToggle"
-        local reserved = hasValue and 98 or 0
+        local reserved = 78
         local row = create("TextButton", {
             Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
-            Size = UDim2.new(1, -4, 0, 72),
+            Size = UDim2.new(1, -2, 0, 68),
             BackgroundColor3 = Theme.Control,
             BorderSizePixel = 0,
-            AutoButtonColor = true,
+            AutoButtonColor = false,
             Text = "",
-            LayoutOrder = index + 1,
+            LayoutOrder = index + 2,
         }, content)
-        addCorner(row, 5)
+        addCorner(row, 3)
         addStroke(row)
 
         create("TextLabel", {
             Name = "Title",
-            Position = UDim2.fromOffset(10, 7),
+            Position = UDim2.fromOffset(10, 8),
             Size = UDim2.new(1, -20 - reserved, 0, 22),
             BackgroundTransparency = 1,
             Font = Theme.StrongFont,
             Text = control.Label,
             TextColor3 = Theme.Text,
-            TextSize = 14,
+            TextSize = 13,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
         }, row)
 
         create("TextLabel", {
             Name = "Detail",
-            Position = UDim2.fromOffset(10, 31),
+            Position = UDim2.fromOffset(10, 32),
             Size = UDim2.new(1, -20, 0, 32),
             BackgroundTransparency = 1,
             Font = Theme.Font,
             Text = control.Detail,
             TextColor3 = Theme.MutedText,
-            TextSize = 12,
+            TextSize = 10,
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Top,
@@ -358,16 +444,35 @@ renderTab = function(tabName)
             local valueLabel = create("TextLabel", {
                 Name = "Value",
                 AnchorPoint = Vector2.new(1, 0),
-                Position = UDim2.new(1, -10, 0, 8),
-                Size = UDim2.fromOffset(90, 18),
-                BackgroundTransparency = 1,
+                Position = UDim2.new(1, -10, 0, 10),
+                Size = UDim2.fromOffset(58, 22),
+                BackgroundColor3 = Theme.TabBar,
+                BorderSizePixel = 0,
                 Font = Theme.StrongFont,
-                Text = "Off",
-                TextColor3 = Theme.Accent,
-                TextSize = 12,
-                TextXAlignment = Enum.TextXAlignment.Right,
+                Text = "OFF",
+                TextColor3 = Theme.MutedText,
+                TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Center,
             }, row)
+            addCorner(valueLabel, 3)
+            addStroke(valueLabel)
             table.insert(toggleEntries, { Action = control.Action, Value = valueLabel })
+        else
+            local badge = create("TextLabel", {
+                Name = "ActionBadge",
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -10, 0, 10),
+                Size = UDim2.fromOffset(58, 22),
+                BackgroundColor3 = Theme.TabBar,
+                BorderSizePixel = 0,
+                Font = Theme.MonoFont,
+                Text = control.Badge or "OPEN",
+                TextColor3 = Theme.Accent,
+                TextSize = 8,
+                TextXAlignment = Enum.TextXAlignment.Center,
+            }, row)
+            addCorner(badge, 3)
+            addStroke(badge)
         end
 
         connect(pageConnections, row.Activated, function()
@@ -408,9 +513,14 @@ local function cleanup(fromSelfTest)
     scroll = nil
     content = nil
     contentLayout = nil
+    titlebar = nil
     statusLabel = nil
     tabButtons = {}
     toggleEntries = {}
+    dragging = false
+    dragInput = nil
+    dragStart = nil
+    dragOrigin = nil
 
     local registry = closeRegistry
     closeRegistry = nil
@@ -437,118 +547,232 @@ local function mount()
         Name = "Window",
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromScale(0.92, 0.78),
+        Size = UDim2.fromOffset(350, 600),
         BackgroundColor3 = Theme.Background,
         BorderSizePixel = 0,
     }, screenGui)
-    addCorner(root, 7)
+    addCorner(root, 4)
     addStroke(root)
     create("UISizeConstraint", {
-        MinSize = Vector2.new(270, 330),
-        MaxSize = Vector2.new(500, 680),
+        MinSize = Vector2.new(280, 320),
+        MaxSize = Vector2.new(760, 740),
     }, root)
 
+    titlebar = create("Frame", {
+        Name = "Titlebar",
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = Theme.Header,
+        BorderSizePixel = 0,
+        Active = true,
+    }, root)
+    create("Frame", {
+        Name = "LogoMark",
+        Position = UDim2.fromOffset(10, 13),
+        Size = UDim2.fromOffset(14, 14),
+        BackgroundColor3 = Theme.Accent,
+        BorderSizePixel = 0,
+    }, titlebar)
+    create("Frame", {
+        Name = "LogoCenter",
+        Position = UDim2.fromOffset(5, 5),
+        Size = UDim2.fromOffset(4, 4),
+        BackgroundColor3 = Theme.Text,
+        BorderSizePixel = 0,
+    }, titlebar.LogoMark)
     create("TextLabel", {
         Name = "Title",
-        Position = UDim2.fromOffset(12, 7),
-        Size = UDim2.new(1, -84, 0, 30),
+        Position = UDim2.fromOffset(32, 0),
+        Size = UDim2.new(0, 72, 1, 0),
         BackgroundTransparency = 1,
-        Font = Theme.StrongFont,
-        Text = "Custom Hub  ·  UI Test",
+        Font = Theme.MonoFont,
+        Text = "APEX HUB",
         TextColor3 = Theme.Text,
-        TextSize = 17,
+        TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-    }, root)
+    }, titlebar)
+    local versionBadge = create("TextLabel", {
+        Name = "VersionBadge",
+        Position = UDim2.fromOffset(110, 11),
+        Size = UDim2.fromOffset(50, 18),
+        BackgroundColor3 = Theme.Selected,
+        BorderSizePixel = 0,
+        Font = Theme.MonoFont,
+        Text = "UI TEST",
+        TextColor3 = Theme.Accent,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Center,
+    }, titlebar)
+    addCorner(versionBadge, 2)
+    addStroke(versionBadge)
 
     local closeButton = create("TextButton", {
         Name = "Close",
         AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -10, 0, 7),
-        Size = UDim2.fromOffset(54, 28),
+        Position = UDim2.new(1, -8, 0, 7),
+        Size = UDim2.fromOffset(28, 26),
         BackgroundColor3 = Theme.Control,
         BorderSizePixel = 0,
-        Font = Theme.Font,
-        Text = "Close",
+        Font = Theme.StrongFont,
+        Text = "×",
         TextColor3 = Theme.MutedText,
-        TextSize = 12,
-    }, root)
-    addCorner(closeButton, 5)
+        TextSize = 17,
+    }, titlebar)
+    addCorner(closeButton, 3)
     addStroke(closeButton)
     connect(persistentConnections, closeButton.Activated, function()
         cleanup()
     end)
 
+    connect(persistentConnections, titlebar.InputBegan, function(input)
+        if input.Position.X >= closeButton.AbsolutePosition.X then
+            return
+        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+            dragStart = input.Position
+            dragOrigin = root.AbsolutePosition
+        end
+    end)
+    connect(persistentConnections, UserInputService.InputChanged, function(input)
+        if not dragging or not dragStart or not dragOrigin then
+            return
+        end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input ~= dragInput then
+            return
+        end
+
+        local camera = workspace.CurrentCamera
+        local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+        local delta = input.Position - dragStart
+        local size = root.AbsoluteSize
+        local x = math.clamp(dragOrigin.X + delta.X, 0, math.max(0, viewport.X - size.X))
+        local y = math.clamp(dragOrigin.Y + delta.Y, 0, math.max(0, viewport.Y - size.Y))
+        root.Position = UDim2.fromOffset(x + size.X / 2, y + size.Y / 2)
+    end)
+    connect(persistentConnections, UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input == dragInput then
+            dragging = false
+            dragInput = nil
+            dragStart = nil
+            dragOrigin = nil
+        end
+    end)
+
+    local tabBar = create("Frame", {
+        Name = "TabBar",
+        Position = UDim2.fromOffset(0, 40),
+        Size = UDim2.new(1, 0, 0, 36),
+        BackgroundColor3 = Theme.TabBar,
+        BorderSizePixel = 0,
+    }, root)
     local tabWidth = 1 / #Tabs
     for index, tabName in ipairs(Tabs) do
         local button = create("TextButton", {
             Name = "Tab_" .. tabName,
-            Position = UDim2.new((index - 1) * tabWidth, 0, 0, 42),
-            Size = UDim2.new(tabWidth, -2, 0, 34),
-            BackgroundColor3 = Theme.Control,
+            Position = UDim2.new((index - 1) * tabWidth, 2, 0, 4),
+            Size = UDim2.new(tabWidth, -4, 0, 28),
+            BackgroundColor3 = Theme.TabBar,
             BorderSizePixel = 0,
             Font = Theme.Font,
             Text = tabName,
             TextColor3 = Theme.MutedText,
-            TextSize = 11,
+            TextSize = 10,
             TextTruncate = Enum.TextTruncate.AtEnd,
-        }, root)
-        addCorner(button, 4)
+        }, tabBar)
+        addCorner(button, 3)
+        addStroke(button)
+        create("Frame", {
+            Name = "ActiveMarker",
+            AnchorPoint = Vector2.new(0.5, 1),
+            Position = UDim2.new(0.5, 0, 1, -2),
+            Size = UDim2.fromOffset(12, 2),
+            BackgroundColor3 = Theme.Accent,
+            BorderSizePixel = 0,
+            Visible = false,
+        }, button)
         connect(persistentConnections, button.Activated, function()
             selectTab(tabName)
         end)
         tabButtons[tabName] = button
     end
 
-    local statusFrame = create("Frame", {
-        Name = "Status",
-        Position = UDim2.fromOffset(0, 82),
-        Size = UDim2.new(1, 0, 0, 44),
-        BackgroundColor3 = Theme.Panel,
-        BorderSizePixel = 0,
-    }, root)
-    statusLabel = create("TextLabel", {
-        Name = "Message",
-        Position = UDim2.fromOffset(8, 4),
-        Size = UDim2.new(1, -16, 1, -8),
-        BackgroundTransparency = 1,
-        Font = Theme.Font,
-        Text = state.status,
-        TextColor3 = Theme.Success,
-        TextSize = 11,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-    }, statusFrame)
-
     scroll = create("ScrollingFrame", {
         Name = "Page",
-        Position = UDim2.new(0, 0, 0, 138),
-        Size = UDim2.new(1, 0, 1, -148),
+        Position = UDim2.fromOffset(0, 76),
+        Size = UDim2.new(1, 0, 1, -106),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollingDirection = Enum.ScrollingDirection.Y,
-        ScrollBarThickness = 4,
+        ScrollBarThickness = 3,
         ScrollBarImageColor3 = Theme.Accent,
         AutomaticCanvasSize = Enum.AutomaticSize.None,
     }, root)
     content = create("Frame", {
         Name = "Content",
-        Position = UDim2.fromOffset(0, 0),
-        Size = UDim2.new(1, -8, 0, 0),
+        Position = UDim2.fromOffset(9, 7),
+        Size = UDim2.new(1, -18, 0, 0),
         BackgroundTransparency = 1,
         AutomaticSize = Enum.AutomaticSize.Y,
     }, scroll)
     contentLayout = create("UIListLayout", {
-        Padding = UDim.new(0, 8),
+        Padding = UDim.new(0, 6),
         SortOrder = Enum.SortOrder.LayoutOrder,
     }, content)
+
+    local statusFrame = create("Frame", {
+        Name = "Status",
+        AnchorPoint = Vector2.new(0, 1),
+        Position = UDim2.new(0, 0, 1, 0),
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = Theme.TabBar,
+        BorderSizePixel = 0,
+    }, root)
+    create("Frame", {
+        Name = "StatusDot",
+        Position = UDim2.fromOffset(10, 12),
+        Size = UDim2.fromOffset(6, 6),
+        BackgroundColor3 = Theme.Success,
+        BorderSizePixel = 0,
+    }, statusFrame)
+    statusLabel = create("TextLabel", {
+        Name = "Message",
+        Position = UDim2.fromOffset(24, 0),
+        Size = UDim2.new(1, -100, 1, 0),
+        BackgroundTransparency = 1,
+        Font = Theme.MonoFont,
+        Text = state.status,
+        TextColor3 = Theme.Success,
+        TextSize = 9,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+    }, statusFrame)
+    local footerTag = create("TextLabel", {
+        Name = "FooterTag",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -10, 0, 0),
+        Size = UDim2.fromOffset(60, 30),
+        BackgroundTransparency = 1,
+        Font = Theme.MonoFont,
+        Text = "UI ONLY",
+        TextColor3 = Theme.MutedText,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    }, statusFrame)
 
     connect(persistentConnections, contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
         if scroll then
             scroll.CanvasSize = UDim2.new(0, 0, 0, contentLayout.AbsoluteContentSize.Y)
         end
     end)
+    local camera = workspace.CurrentCamera
+    if camera then
+        connect(persistentConnections, camera:GetPropertyChangedSignal("ViewportSize"), updateSize)
+    end
 
     closeRegistry = Instance.new("BindableFunction")
     closeRegistry.Name = CLEANUP_NAME
@@ -620,6 +844,15 @@ task.spawn(function()
         return true
     end)
 
+    test("native window, section, and scrolling surfaces exist", function()
+        selectTab("Main")
+        local section = content:FindFirstChild("SectionHeader")
+        return titlebar ~= nil and titlebar:IsA("Frame")
+            and scroll ~= nil and scroll:IsA("ScrollingFrame")
+            and section ~= nil and section:FindFirstChild("AccentBar") ~= nil
+            and screenGui:FindFirstChild("Window"):FindFirstChild("Status") ~= nil
+    end)
+
     test("tab selection and active indicators", function()
         for _, tabName in ipairs(Tabs) do
             if not selectTab(tabName) or state.selectedTab ~= tabName then
@@ -637,9 +870,9 @@ task.spawn(function()
         selectTab("Farm")
         local control = Pages.Farm.Controls[1]
         activateControl(control)
-        local enabled = state.farmPreview and toggleEntries[1].Value.Text == "Preview ON"
+        local enabled = state.farmPreview and toggleEntries[1].Value.Text == "ON"
         activateControl(control)
-        local disabled = not state.farmPreview and toggleEntries[1].Value.Text == "Preview OFF"
+        local disabled = not state.farmPreview and toggleEntries[1].Value.Text == "OFF"
         selectTab("Main")
         return enabled and disabled
     end)
@@ -648,11 +881,15 @@ task.spawn(function()
         selectTab("Settings")
         local control = Pages.Settings.Controls[1]
         activateControl(control)
-        local expanded = not state.compact and root.Size.X.Scale == 0.96 and root.Size.Y.Scale == 0.88
+        local expandedWidth = root.Size.X.Offset
+        local expandedHeight = root.Size.Y.Offset
+        local expanded = not state.compact
         activateControl(control)
-        local compact = state.compact and root.Size.X.Scale == (touchEnabled and 0.92 or 0.72)
+        local compactWidth = root.Size.X.Offset
+        local compactHeight = root.Size.Y.Offset
+        local compact = state.compact
         selectTab("Main")
-        return expanded and compact
+        return expanded and compact and expandedWidth >= compactWidth and expandedHeight > compactHeight
     end)
 
     test("placeholder actions only update status", function()
@@ -767,7 +1004,7 @@ task.spawn(function()
 
     local summary = string.format("Client self-test: %d PASS / %d FAIL.", passed, failed)
     print("[CustomHub UI Test] " .. summary)
-    print("[CustomHub UI Test] MANUAL: tap all tabs and Close; inspect text fit, contrast, and scroll feel on your phone.")
-    setStatus(summary .. " MANUAL: inspect touch, text fit, and scrolling.", failed == 0 and "success" or "error")
+    print("[CustomHub UI Test] MANUAL: tap all tabs and Close; also drag the titlebar and inspect text fit, contrast, and scroll feel on your phone.")
+    setStatus(summary .. " MANUAL: inspect touch, drag, text, and scroll.", failed == 0 and "success" or "error")
     selfTestRunning = false
 end)
