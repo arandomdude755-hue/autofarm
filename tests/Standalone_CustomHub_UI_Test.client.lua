@@ -160,6 +160,10 @@ local controlGridLayout
 local currentControlCount = 0
 local titlebar
 local sizeConstraint
+local minimizeButton
+local bubbleContainer
+local bubbleButton
+local bubbleHint
 local statusLabel
 local tabButtons = {}
 local toggleEntries = {}
@@ -171,6 +175,12 @@ local dragging = false
 local dragInput
 local dragStart
 local dragOrigin
+local isMinimized = false
+local bubbleDragging = false
+local bubbleDragInput
+local bubbleDragStart
+local bubbleDragOrigin
+local bubbleDragMoved = false
 
 local function create(className, properties, parent)
     local object = Instance.new(className)
@@ -238,11 +248,52 @@ local function setStatus(message, kind)
     end
 end
 
+local function minimizeWindow()
+    if isCleaned or not root or not bubbleContainer then
+        return false
+    end
+    root.Visible = false
+    bubbleContainer.Visible = true
+    isMinimized = true
+    setStatus("Hub minimized; tap the bubble to restore.", "info")
+    return true
+end
+
+local function restoreWindow()
+    if isCleaned or not root or not bubbleContainer then
+        return false
+    end
+    bubbleContainer.Visible = false
+    root.Visible = true
+    isMinimized = false
+    setStatus("Hub restored; UI-only preview.", "info")
+    return true
+end
+
 local function getColumnCount(availableWidth, controlCount, landscape)
     if landscape and availableWidth >= 620 and controlCount > 1 then
         return 2
     end
     return 1
+end
+
+local function clampBubbleToViewport()
+    if not bubbleContainer then
+        return
+    end
+    local camera = workspace.CurrentCamera
+    local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+    local halfSize = bubbleContainer.AbsoluteSize / 2
+    local halfX = math.min(halfSize.X, viewport.X / 2)
+    local halfY = math.min(halfSize.Y, viewport.Y / 2)
+    local position = bubbleContainer.Position
+    local x = math.clamp(position.X.Offset, halfX, math.max(halfX, viewport.X - halfX))
+    local y = math.clamp(position.Y.Offset, halfY, math.max(halfY, viewport.Y - halfY))
+    bubbleContainer.Position = UDim2.fromOffset(x, y)
+    if bubbleHint then
+        local leftFits = x >= bubbleHint.AbsoluteSize.X + halfSize.X + 8
+        bubbleHint.Position = leftFits and UDim2.new(0, -154, 0.5, -19) or UDim2.new(1, 14, 0.5, -19)
+    end
 end
 
 local function syncControlGridHeight()
@@ -290,6 +341,7 @@ local function updateSize()
         sizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
     end
     root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
+    clampBubbleToViewport()
 end
 
 local function updateIndicators()
@@ -584,6 +636,10 @@ local function cleanup(fromSelfTest)
     currentControlCount = 0
     titlebar = nil
     sizeConstraint = nil
+    minimizeButton = nil
+    bubbleContainer = nil
+    bubbleButton = nil
+    bubbleHint = nil
     statusLabel = nil
     tabButtons = {}
     toggleEntries = {}
@@ -591,6 +647,12 @@ local function cleanup(fromSelfTest)
     dragInput = nil
     dragStart = nil
     dragOrigin = nil
+    isMinimized = false
+    bubbleDragging = false
+    bubbleDragInput = nil
+    bubbleDragStart = nil
+    bubbleDragOrigin = nil
+    bubbleDragMoved = false
 
     local registry = closeRegistry
     closeRegistry = nil
@@ -677,6 +739,23 @@ local function mount()
     addCorner(versionBadge, 2)
     addStroke(versionBadge)
 
+    minimizeButton = create("TextButton", {
+        Name = "Minimize",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -42, 0, 7),
+        Size = UDim2.fromOffset(26, 26),
+        BackgroundColor3 = Theme.Control,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Font = Theme.StrongFont,
+        Text = "−",
+        TextColor3 = Theme.MutedText,
+        TextSize = 17,
+    }, titlebar)
+    addCorner(minimizeButton, 3)
+    addStroke(minimizeButton)
+    connect(persistentConnections, minimizeButton.Activated, minimizeWindow)
+
     local closeButton = create("TextButton", {
         Name = "Close",
         AnchorPoint = Vector2.new(1, 0),
@@ -695,8 +774,148 @@ local function mount()
         cleanup()
     end)
 
+    local camera = workspace.CurrentCamera
+    local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+    bubbleContainer = create("Frame", {
+        Name = "FloatingBubble",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromOffset(viewport.X - 42, viewport.Y / 2),
+        Size = UDim2.fromOffset(64, 64),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 20,
+    }, screenGui)
+    local bubbleRing = create("Frame", {
+        Name = "Ring",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Theme.Accent,
+        BackgroundTransparency = 0.94,
+        BorderSizePixel = 0,
+        ZIndex = 20,
+    }, bubbleContainer)
+    addCorner(bubbleRing, 32)
+    create("UIStroke", {
+        Color = Theme.Accent,
+        Thickness = 1,
+        Transparency = 0.55,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, bubbleRing)
+
+    bubbleButton = create("TextButton", {
+        Name = "Restore",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(56, 56),
+        BackgroundColor3 = Theme.Header,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
+        ZIndex = 21,
+    }, bubbleContainer)
+    addCorner(bubbleButton, 28)
+    create("UIStroke", {
+        Color = Theme.Border,
+        Thickness = 2,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, bubbleButton)
+    create("TextLabel", {
+        Name = "Glyph",
+        Position = UDim2.fromOffset(18, 5),
+        Size = UDim2.fromOffset(20, 22),
+        BackgroundTransparency = 1,
+        Font = Theme.StrongFont,
+        Text = "⌂",
+        TextColor3 = Theme.Accent,
+        TextSize = 19,
+        ZIndex = 22,
+    }, bubbleButton)
+    create("TextLabel", {
+        Name = "Brand",
+        Position = UDim2.fromOffset(0, 29),
+        Size = UDim2.new(1, 0, 0, 12),
+        BackgroundTransparency = 1,
+        Font = Theme.MonoFont,
+        Text = "APEX",
+        TextColor3 = Theme.Text,
+        TextSize = 8,
+        ZIndex = 22,
+    }, bubbleButton)
+    local bubbleDot = create("Frame", {
+        Name = "UiStatusDot",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 8),
+        Size = UDim2.fromOffset(7, 7),
+        BackgroundColor3 = Theme.Accent,
+        BorderSizePixel = 0,
+        ZIndex = 22,
+    }, bubbleButton)
+    addCorner(bubbleDot, 4)
+    for index, width in ipairs({ 4, 8, 4 }) do
+        create("Frame", {
+            Name = "Grip_" .. tostring(index),
+            Position = UDim2.new(0.5, (index - 2) * 6 - width / 2, 1, -7),
+            Size = UDim2.fromOffset(width, 1),
+            BackgroundColor3 = Theme.MutedText,
+            BackgroundTransparency = 0.25,
+            BorderSizePixel = 0,
+            ZIndex = 22,
+        }, bubbleButton)
+    end
+    bubbleHint = create("Frame", {
+        Name = "Hint",
+        Position = UDim2.new(0, -154, 0.5, -19),
+        Size = UDim2.fromOffset(140, 38),
+        BackgroundColor3 = Theme.Header,
+        BorderSizePixel = 0,
+        ZIndex = 20,
+    }, bubbleContainer)
+    addCorner(bubbleHint, 3)
+    addStroke(bubbleHint)
+    create("TextLabel", {
+        Name = "Title",
+        Position = UDim2.fromOffset(8, 4),
+        Size = UDim2.new(1, -16, 0, 13),
+        BackgroundTransparency = 1,
+        Font = Theme.MonoFont,
+        Text = "APEX  /  UI ONLY",
+        TextColor3 = Theme.Accent,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 21,
+    }, bubbleHint)
+    create("TextLabel", {
+        Name = "HintText",
+        Position = UDim2.fromOffset(8, 19),
+        Size = UDim2.new(1, -16, 0, 13),
+        BackgroundTransparency = 1,
+        Font = Theme.Font,
+        Text = "Tap to restore • Drag to move",
+        TextColor3 = Theme.MutedText,
+        TextSize = 8,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 21,
+    }, bubbleHint)
+    connect(persistentConnections, bubbleButton.Activated, function()
+        if not bubbleDragMoved then
+            restoreWindow()
+        end
+        bubbleDragMoved = false
+    end)
+    connect(persistentConnections, bubbleButton.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            bubbleDragging = true
+            bubbleDragInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+            bubbleDragStart = input.Position
+            bubbleDragOrigin = bubbleContainer.AbsolutePosition + bubbleContainer.AbsoluteSize / 2
+            bubbleDragMoved = false
+        end
+    end)
+
     connect(persistentConnections, titlebar.InputBegan, function(input)
-        if input.Position.X >= closeButton.AbsolutePosition.X then
+        if input.Position.X >= minimizeButton.AbsolutePosition.X then
             return
         end
         if input.UserInputType == Enum.UserInputType.MouseButton1
@@ -708,6 +927,25 @@ local function mount()
         end
     end)
     connect(persistentConnections, UserInputService.InputChanged, function(input)
+        if bubbleDragging and bubbleDragStart and bubbleDragOrigin
+            and (input.UserInputType == Enum.UserInputType.MouseMovement or input == bubbleDragInput) then
+            local delta = input.Position - bubbleDragStart
+            if delta.Magnitude >= 8 then
+                bubbleDragMoved = true
+            end
+            if bubbleDragMoved and bubbleContainer then
+                local camera = workspace.CurrentCamera
+                local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+                local halfSize = bubbleContainer.AbsoluteSize / 2
+                local halfX = math.min(halfSize.X, viewport.X / 2)
+                local halfY = math.min(halfSize.Y, viewport.Y / 2)
+                local x = math.clamp(bubbleDragOrigin.X + delta.X, halfX, math.max(halfX, viewport.X - halfX))
+                local y = math.clamp(bubbleDragOrigin.Y + delta.Y, halfY, math.max(halfY, viewport.Y - halfY))
+                bubbleContainer.Position = UDim2.fromOffset(x, y)
+                clampBubbleToViewport()
+            end
+        end
+
         if not dragging or not dragStart or not dragOrigin then
             return
         end
@@ -724,6 +962,14 @@ local function mount()
         root.Position = UDim2.fromOffset(x + size.X / 2, y + size.Y / 2)
     end)
     connect(persistentConnections, UserInputService.InputEnded, function(input)
+        if bubbleDragging
+            and (input.UserInputType == Enum.UserInputType.MouseButton1 or input == bubbleDragInput) then
+            bubbleDragging = false
+            bubbleDragInput = nil
+            bubbleDragStart = nil
+            bubbleDragOrigin = nil
+        end
+
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input == dragInput then
             dragging = false
             dragInput = nil
@@ -989,6 +1235,17 @@ task.spawn(function()
             and compactHeight <= maxHeight
     end)
 
+    test("minimize and restore use the floating bubble without cleanup", function()
+        local minimized = minimizeWindow()
+        local hidden = root ~= nil and not root.Visible
+            and bubbleContainer ~= nil and bubbleContainer.Visible
+            and isMinimized and not isCleaned
+        local restored = restoreWindow()
+        return minimized and hidden and restored
+            and root.Visible and not bubbleContainer.Visible
+            and not isMinimized and not isCleaned
+    end)
+
     test("placeholder actions only update status", function()
         state.farmPreview = false
         selectTab("Main")
@@ -1105,7 +1362,7 @@ task.spawn(function()
 
     local summary = string.format("Client self-test: %d PASS / %d FAIL.", passed, failed)
     print("[CustomHub UI Test] " .. summary)
-    print("[CustomHub UI Test] MANUAL: tap all tabs and Close; also drag the titlebar and inspect text fit, contrast, and scroll feel on your phone.")
+    print("[CustomHub UI Test] MANUAL: tap all tabs and Close; also minimize, restore, and drag the bubble; drag the titlebar and inspect text, contrast, and scrolling.")
     setStatus(summary .. " MANUAL: inspect touch, drag, text, and scroll.", failed == 0 and "success" or "error")
     selfTestRunning = false
 end)
