@@ -413,11 +413,17 @@ function MainFarm:_Step(session)
         if self.Target then
             self:_ClearTarget()
         end
-        local spawnPart = self.EnemyService:FindSpawn(activeTarget)
+        local spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget)
         if spawnPart then
             self:_MoveTo(spawnPart.CFrame * CFrame.new(0, 60, 0), session, 100)
+            if (spawnPart.Position - root.Position).Magnitude <= 100 then
+                self.EnemyService:MarkSpawnIgnored(spawnPart)
+            end
             self:_SetStatus("Waiting near supported spawn: " .. activeTarget, "info")
         else
+            if allSpawnsVisited then
+                self.EnemyService:ClearIgnoredSpawns()
+            end
             self.MovementService:Cancel()
             self:_SetStatus(
                 "Waiting for living " .. activeTarget .. " or a Workspace._WorldOrigin.EnemySpawns marker",
@@ -440,28 +446,25 @@ function MainFarm:_Step(session)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
-        local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
-        if weaponCategory == "Blox Fruit" then
-            self:_SetStatus("Blox Fruit M1 is a separate BNN path and is not part of this batch", "warning")
-        else
-            local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
-            if equipped then
-                local attackIssued, attackResult = self.CombatService:AttackM1(
-                    target,
-                    30,
-                    weaponCategory
-                )
-                if attackIssued then
-                    self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
-                elseif attackResult ~= "M1 animation cooldown" then
-                    self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
-                end
+        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+        if equipped then
+            local attackIssued, attackResult = self.CombatService:AttackM1(
+                target,
+                30,
+                weaponCategory,
+                farmSettings and farmSettings.AttackNoAnimation == true
+            )
+            if attackIssued then
+                self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
             else
-                self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
+                self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
             end
+        else
+            self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
         end
     else
         self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
@@ -470,7 +473,10 @@ function MainFarm:_Step(session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            self:_MoveTo(targetRoot.CFrame * CFrame.new(7, 20, 0), session, 2.5)
+            local targetOffset = weaponCategory == "Blox Fruit"
+                and CFrame.new(-7, 20, 0)
+                or CFrame.new(7, 20, 0)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end
@@ -490,7 +496,7 @@ function MainFarm:_Run(session)
             end
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
-        task.wait(0.15)
+        task.wait()
     end
 end
 
@@ -557,6 +563,11 @@ function MainFarm:Start()
     end
 
     self.Session += 1
+    local collisionReady, collisionError = self.MovementService:SetFarmCollisionSuppression(true)
+    if not collisionReady then
+        self:_SetStatus("Main Farm collision setup failed: " .. tostring(collisionError), "error")
+        return false, collisionError
+    end
     self.Running = true
     self.CombatDependencyAttempted = false
     self.CombatDependencyError = nil
@@ -573,12 +584,14 @@ function MainFarm:Stop()
     self:_EndQuestDiagnosticWait("stopped_before_confirmation", os.clock())
     if self.MovementService then
         self.MovementService:Cancel()
+        self.MovementService:SetFarmCollisionSuppression(false)
     end
     if self.CombatService then
         self.CombatService:Cancel()
     end
     if self.EnemyService then
         self.EnemyService:RestoreTargetCollision()
+        self.EnemyService:ClearIgnoredSpawns()
     end
     self.Target = nil
     self.TargetName = nil

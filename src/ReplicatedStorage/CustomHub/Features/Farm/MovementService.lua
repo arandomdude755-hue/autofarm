@@ -41,6 +41,11 @@ function MovementService.new(compatibility, report)
         TagGeneration = 0,
         OwnsTeleportTag = false,
         LastRouteRequest = {},
+        FarmCollisionActive = false,
+        FarmCollisionConnection = nil,
+        FarmCollisionCharacter = nil,
+        FarmCollisionOriginals = {},
+        FarmCollisionErrorReported = false,
     }, MovementService)
 end
 
@@ -67,6 +72,100 @@ function MovementService:_RestoreCollision(active)
         end
         active.CollisionOriginals[part] = nil
     end
+end
+
+function MovementService:_RestoreFarmCollision()
+    for part, canCollide in pairs(self.FarmCollisionOriginals) do
+        pcall(function()
+            if part.Parent then
+                part.CanCollide = canCollide
+            end
+        end)
+    end
+    table.clear(self.FarmCollisionOriginals)
+    self.FarmCollisionCharacter = nil
+end
+
+function MovementService:_ApplyFarmCollision()
+    if not self.FarmCollisionActive then
+        return true
+    end
+
+    local player = self.Compatibility.Player
+    local character = player and player.Character
+    if character ~= self.FarmCollisionCharacter then
+        self:_RestoreFarmCollision()
+        self.FarmCollisionCharacter = character
+    end
+    if not character then
+        return true
+    end
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            if self.FarmCollisionOriginals[descendant] == nil then
+                self.FarmCollisionOriginals[descendant] = descendant.CanCollide
+            end
+            descendant.CanCollide = false
+        end
+    end
+    return true
+end
+
+function MovementService:SetFarmCollisionSuppression(enabled)
+    enabled = enabled == true
+    if not enabled then
+        self.FarmCollisionActive = false
+        local connection = self.FarmCollisionConnection
+        self.FarmCollisionConnection = nil
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+        self:_RestoreFarmCollision()
+        self.FarmCollisionErrorReported = false
+        return true
+    end
+
+    if self.FarmCollisionActive
+        and self.FarmCollisionConnection
+        and self.FarmCollisionConnection.Connected
+    then
+        local ok, err = pcall(self._ApplyFarmCollision, self)
+        if not ok then
+            return false, tostring(err)
+        end
+        return true
+    end
+
+    self.FarmCollisionActive = true
+    local ok, err = pcall(self._ApplyFarmCollision, self)
+    if not ok then
+        self.FarmCollisionActive = false
+        self:_RestoreFarmCollision()
+        return false, tostring(err)
+    end
+
+    local connected, connection = pcall(function()
+        return self.Compatibility.RunService.Heartbeat:Connect(function()
+            local applyOk, applyError = pcall(self._ApplyFarmCollision, self)
+            if applyOk then
+                self.FarmCollisionErrorReported = false
+            elseif not self.FarmCollisionErrorReported and self.Report then
+                self.FarmCollisionErrorReported = true
+                self.Report(
+                    "Character collision maintenance error: " .. tostring(applyError),
+                    "warning"
+                )
+            end
+        end)
+    end)
+    if not connected or not connection then
+        self.FarmCollisionActive = false
+        self:_RestoreFarmCollision()
+        return false, tostring(connection or "Heartbeat connection is unavailable")
+    end
+    self.FarmCollisionConnection = connection
+    return true
 end
 
 function MovementService:_Finish(active, delayTagRemoval)

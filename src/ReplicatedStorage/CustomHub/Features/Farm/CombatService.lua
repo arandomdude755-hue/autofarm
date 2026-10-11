@@ -29,8 +29,7 @@ function CombatService.new(compatibility, enemyService)
         EnemyService = enemyService,
         Dependencies = dependencies,
         AttackIndex = 0,
-        AttackGeneration = 0,
-        AttackBusy = false,
+        FruitAttackIndex = 1,
     }, CombatService)
 end
 
@@ -135,7 +134,51 @@ function CombatService:_GetAttackCandidates(character, root, range)
     return candidates
 end
 
-function CombatService:AttackM1(target, range, weaponCategory)
+function CombatService:_AttackFruitM1(target, character, root)
+    local targetPart = target and (target.PrimaryPart or target:FindFirstChild("HumanoidRootPart"))
+    if not targetPart then
+        return false, "Fruit M1 target is unavailable"
+    end
+
+    local aimPosition = targetPart.Position
+    local direction = aimPosition - root.Position
+    if direction.Magnitude <= 0 then
+        return false, "Fruit M1 target direction is unavailable"
+    end
+    direction = direction.Unit
+
+    local tool = character:FindFirstChildOfClass("Tool")
+    if not tool or tool.ToolTip ~= "Blox Fruit" then
+        return false, "Selected fruit tool is not equipped"
+    end
+
+    local leftClickRemote = tool:FindFirstChild("LeftClickRemote")
+    local remoteFunction = tool:FindFirstChild("RemoteFunction")
+    local remoteEvent = tool:FindFirstChild("RemoteEvent")
+    if not leftClickRemote and remoteFunction then
+        if remoteEvent then
+            remoteEvent:FireServer(aimPosition)
+        end
+        remoteFunction:InvokeServer("TAP")
+        return true, "Fruit M1 request issued"
+    end
+
+    if leftClickRemote and tool.Name == "Mammoth-Mammoth" then
+        leftClickRemote:FireServer(direction)
+        return true, "Fruit M1 request issued"
+    end
+    if leftClickRemote then
+        self.FruitAttackIndex += 1
+        if self.FruitAttackIndex > 5 then
+            self.FruitAttackIndex = 1
+        end
+        leftClickRemote:FireServer(direction, self.FruitAttackIndex)
+        return true, "Fruit M1 request issued"
+    end
+    return false, "Selected fruit tool has no supported M1 remote"
+end
+
+function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation)
     local character, humanoid, root = self.Compatibility:GetCharacterParts()
     if not character or not humanoid or not root or not self.EnemyService:IsAlive(target) then
         return false, "Target or character is invalid"
@@ -146,16 +189,22 @@ function CombatService:AttackM1(target, range, weaponCategory)
         return false, "Target is outside ClickM1 range"
     end
 
+    weaponCategory = weaponCategory or "Melee"
     local tool = character:FindFirstChildOfClass("Tool")
-    if not tool or tool.ToolTip ~= (weaponCategory or "Melee") then
+    if not tool or tool.ToolTip ~= weaponCategory then
         return false, "Selected weapon category is not equipped"
     end
+
+    if weaponCategory == "Blox Fruit" then
+        local fruitIssued, fruitResult = self:_AttackFruitM1(target, character, root)
+        if fruitIssued then
+            return true, fruitResult
+        end
+    end
+
     local stun = character:FindFirstChild("Stun")
     if not stun or stun.Value ~= 0 then
         return false, "Character is stunned or has no Stun state"
-    end
-    if self.AttackBusy then
-        return false, "M1 animation cooldown"
     end
 
     local candidates = self:_GetAttackCandidates(character, root, tonumber(range) or 30)
@@ -164,11 +213,10 @@ function CombatService:AttackM1(target, range, weaponCategory)
     end
 
     local combatUtil = self.Dependencies.CombatUtil
-    local animationCache = combatUtil:GetMovesetAnimCache(humanoid)
     local weaponName = combatUtil:GetWeaponName(tool)
     local weaponData = combatUtil:GetWeaponData(weaponName)
-    if not animationCache or not weaponData or not weaponData.Moveset or not weaponData.Moveset.Basic then
-        return false, "CombatUtil weapon or moveset data is unavailable"
+    if not weaponData then
+        return false, "CombatUtil weapon data is unavailable"
     end
 
     local weaponType = weaponData.WeaponType
@@ -176,6 +224,17 @@ function CombatService:AttackM1(target, range, weaponCategory)
         return false, "CombatUtil rejected attack timing"
     end
 
+    local hitPart = table.remove(candidates, 1)[2]
+    if attackNoAnimation == true then
+        self.Dependencies.RegisterAttack:FireServer(0)
+        self.Dependencies.RegisterHit:FireServer(hitPart, candidates)
+        return true, "M1 request issued without animation"
+    end
+
+    local animationCache = combatUtil:GetMovesetAnimCache(humanoid)
+    if not animationCache or not weaponData.Moveset or not weaponData.Moveset.Basic then
+        return false, "CombatUtil moveset data is unavailable"
+    end
     local basics = weaponData.Moveset.Basic
     if #basics == 0 then
         return false, "Weapon has no basic attack animations"
@@ -193,26 +252,16 @@ function CombatService:AttackM1(target, range, weaponCategory)
         speedMultiplier = 1
     end
     local duration = animation.Length / speedMultiplier
-    local hitPart = table.remove(candidates, 1)[2]
 
     self.Dependencies.RegisterAttack:FireServer(duration)
     self.Dependencies.RegisterHit:FireServer(hitPart, candidates)
     animation:Play(0.1, 1, speedMultiplier)
 
-    self.AttackBusy = true
-    self.AttackGeneration += 1
-    local generation = self.AttackGeneration
-    task.delay(duration, function()
-        if self.AttackGeneration == generation then
-            self.AttackBusy = false
-        end
-    end)
     return true, "M1 request issued"
 end
 
 function CombatService:Cancel()
-    self.AttackGeneration += 1
-    self.AttackBusy = false
+    return true
 end
 
 return CombatService

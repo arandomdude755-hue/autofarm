@@ -10,6 +10,7 @@ function EnemyService.new(compatibility)
         Compatibility = compatibility,
         Workspace = compatibility.Workspace,
         CollisionOriginals = {},
+        IgnoredSpawns = {},
     }, EnemyService)
 end
 
@@ -47,19 +48,33 @@ function EnemyService:FindSpawn(targetName)
     local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
     local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
     if not enemySpawns or type(targetName) ~= "string" then
-        return nil
+        return nil, false
     end
 
     local normalizedTarget = normalizeEnemyName(targetName)
+    local hasMatchingSpawn = false
     for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
         if spawnPart:IsA("BasePart") then
             local normalizedSpawn = normalizeEnemyName(spawnPart.Name)
             if spawnPart.Name == targetName or normalizedSpawn == normalizedTarget then
-                return spawnPart
+                hasMatchingSpawn = true
+                if not self.IgnoredSpawns[spawnPart] then
+                    return spawnPart, false
+                end
             end
         end
     end
-    return nil
+    return nil, hasMatchingSpawn
+end
+
+function EnemyService:MarkSpawnIgnored(spawnPart)
+    if spawnPart and spawnPart.Parent then
+        self.IgnoredSpawns[spawnPart] = true
+    end
+end
+
+function EnemyService:ClearIgnoredSpawns()
+    table.clear(self.IgnoredSpawns)
 end
 
 function EnemyService:PrepareTarget(model, playerRoot)

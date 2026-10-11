@@ -62,20 +62,70 @@ for token in (
     "EquipWeapon",
     "AttackM1",
     "MovementService:Cancel",
+    "SetFarmCollisionSuppression(true)",
+    "SetFarmCollisionSuppression(false)",
     "CharacterAdded",
     "CharacterRemoving",
+    "task.wait()",
 ):
     require(token in main_farm, f"Main Farm lifecycle/dependency missing: {token}")
+require("task.wait(0.15)" not in main_farm,
+        "Main Farm still imposes a poll delay that is absent from BNN's level loop")
 
 for token in ('InvokeServer("StartQuest"', "npcEntry.Levels", "quest.Task", "numericCount > 1"):
     require(token in quest, f"Quest selector/request path missing: {token}")
-for token in ('FindFirstChild("Enemies")', '"HumanoidRootPart"', 'FindFirstChild("EnemySpawns")'):
+for token in (
+    'FindFirstChild("Enemies")',
+    '"HumanoidRootPart"',
+    'FindFirstChild("EnemySpawns")',
+    "MarkSpawnIgnored",
+    "ClearIgnoredSpawns",
+):
     require(token in enemy, f"Enemy lookup dependency missing: {token}")
 for token in ("RunService.Heartbeat", "AssemblyLinearVelocity", "IsThirdSea", "TravelToSubmergedIsland"):
     require(token in movement, f"Movement dependency/path missing: {token}")
+for token in (
+    "FarmCollisionConnection",
+    "FarmCollisionCharacter",
+    "FarmCollisionOriginals",
+    "function MovementService:SetFarmCollisionSuppression(enabled)",
+    "function MovementService:_RestoreFarmCollision()",
+    "function MovementService:_ApplyFarmCollision()",
+    'descendant:IsA("BasePart")',
+    "Heartbeat:Connect",
+):
+    require(token in movement, f"continuous character collision lifecycle is missing: {token}")
 for token in ('"RE/RegisterAttack"', 'RemoteEvent("RegisterHit", true)', "CanAttack", "GetRigOfHitPart"):
     require(token in combat or token in (CUSTOM_HUB / "Compatibility.lua").read_text(encoding="utf-8"),
             f"BNN melee dependency missing: {token}")
+for token in (
+    "function CombatService:_AttackFruitM1",
+    'FindFirstChild("LeftClickRemote")',
+    'InvokeServer("TAP")',
+    'RegisterAttack:FireServer(0)',
+    "attackNoAnimation == true",
+    "combatUtil:CanAttack(character, weaponType)",
+):
+    require(token in combat, f"BNN M1 branch/cooldown path is missing: {token}")
+require("AttackBusy" not in combat,
+        "CustomHub still gates M1 with a local animation-duration flag absent from BNN")
+require(
+    'AttackNoAnimation = false' in config,
+    "Attack No Animation default must follow BNN's unset/animated branch unless explicitly configured",
+)
+start_function = main_farm.index("function MainFarm:Start()")
+stop_function = main_farm.index("function MainFarm:Stop()", start_function)
+start_body = main_farm[start_function:stop_function]
+stop_body = main_farm[stop_function:main_farm.index("function MainFarm:Handle", stop_function)]
+require(
+    start_body.index("SetFarmCollisionSuppression(true)") < start_body.index("self.Running = true"),
+    "Main Farm must establish collision maintenance before starting its worker",
+)
+require(
+    "SetFarmCollisionSuppression(false)" in stop_body
+    and "ClearIgnoredSpawns()" in stop_body,
+    "Main Farm stop must restore collision state and reset spawn traversal",
+)
 
 all_lua = [path for path in CUSTOM_HUB.rglob("*.lua")]
 for path in all_lua:

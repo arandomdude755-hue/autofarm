@@ -9,6 +9,8 @@ local Config = {
     FarmSettings = {
         -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
         WeaponCategory = "Melee",
+        -- An unset BNN setting follows its animated, CanAttack-validated branch.
+        AttackNoAnimation = false,
     },
     Layout = {
         MobileWidth = 0.92,

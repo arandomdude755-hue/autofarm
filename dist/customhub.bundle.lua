@@ -38,6 +38,8 @@ local Config = {
     FarmSettings = {
         -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
         WeaponCategory = "Melee",
+        -- An unset BNN setting follows its animated, CanAttack-validated branch.
+        AttackNoAnimation = false,
     },
     Layout = {
         MobileWidth = 0.92,
@@ -1430,6 +1432,7 @@ function EnemyService.new(compatibility)
         Compatibility = compatibility,
         Workspace = compatibility.Workspace,
         CollisionOriginals = {},
+        IgnoredSpawns = {},
     }, EnemyService)
 end
 
@@ -1467,19 +1470,33 @@ function EnemyService:FindSpawn(targetName)
     local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
     local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
     if not enemySpawns or type(targetName) ~= "string" then
-        return nil
+        return nil, false
     end
 
     local normalizedTarget = normalizeEnemyName(targetName)
+    local hasMatchingSpawn = false
     for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
         if spawnPart:IsA("BasePart") then
             local normalizedSpawn = normalizeEnemyName(spawnPart.Name)
             if spawnPart.Name == targetName or normalizedSpawn == normalizedTarget then
-                return spawnPart
+                hasMatchingSpawn = true
+                if not self.IgnoredSpawns[spawnPart] then
+                    return spawnPart, false
+                end
             end
         end
     end
-    return nil
+    return nil, hasMatchingSpawn
+end
+
+function EnemyService:MarkSpawnIgnored(spawnPart)
+    if spawnPart and spawnPart.Parent then
+        self.IgnoredSpawns[spawnPart] = true
+    end
+end
+
+function EnemyService:ClearIgnoredSpawns()
+    table.clear(self.IgnoredSpawns)
 end
 
 function EnemyService:PrepareTarget(model, playerRoot)
@@ -1556,6 +1573,11 @@ function MovementService.new(compatibility, report)
         TagGeneration = 0,
         OwnsTeleportTag = false,
         LastRouteRequest = {},
+        FarmCollisionActive = false,
+        FarmCollisionConnection = nil,
+        FarmCollisionCharacter = nil,
+        FarmCollisionOriginals = {},
+        FarmCollisionErrorReported = false,
     }, MovementService)
 end
 
@@ -1582,6 +1604,100 @@ function MovementService:_RestoreCollision(active)
         end
         active.CollisionOriginals[part] = nil
     end
+end
+
+function MovementService:_RestoreFarmCollision()
+    for part, canCollide in pairs(self.FarmCollisionOriginals) do
+        pcall(function()
+            if part.Parent then
+                part.CanCollide = canCollide
+            end
+        end)
+    end
+    table.clear(self.FarmCollisionOriginals)
+    self.FarmCollisionCharacter = nil
+end
+
+function MovementService:_ApplyFarmCollision()
+    if not self.FarmCollisionActive then
+        return true
+    end
+
+    local player = self.Compatibility.Player
+    local character = player and player.Character
+    if character ~= self.FarmCollisionCharacter then
+        self:_RestoreFarmCollision()
+        self.FarmCollisionCharacter = character
+    end
+    if not character then
+        return true
+    end
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            if self.FarmCollisionOriginals[descendant] == nil then
+                self.FarmCollisionOriginals[descendant] = descendant.CanCollide
+            end
+            descendant.CanCollide = false
+        end
+    end
+    return true
+end
+
+function MovementService:SetFarmCollisionSuppression(enabled)
+    enabled = enabled == true
+    if not enabled then
+        self.FarmCollisionActive = false
+        local connection = self.FarmCollisionConnection
+        self.FarmCollisionConnection = nil
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+        self:_RestoreFarmCollision()
+        self.FarmCollisionErrorReported = false
+        return true
+    end
+
+    if self.FarmCollisionActive
+        and self.FarmCollisionConnection
+        and self.FarmCollisionConnection.Connected
+    then
+        local ok, err = pcall(self._ApplyFarmCollision, self)
+        if not ok then
+            return false, tostring(err)
+        end
+        return true
+    end
+
+    self.FarmCollisionActive = true
+    local ok, err = pcall(self._ApplyFarmCollision, self)
+    if not ok then
+        self.FarmCollisionActive = false
+        self:_RestoreFarmCollision()
+        return false, tostring(err)
+    end
+
+    local connected, connection = pcall(function()
+        return self.Compatibility.RunService.Heartbeat:Connect(function()
+            local applyOk, applyError = pcall(self._ApplyFarmCollision, self)
+            if applyOk then
+                self.FarmCollisionErrorReported = false
+            elseif not self.FarmCollisionErrorReported and self.Report then
+                self.FarmCollisionErrorReported = true
+                self.Report(
+                    "Character collision maintenance error: " .. tostring(applyError),
+                    "warning"
+                )
+            end
+        end)
+    end)
+    if not connected or not connection then
+        self.FarmCollisionActive = false
+        self:_RestoreFarmCollision()
+        return false, tostring(connection or "Heartbeat connection is unavailable")
+    end
+    self.FarmCollisionConnection = connection
+    return true
 end
 
 function MovementService:_Finish(active, delayTagRemoval)
@@ -1871,8 +1987,7 @@ function CombatService.new(compatibility, enemyService)
         EnemyService = enemyService,
         Dependencies = dependencies,
         AttackIndex = 0,
-        AttackGeneration = 0,
-        AttackBusy = false,
+        FruitAttackIndex = 1,
     }, CombatService)
 end
 
@@ -1977,7 +2092,51 @@ function CombatService:_GetAttackCandidates(character, root, range)
     return candidates
 end
 
-function CombatService:AttackM1(target, range, weaponCategory)
+function CombatService:_AttackFruitM1(target, character, root)
+    local targetPart = target and (target.PrimaryPart or target:FindFirstChild("HumanoidRootPart"))
+    if not targetPart then
+        return false, "Fruit M1 target is unavailable"
+    end
+
+    local aimPosition = targetPart.Position
+    local direction = aimPosition - root.Position
+    if direction.Magnitude <= 0 then
+        return false, "Fruit M1 target direction is unavailable"
+    end
+    direction = direction.Unit
+
+    local tool = character:FindFirstChildOfClass("Tool")
+    if not tool or tool.ToolTip ~= "Blox Fruit" then
+        return false, "Selected fruit tool is not equipped"
+    end
+
+    local leftClickRemote = tool:FindFirstChild("LeftClickRemote")
+    local remoteFunction = tool:FindFirstChild("RemoteFunction")
+    local remoteEvent = tool:FindFirstChild("RemoteEvent")
+    if not leftClickRemote and remoteFunction then
+        if remoteEvent then
+            remoteEvent:FireServer(aimPosition)
+        end
+        remoteFunction:InvokeServer("TAP")
+        return true, "Fruit M1 request issued"
+    end
+
+    if leftClickRemote and tool.Name == "Mammoth-Mammoth" then
+        leftClickRemote:FireServer(direction)
+        return true, "Fruit M1 request issued"
+    end
+    if leftClickRemote then
+        self.FruitAttackIndex += 1
+        if self.FruitAttackIndex > 5 then
+            self.FruitAttackIndex = 1
+        end
+        leftClickRemote:FireServer(direction, self.FruitAttackIndex)
+        return true, "Fruit M1 request issued"
+    end
+    return false, "Selected fruit tool has no supported M1 remote"
+end
+
+function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation)
     local character, humanoid, root = self.Compatibility:GetCharacterParts()
     if not character or not humanoid or not root or not self.EnemyService:IsAlive(target) then
         return false, "Target or character is invalid"
@@ -1988,16 +2147,22 @@ function CombatService:AttackM1(target, range, weaponCategory)
         return false, "Target is outside ClickM1 range"
     end
 
+    weaponCategory = weaponCategory or "Melee"
     local tool = character:FindFirstChildOfClass("Tool")
-    if not tool or tool.ToolTip ~= (weaponCategory or "Melee") then
+    if not tool or tool.ToolTip ~= weaponCategory then
         return false, "Selected weapon category is not equipped"
     end
+
+    if weaponCategory == "Blox Fruit" then
+        local fruitIssued, fruitResult = self:_AttackFruitM1(target, character, root)
+        if fruitIssued then
+            return true, fruitResult
+        end
+    end
+
     local stun = character:FindFirstChild("Stun")
     if not stun or stun.Value ~= 0 then
         return false, "Character is stunned or has no Stun state"
-    end
-    if self.AttackBusy then
-        return false, "M1 animation cooldown"
     end
 
     local candidates = self:_GetAttackCandidates(character, root, tonumber(range) or 30)
@@ -2006,11 +2171,10 @@ function CombatService:AttackM1(target, range, weaponCategory)
     end
 
     local combatUtil = self.Dependencies.CombatUtil
-    local animationCache = combatUtil:GetMovesetAnimCache(humanoid)
     local weaponName = combatUtil:GetWeaponName(tool)
     local weaponData = combatUtil:GetWeaponData(weaponName)
-    if not animationCache or not weaponData or not weaponData.Moveset or not weaponData.Moveset.Basic then
-        return false, "CombatUtil weapon or moveset data is unavailable"
+    if not weaponData then
+        return false, "CombatUtil weapon data is unavailable"
     end
 
     local weaponType = weaponData.WeaponType
@@ -2018,6 +2182,17 @@ function CombatService:AttackM1(target, range, weaponCategory)
         return false, "CombatUtil rejected attack timing"
     end
 
+    local hitPart = table.remove(candidates, 1)[2]
+    if attackNoAnimation == true then
+        self.Dependencies.RegisterAttack:FireServer(0)
+        self.Dependencies.RegisterHit:FireServer(hitPart, candidates)
+        return true, "M1 request issued without animation"
+    end
+
+    local animationCache = combatUtil:GetMovesetAnimCache(humanoid)
+    if not animationCache or not weaponData.Moveset or not weaponData.Moveset.Basic then
+        return false, "CombatUtil moveset data is unavailable"
+    end
     local basics = weaponData.Moveset.Basic
     if #basics == 0 then
         return false, "Weapon has no basic attack animations"
@@ -2035,26 +2210,16 @@ function CombatService:AttackM1(target, range, weaponCategory)
         speedMultiplier = 1
     end
     local duration = animation.Length / speedMultiplier
-    local hitPart = table.remove(candidates, 1)[2]
 
     self.Dependencies.RegisterAttack:FireServer(duration)
     self.Dependencies.RegisterHit:FireServer(hitPart, candidates)
     animation:Play(0.1, 1, speedMultiplier)
 
-    self.AttackBusy = true
-    self.AttackGeneration += 1
-    local generation = self.AttackGeneration
-    task.delay(duration, function()
-        if self.AttackGeneration == generation then
-            self.AttackBusy = false
-        end
-    end)
     return true, "M1 request issued"
 end
 
 function CombatService:Cancel()
-    self.AttackGeneration += 1
-    self.AttackBusy = false
+    return true
 end
 
 return CombatService
@@ -2478,11 +2643,17 @@ function MainFarm:_Step(session)
         if self.Target then
             self:_ClearTarget()
         end
-        local spawnPart = self.EnemyService:FindSpawn(activeTarget)
+        local spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget)
         if spawnPart then
             self:_MoveTo(spawnPart.CFrame * CFrame.new(0, 60, 0), session, 100)
+            if (spawnPart.Position - root.Position).Magnitude <= 100 then
+                self.EnemyService:MarkSpawnIgnored(spawnPart)
+            end
             self:_SetStatus("Waiting near supported spawn: " .. activeTarget, "info")
         else
+            if allSpawnsVisited then
+                self.EnemyService:ClearIgnoredSpawns()
+            end
             self.MovementService:Cancel()
             self:_SetStatus(
                 "Waiting for living " .. activeTarget .. " or a Workspace._WorldOrigin.EnemySpawns marker",
@@ -2505,28 +2676,25 @@ function MainFarm:_Step(session)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
-        local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
-        if weaponCategory == "Blox Fruit" then
-            self:_SetStatus("Blox Fruit M1 is a separate BNN path and is not part of this batch", "warning")
-        else
-            local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
-            if equipped then
-                local attackIssued, attackResult = self.CombatService:AttackM1(
-                    target,
-                    30,
-                    weaponCategory
-                )
-                if attackIssued then
-                    self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
-                elseif attackResult ~= "M1 animation cooldown" then
-                    self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
-                end
+        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+        if equipped then
+            local attackIssued, attackResult = self.CombatService:AttackM1(
+                target,
+                30,
+                weaponCategory,
+                farmSettings and farmSettings.AttackNoAnimation == true
+            )
+            if attackIssued then
+                self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
             else
-                self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
+                self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
             end
+        else
+            self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
         end
     else
         self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
@@ -2535,7 +2703,10 @@ function MainFarm:_Step(session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            self:_MoveTo(targetRoot.CFrame * CFrame.new(7, 20, 0), session, 2.5)
+            local targetOffset = weaponCategory == "Blox Fruit"
+                and CFrame.new(-7, 20, 0)
+                or CFrame.new(7, 20, 0)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end
@@ -2555,7 +2726,7 @@ function MainFarm:_Run(session)
             end
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
-        task.wait(0.15)
+        task.wait()
     end
 end
 
@@ -2622,6 +2793,11 @@ function MainFarm:Start()
     end
 
     self.Session += 1
+    local collisionReady, collisionError = self.MovementService:SetFarmCollisionSuppression(true)
+    if not collisionReady then
+        self:_SetStatus("Main Farm collision setup failed: " .. tostring(collisionError), "error")
+        return false, collisionError
+    end
     self.Running = true
     self.CombatDependencyAttempted = false
     self.CombatDependencyError = nil
@@ -2638,12 +2814,14 @@ function MainFarm:Stop()
     self:_EndQuestDiagnosticWait("stopped_before_confirmation", os.clock())
     if self.MovementService then
         self.MovementService:Cancel()
+        self.MovementService:SetFarmCollisionSuppression(false)
     end
     if self.CombatService then
         self.CombatService:Cancel()
     end
     if self.EnemyService then
         self.EnemyService:RestoreTargetCollision()
+        self.EnemyService:ClearIgnoredSpawns()
     end
     self.Target = nil
     self.TargetName = nil
