@@ -1886,6 +1886,79 @@ local function usableTrackedQuestText(text, maxLength)
     return trimmed
 end
 
+local function singularizeQuestTargetWord(word)
+    if #word > 3 and word:sub(-3) == "ies" then
+        local stem = word:sub(1, -4)
+        local lastStemCharacter = stem:sub(-1)
+        if lastStemCharacter ~= "" and not lastStemCharacter:match("[aeiou]") then
+            return stem .. "y"
+        end
+    end
+
+    if #word > 4 and word:sub(-2) == "es" then
+        local stem = word:sub(1, -3)
+        if stem:sub(-1) == "s" or stem:sub(-1) == "x" or stem:sub(-1) == "z"
+            or stem:sub(-2) == "ch" or stem:sub(-2) == "sh"
+        then
+            return stem
+        end
+    end
+
+    local ending = word:sub(-2)
+    if #word > 2 and word:sub(-1) == "s"
+        and ending ~= "ss" and ending ~= "us" and ending ~= "is"
+    then
+        return word:sub(1, -2)
+    end
+    return word
+end
+
+local function normalizeQuestTargetName(name)
+    if type(name) ~= "string" or #name == 0 or #name > MAX_TRACKED_QUEST_TEXT_LENGTH then
+        return nil
+    end
+
+    local words = {}
+    for word in name:lower():gmatch("[%w]+") do
+        table.insert(words, word)
+    end
+    if #words == 0 then
+        return nil
+    end
+
+    words[#words] = singularizeQuestTargetWord(words[#words])
+    return table.concat(words, " ")
+end
+
+local function trackedTargetMatches(catalogTarget, trackedTarget, allowFirstSeaVariants)
+    if catalogTarget == trackedTarget then
+        return true
+    end
+    if not allowFirstSeaVariants then
+        return false
+    end
+
+    local normalizedCatalogTarget = normalizeQuestTargetName(catalogTarget)
+    local normalizedTrackedTarget = normalizeQuestTargetName(trackedTarget)
+    return normalizedCatalogTarget ~= nil
+        and normalizedCatalogTarget == normalizedTrackedTarget
+end
+
+local function isVisibleGuiObjectWithin(instance, root)
+    if not instance or not instance:IsA("GuiObject") then
+        return false
+    end
+
+    local current = instance
+    while current and current ~= root do
+        if current:IsA("GuiObject") and not current.Visible then
+            return false
+        end
+        current = current.Parent
+    end
+    return current == root
+end
+
 local function parseTrackedQuestProgress(text)
     if type(text) ~= "string" or #text > MAX_TRACKED_QUEST_PROGRESS_LENGTH then
         return nil
@@ -1909,7 +1982,7 @@ local function parseTrackedQuestProgress(text)
     return current, total
 end
 
-local function titleContainsTarget(title, targetName)
+local function titleContainsTarget(title, targetName, allowFirstSeaVariants)
     if type(title) ~= "string" or type(targetName) ~= "string" then
         return false
     end
@@ -1931,7 +2004,11 @@ local function titleContainsTarget(title, targetName)
         for offset, expected in ipairs(targetWords) do
             local actual = titleWords[startIndex + offset - 1]
             local finalWord = offset == #targetWords
-            if actual ~= expected and not (finalWord and actual == expected .. "s") then
+            local finalWordMatches = finalWord
+                and (actual == expected .. "s"
+                    or (allowFirstSeaVariants
+                        and trackedTargetMatches(actual, expected, true)))
+            if actual ~= expected and not finalWordMatches then
                 matches = false
                 break
             end
@@ -1956,15 +2033,24 @@ local function parseMainQuestTitleProgress(title)
     return current, total
 end
 
-local function findEligibleQuestTarget(self, guideData, targetName, progressTotal)
+local function findEligibleQuestTarget(
+    self,
+    guideData,
+    targetName,
+    progressTotal,
+    allowFirstSeaActiveQuest
+)
     local level = self:GetPlayerLevel()
     local npcList = type(guideData) == "table" and guideData.NPCList or nil
     if not level or type(npcList) ~= "table" or type(self.Quests) ~= "table" then
         return nil
     end
 
+    local firstSeaMatches = {}
+    -- Selection exclusions do not hide a separately verified active First Sea quest.
     for _, npcEntry in pairs(npcList) do
-        if type(npcEntry) == "table" and not excludedQuestNames[npcEntry.InternalQuestName]
+        if type(npcEntry) == "table"
+            and (allowFirstSeaActiveQuest or not excludedQuestNames[npcEntry.InternalQuestName])
             and type(npcEntry.Levels) == "table"
         then
             local questGroup = self.Quests[npcEntry.InternalQuestName]
@@ -1975,17 +2061,40 @@ local function findEligibleQuestTarget(self, guideData, targetName, progressTota
                     if numericLevel and numericLevel >= 0 and numericLevel <= level
                         and type(quest) == "table" and type(quest.Task) == "table"
                     then
-                        local mobName, count = next(quest.Task)
-                        local numericCount = tonumber(count)
-                        if mobName == targetName and numericCount == progressTotal
-                            and numericCount > 1
-                        then
-                            return mobName
+                        if allowFirstSeaActiveQuest then
+                            for mobName, count in pairs(quest.Task) do
+                                local numericCount = tonumber(count)
+                                if type(mobName) == "string"
+                                    and trackedTargetMatches(mobName, targetName, true)
+                                    and numericCount == progressTotal and numericCount > 1
+                                then
+                                    firstSeaMatches[mobName] = true
+                                end
+                            end
+                        else
+                            local mobName, count = next(quest.Task)
+                            local numericCount = tonumber(count)
+                            if mobName == targetName and numericCount == progressTotal
+                                and numericCount > 1
+                            then
+                                return mobName
+                            end
                         end
                     end
                 end
             end
         end
+    end
+
+    if allowFirstSeaActiveQuest then
+        local matchedTarget = nil
+        for mobName in pairs(firstSeaMatches) do
+            if matchedTarget then
+                return nil
+            end
+            matchedTarget = mobName
+        end
+        return matchedTarget
     end
     return nil
 end
@@ -2040,7 +2149,7 @@ local function findEligibleTargetFromTitle(self, guideData, title, progressTotal
     return bestTarget
 end
 
-local function readTrackedQuestTarget(self, guideData)
+local function readTrackedQuestTarget(self, guideData, isFirstSea)
     local ok, targetName = pcall(function()
         local compatibility = self.Compatibility
         if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
@@ -2060,6 +2169,14 @@ local function readTrackedQuestTarget(self, guideData)
         local titleLabel = header and header:FindFirstChild("textLabel")
         local description = frame and frame:FindFirstChild("description")
         local progressLabel = frame and frame:FindFirstChild("progress")
+        if isFirstSea
+            and (not isVisibleGuiObjectWithin(titleLabel, trackedQuestFrame)
+                or not isVisibleGuiObjectWithin(description, trackedQuestFrame)
+                or not isVisibleGuiObjectWithin(progressLabel, trackedQuestFrame))
+        then
+            return nil
+        end
+
         local title = titleLabel and usableTrackedQuestText(
             titleLabel.Text,
             MAX_TRACKED_QUEST_TEXT_LENGTH
@@ -2072,12 +2189,15 @@ local function readTrackedQuestTarget(self, guideData)
         if not title or not target then
             return nil
         end
+        if isFirstSea and not titleContainsTarget(title, target, true) then
+            return nil
+        end
         local progressCurrent, progressTotal = parseTrackedQuestProgress(progressText)
         if progressCurrent == nil or progressTotal == nil then
             return nil
         end
 
-        return findEligibleQuestTarget(self, guideData, target, progressTotal)
+        return findEligibleQuestTarget(self, guideData, target, progressTotal, isFirstSea == true)
     end)
 
     if not ok then
@@ -2181,16 +2301,17 @@ function QuestService:GetActiveQuestState()
         end
     end
 
-    local trackedTarget = readTrackedQuestTarget(self, guideData)
-    if trackedTarget then
-        return "active", trackedTarget, "TrackedQuestFrame title/target/progress mapped to quest catalog"
-    end
-
     local firstSea = false
     if self.Compatibility and type(self.Compatibility.IsFirstSea) == "function" then
         local seaReadOk, isFirstSea = pcall(self.Compatibility.IsFirstSea, self.Compatibility)
         firstSea = seaReadOk and isFirstSea == true
     end
+
+    local trackedTarget = readTrackedQuestTarget(self, guideData, firstSea)
+    if trackedTarget then
+        return "active", trackedTarget, "TrackedQuestFrame title/target/progress mapped to quest catalog"
+    end
+
     if firstSea then
         local hudState, hudTarget, hudReason = readFirstSeaQuestHud(self, guideData)
         return hudState, hudTarget, hudReason

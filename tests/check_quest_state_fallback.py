@@ -18,7 +18,7 @@ def require(condition, message):
 active_reader = QUEST_SERVICE.index("function QuestService:GetActiveQuestState()")
 preferred_read = QUEST_SERVICE.index("return \"active\", targetName", active_reader)
 fallback_read = QUEST_SERVICE.index(
-    "local trackedTarget = readTrackedQuestTarget(self, guideData)", active_reader
+    "local trackedTarget = readTrackedQuestTarget(self, guideData, firstSea)", active_reader
 )
 require(preferred_read < fallback_read, "GuideModule QuestData is no longer preferred")
 require(
@@ -38,6 +38,10 @@ for token in (
     "titleLabel.Text",
     "description.Text",
     "progressLabel.Text",
+    "titleContainsTarget(title, target, true)",
+    "isVisibleGuiObjectWithin(titleLabel, trackedQuestFrame)",
+    "isVisibleGuiObjectWithin(description, trackedQuestFrame)",
+    "isVisibleGuiObjectWithin(progressLabel, trackedQuestFrame)",
 ):
     require(token in QUEST_SERVICE, f"tracked quest UI validation is missing: {token}")
 
@@ -52,9 +56,31 @@ for token in (
     "local mobName, count = next(quest.Task)",
     "numericCount == progressTotal",
     "numericCount > 1",
+    "local function normalizeQuestTargetName(name)",
+    "local function trackedTargetMatches(catalogTarget, trackedTarget, allowFirstSeaVariants)",
+    "trackedTargetMatches(mobName, targetName, true)",
+    "firstSeaMatches[mobName] = true",
     'title:match("%((%d+)%s*/%s*(%d+)%)%s*$")',
 ):
     require(token in QUEST_SERVICE, f"safe progress/target mapping is missing: {token}")
+
+require(
+    "readTrackedQuestTarget(self, guideData, firstSea)" in QUEST_SERVICE,
+    "First Sea-specific tracked-quest matching is not gated by sea detection",
+)
+require(
+    "(allowFirstSeaActiveQuest or not excludedQuestNames[npcEntry.InternalQuestName])"
+    in QUEST_SERVICE,
+    "active First Sea tracking does not separate from quest-selection exclusions",
+)
+selector = QUEST_SERVICE[QUEST_SERVICE.index("function QuestService:SelectLevelQuest()"):]
+require(
+    "not excludedQuestNames[npcEntry.InternalQuestName]" in selector,
+    "existing level-quest exclusions were removed",
+)
+for excluded_name in ("BartiloQuest", "Trainees", "MarineQuest", "CitizenQuest"):
+    require(f"{excluded_name} = true" in QUEST_SERVICE,
+            f"existing quest-selection exclusion changed: {excluded_name}")
 
 tracked_progress_parser = QUEST_SERVICE[
     QUEST_SERVICE.index("local function parseTrackedQuestProgress"):
@@ -85,6 +111,88 @@ for current, total, expected in (
         f"unexpected tracked progress result for {current}/{total}",
     )
 print("PASS: tracked progress accepts incomplete counts and rejects complete/over-complete counts")
+
+
+def normalize_target_name(name):
+    """Python fixture model of the bounded First Sea target normalization."""
+    import re
+
+    words = re.findall(r"[a-z0-9]+", name.lower())
+    if not words:
+        return None
+    word = words[-1]
+    if len(word) > 3 and word.endswith("ies") and word[-4] not in "aeiou":
+        word = word[:-3] + "y"
+    elif len(word) > 4 and word.endswith("es"):
+        stem = word[:-2]
+        if (stem.endswith(("s", "x", "z", "ch", "sh"))):
+            word = stem
+        elif len(word) > 2 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+            word = word[:-1]
+    elif len(word) > 2 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        word = word[:-1]
+    words[-1] = word
+    return " ".join(words)
+
+
+def unique_first_sea_target(display_target, catalog_targets, progress_current, progress_total):
+    """Fixture model: incomplete progress and one distinct catalog name are required."""
+    if not isinstance(progress_current, int) or not isinstance(progress_total, int):
+        return None
+    if progress_total <= 0 or progress_current < 0 or progress_current >= progress_total:
+        return None
+    matches = {
+        catalog_target
+        for catalog_target, count in catalog_targets
+        if isinstance(count, int)
+        and count == progress_total
+        and count > 1
+        and normalize_target_name(catalog_target) == normalize_target_name(display_target)
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def parse_progress_text(text):
+    import re
+
+    match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", text or "")
+    if not match:
+        return None
+    current, total = (int(part) for part in match.groups())
+    if total <= 0 or current >= total:
+        return None
+    return current, total
+
+
+for display_target, candidates, expected in (
+    ("Trainees", [("Trainee", 5)], "Trainee"),
+    ("Bandits", [("Bandit", 5)], "Bandit"),
+    ("Bandit", [("Bandit", 5)], "Bandit"),
+    ("Trainees", [("Trainee", 5), ("Trainees", 5)], None),
+    ("Trainees", [("Trainee", 4)], None),
+):
+    actual = unique_first_sea_target(display_target, candidates, 0, 5)
+    require(actual == expected,
+            f"unexpected First Sea target match for {display_target}: {actual!r}")
+require(unique_first_sea_target("Trainees", [("Trainee", 5)], 5, 5) is None,
+        "completed tracked quest progress must not map")
+require(unique_first_sea_target("Trainees", [("Trainee", 5)], 6, 5) is None,
+        "over-complete tracked quest progress must not map")
+require(unique_first_sea_target("Trainees", [("Trainee", 5)], -1, 5) is None,
+        "negative tracked quest progress must not map")
+require(unique_first_sea_target("Trainees", [("Trainee", 5)], 0, 0) is None,
+        "zero-total tracked quest progress must not map")
+for invalid_progress in ("", "x/5", "0/0", "5/5", "6/5"):
+    require(parse_progress_text(invalid_progress) is None,
+            f"invalid or completed progress was accepted: {invalid_progress!r}")
+require(parse_progress_text("0/5") == (0, 5),
+        "valid incomplete tracked progress was rejected")
+require(
+    'if not allowFirstSeaVariants then\n        return false'
+    in QUEST_SERVICE,
+    "plural target normalization can affect non-First-Sea tracker matching",
+)
+print("PASS: tracker target fixtures cover singular/plural, ambiguity, count, and progress")
 
 require("local ok, targetName = pcall(function()" in QUEST_SERVICE,
         "destroyed or absent UI reads are not protected")
