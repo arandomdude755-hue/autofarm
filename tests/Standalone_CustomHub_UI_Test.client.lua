@@ -543,17 +543,20 @@ local function restoreWindow(fromSelfTest)
 
     transitionGeneration += 1
     local generation = transitionGeneration
-    root.Visible = true
     bubbleContainer.Visible = true
     setBubbleHintVisible(false)
     stopBubbleAmbientAnimations()
 
-    playTween(windowScale, 0.2, { Scale = 1 })
-    playTween(root, 0.2, { BackgroundTransparency = 0 })
-    playTween(bubbleScale, 0.14, { Scale = 0.9 }, function()
-        if generation == transitionGeneration and not isMinimized and bubbleContainer then
+    -- Finish hiding the bubble before mounting the window again, so the two never overlap.
+    playTween(bubbleScale, 0.14, { Scale = 0.88 }, function()
+        if generation == transitionGeneration and not isMinimized and bubbleContainer and root then
             bubbleContainer.Visible = false
             bubbleScale.Scale = 1
+            windowScale.Scale = 0.94
+            root.BackgroundTransparency = 0.18
+            root.Visible = true
+            playTween(windowScale, 0.18, { Scale = 1 })
+            playTween(root, 0.18, { BackgroundTransparency = 0 })
         end
     end)
     return true
@@ -1289,7 +1292,7 @@ local function mount()
             bubbleDragging = true
             bubbleDragInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
             bubbleDragStart = input.Position
-            bubbleDragOrigin = bubbleContainer.AbsolutePosition + bubbleContainer.AbsoluteSize / 2
+            bubbleDragOrigin = bubbleContainer.Position
             bubbleDragMoved = false
         end
     end)
@@ -1316,13 +1319,12 @@ local function mount()
             if bubbleDragMoved and bubbleContainer then
                 local camera = workspace.CurrentCamera
                 local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
-                local halfSize = bubbleContainer.AbsoluteSize / 2
-                local halfX = math.min(halfSize.X, viewport.X / 2)
-                local halfY = math.min(halfSize.Y, viewport.Y / 2)
-                local x = math.clamp(bubbleDragOrigin.X + delta.X, halfX, math.max(halfX, viewport.X - halfX))
-                local y = math.clamp(bubbleDragOrigin.Y + delta.Y, halfY, math.max(halfY, viewport.Y - halfY))
-                bubbleContainer.Position = UDim2.fromOffset(x, y)
-                clampBubbleToViewport()
+                bubbleContainer.Position = getClampedDragPosition(
+                    bubbleDragOrigin,
+                    delta,
+                    viewport,
+                    bubbleContainer.AbsoluteSize
+                )
             end
         end
 
@@ -1580,12 +1582,29 @@ task.spawn(function()
             Vector2.new(844, 390),
             Vector2.new(700, 360)
         )
+        local bubbleOrigin = UDim2.fromOffset(400, 195)
+        local bubbleUnchanged = getClampedDragPosition(
+            bubbleOrigin,
+            Vector2.new(0, 0),
+            Vector2.new(844, 390),
+            Vector2.new(64, 64)
+        )
+        local bubbleMoved = getClampedDragPosition(
+            bubbleOrigin,
+            Vector2.new(18, 12),
+            Vector2.new(844, 390),
+            Vector2.new(64, 64)
+        )
         return unchanged.X.Scale == initial.X.Scale
             and unchanged.X.Offset == initial.X.Offset
             and unchanged.Y.Scale == initial.Y.Scale
             and unchanged.Y.Offset == initial.Y.Offset
             and moved.X.Offset == 18
             and moved.Y.Offset == 12
+            and bubbleUnchanged.X.Offset == bubbleOrigin.X.Offset
+            and bubbleUnchanged.Y.Offset == bubbleOrigin.Y.Offset
+            and bubbleMoved.X.Offset == bubbleOrigin.X.Offset + 18
+            and bubbleMoved.Y.Offset == bubbleOrigin.Y.Offset + 12
     end)
 
     test("native window, section, and scrolling surfaces exist", function()
