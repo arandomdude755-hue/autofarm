@@ -1,48 +1,17 @@
 local QuestService = {}
 QuestService.__index = QuestService
 
-local MAX_DIAGNOSTIC_STRING_LENGTH = 120
-
-local function redactLiteral(text, value)
-    if type(value) ~= "string" or value == "" then
-        return text
-    end
-
-    local parts = {}
-    local cursor = 1
-    while cursor <= #text do
-        local first, last = string.find(text, value, cursor, true)
-        if not first then
-            parts[#parts + 1] = text:sub(cursor)
-            break
-        end
-        parts[#parts + 1] = text:sub(cursor, first - 1)
-        parts[#parts + 1] = "[redacted]"
-        cursor = last + 1
-    end
-    return table.concat(parts)
-end
-
-local function diagnosticScalarRepresentation(value, player)
+local function diagnosticScalarRepresentation(value)
     local valueType = typeof(value)
     if type(value) == "string" then
-        local text = value:sub(1, MAX_DIAGNOSTIC_STRING_LENGTH * 4):gsub("[%c]", " ")
-        if player then
-            text = redactLiteral(text, player.Name)
-            text = redactLiteral(text, player.DisplayName)
-            text = redactLiteral(text, tostring(player.UserId))
-        end
-        text = text:gsub("https?://%S+", "[redacted-url]")
-        text = text:gsub("@[%w_%-]+", "[redacted-handle]")
-        text = text:gsub("%d%d%d%d%d+", "[redacted-id]")
-        if #text > MAX_DIAGNOSTIC_STRING_LENGTH then
-            text = text:sub(1, MAX_DIAGNOSTIC_STRING_LENGTH - 3) .. "..."
-        end
-        return string.format("%q", text)
+        return string.format("<string length=%d>", #value)
     end
 
-    if value == nil or type(value) == "boolean" or type(value) == "number" then
+    if value == nil or type(value) == "boolean" then
         return tostring(value)
+    end
+    if type(value) == "number" then
+        return "<number-redacted>"
     end
     return "<" .. tostring(valueType) .. ">"
 end
@@ -165,24 +134,32 @@ function QuestService:SelectLevelQuest()
 end
 
 function QuestService:RequestStart(candidate)
+    self.LastStartDiagnostic = {
+        Stage = "pcall_not_reached",
+        PcallSucceeded = nil,
+        ResultType = "n/a",
+        ResultSummary = "not returned",
+    }
     if type(candidate) ~= "table" or not candidate.QuestName or candidate.Id == nil then
+        self.LastStartDiagnostic.Stage = "candidate_invalid"
         return false, "Quest candidate is incomplete"
     end
 
     local commF, remoteError = self.Compatibility:GetCommF()
     if not commF then
+        self.LastStartDiagnostic.Stage = "remote_unavailable"
         return false, remoteError
     end
     local ok, result = pcall(function()
         return commF:InvokeServer("StartQuest", tostring(candidate.QuestName), candidate.Id)
     end)
     pcall(function()
-        print(string.format(
-            "[QuestDiagnostic] StartQuest pcall_succeeded=%s result_type=%s result_repr=%s",
-            tostring(ok),
-            tostring(typeof(result)),
-            diagnosticScalarRepresentation(result, self.Player)
-        ))
+        self.LastStartDiagnostic = {
+            Stage = "pcall_completed",
+            PcallSucceeded = ok,
+            ResultType = tostring(typeof(result)),
+            ResultSummary = diagnosticScalarRepresentation(result),
+        }
     end)
     if not ok then
         return false, tostring(result)

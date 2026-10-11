@@ -953,48 +953,17 @@ __bundleFactories["CustomHub.Features.Farm.QuestService"] = function()
 local QuestService = {}
 QuestService.__index = QuestService
 
-local MAX_DIAGNOSTIC_STRING_LENGTH = 120
-
-local function redactLiteral(text, value)
-    if type(value) ~= "string" or value == "" then
-        return text
-    end
-
-    local parts = {}
-    local cursor = 1
-    while cursor <= #text do
-        local first, last = string.find(text, value, cursor, true)
-        if not first then
-            parts[#parts + 1] = text:sub(cursor)
-            break
-        end
-        parts[#parts + 1] = text:sub(cursor, first - 1)
-        parts[#parts + 1] = "[redacted]"
-        cursor = last + 1
-    end
-    return table.concat(parts)
-end
-
-local function diagnosticScalarRepresentation(value, player)
+local function diagnosticScalarRepresentation(value)
     local valueType = typeof(value)
     if type(value) == "string" then
-        local text = value:sub(1, MAX_DIAGNOSTIC_STRING_LENGTH * 4):gsub("[%c]", " ")
-        if player then
-            text = redactLiteral(text, player.Name)
-            text = redactLiteral(text, player.DisplayName)
-            text = redactLiteral(text, tostring(player.UserId))
-        end
-        text = text:gsub("https?://%S+", "[redacted-url]")
-        text = text:gsub("@[%w_%-]+", "[redacted-handle]")
-        text = text:gsub("%d%d%d%d%d+", "[redacted-id]")
-        if #text > MAX_DIAGNOSTIC_STRING_LENGTH then
-            text = text:sub(1, MAX_DIAGNOSTIC_STRING_LENGTH - 3) .. "..."
-        end
-        return string.format("%q", text)
+        return string.format("<string length=%d>", #value)
     end
 
-    if value == nil or type(value) == "boolean" or type(value) == "number" then
+    if value == nil or type(value) == "boolean" then
         return tostring(value)
+    end
+    if type(value) == "number" then
+        return "<number-redacted>"
     end
     return "<" .. tostring(valueType) .. ">"
 end
@@ -1117,24 +1086,32 @@ function QuestService:SelectLevelQuest()
 end
 
 function QuestService:RequestStart(candidate)
+    self.LastStartDiagnostic = {
+        Stage = "pcall_not_reached",
+        PcallSucceeded = nil,
+        ResultType = "n/a",
+        ResultSummary = "not returned",
+    }
     if type(candidate) ~= "table" or not candidate.QuestName or candidate.Id == nil then
+        self.LastStartDiagnostic.Stage = "candidate_invalid"
         return false, "Quest candidate is incomplete"
     end
 
     local commF, remoteError = self.Compatibility:GetCommF()
     if not commF then
+        self.LastStartDiagnostic.Stage = "remote_unavailable"
         return false, remoteError
     end
     local ok, result = pcall(function()
         return commF:InvokeServer("StartQuest", tostring(candidate.QuestName), candidate.Id)
     end)
     pcall(function()
-        print(string.format(
-            "[QuestDiagnostic] StartQuest pcall_succeeded=%s result_type=%s result_repr=%s",
-            tostring(ok),
-            tostring(typeof(result)),
-            diagnosticScalarRepresentation(result, self.Player)
-        ))
+        self.LastStartDiagnostic = {
+            Stage = "pcall_completed",
+            PcallSucceeded = ok,
+            ResultType = tostring(typeof(result)),
+            ResultSummary = diagnosticScalarRepresentation(result),
+        }
     end)
     if not ok then
         return false, tostring(result)
@@ -1801,6 +1778,7 @@ local MovementService = __bundleLoad("CustomHub.Features.Farm.MovementService")
 local CombatService = __bundleLoad("CustomHub.Features.Farm.CombatService")
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
+local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
 
 local MainFarm = {
     Running = false,
@@ -1825,6 +1803,21 @@ end
 
 local function questKey(candidate)
     return tostring(candidate.QuestName) .. ":" .. tostring(candidate.Id)
+end
+
+local function questDataSummary(label, snapshot)
+    if type(snapshot) ~= "table" then
+        return label .. ": unavailable"
+    end
+    return string.format(
+        "%s: reader=%s Guide.Data=%s QuestData.present=%s type=%s Task.type=%s",
+        label,
+        tostring(snapshot.ReaderState),
+        tostring(snapshot.GuideDataType),
+        tostring(snapshot.QuestDataPresent),
+        tostring(snapshot.QuestDataType),
+        tostring(snapshot.TaskType)
+    )
 end
 
 function MainFarm:_SetStatus(message, kind)
@@ -1890,6 +1883,11 @@ end
 
 function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
     pcall(function()
+        local report = self.QuestDiagnosticReport
+        if type(report) ~= "table" then
+            return
+        end
+
         local guide = self.QuestService and self.QuestService.Guide
         local guideData = type(guide) == "table" and guide.Data or nil
         local guideDataType = type(guideData)
@@ -1898,6 +1896,7 @@ function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
         local taskType = questDataType == "table" and type(questData.Task) or "n/a"
         local questDataPresent = questData ~= nil
         local signature = table.concat({
+            tostring(phase),
             tostring(guideDataType),
             questDataPresent and "present" or "nil",
             tostring(questDataType),
@@ -1914,15 +1913,54 @@ function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
 
         self.LastQuestDiagnosticSignature = signature
         self.LastQuestDiagnosticAt = now
-        print(string.format(
-            "[QuestDiagnostic] quest_state phase=%s reader_state=%s guide_data_type=%s quest_data_present=%s quest_data_type=%s task_type=%s",
-            tostring(phase),
-            tostring(questState),
-            tostring(guideDataType),
-            tostring(questDataPresent),
-            tostring(questDataType),
-            tostring(taskType)
-        ))
+        local snapshot = {
+            ReaderState = tostring(questState),
+            GuideDataType = tostring(guideDataType),
+            QuestDataPresent = tostring(questDataPresent),
+            QuestDataType = tostring(questDataType),
+            TaskType = tostring(taskType),
+        }
+        report.LatestQuestData = snapshot
+        if phase == "post_request" then
+            report.PostRequestQuestData = snapshot
+        end
+    end)
+end
+
+function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
+    pcall(function()
+        local pcallOutcome
+        if type(report.PcallSucceeded) == "boolean" then
+            pcallOutcome = tostring(report.PcallSucceeded)
+                .. (report.PcallSucceeded and " (returned; acceptance not inferred)"
+                    or " (call raised inside pcall)")
+        else
+            pcallOutcome = "not reached (stage=" .. tostring(report.RequestStage) .. ")"
+        end
+
+        local lines = {
+            "===== [QuestDiagnostic] REPORT BEGIN =====",
+            "Candidate: quest=" .. tostring(report.CandidateQuestName)
+                .. " id=" .. tostring(report.CandidateQuestId),
+            "StartQuest: pcall_succeeded=" .. pcallOutcome,
+            "Result: type=" .. tostring(report.ResultType)
+                .. " summary=" .. tostring(report.ResultSummary),
+            questDataSummary("QuestData after request", report.PostRequestQuestData),
+            questDataSummary("QuestData at end", report.LatestQuestData),
+            string.format(
+                "Confirmation: %s; elapsed_seconds=%.2f",
+                tostring(reason),
+                math.max(0, elapsed)
+            ),
+            "===== [QuestDiagnostic] REPORT END =====",
+        }
+        local text = table.concat(lines, "\n")
+        if #text > MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH then
+            local endMarker = "\n===== [QuestDiagnostic] REPORT END ====="
+            text = text:sub(1, MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH - #endMarker - 18)
+                .. "\n...[truncated]" .. endMarker
+        end
+        print(text)
     end)
 end
 
@@ -1934,14 +1972,15 @@ function MainFarm:_EndQuestDiagnosticWait(reason, now)
 
     pcall(function()
         local startedAt = self.QuestDiagnosticWaitStartedAt or now
-        print(string.format(
-            "[QuestDiagnostic] confirmation_wait_end reason=%s elapsed_seconds=%.2f",
-            tostring(reason),
+        self:_PrintQuestDiagnosticReport(
+            self.QuestDiagnosticReport or {},
+            reason,
             math.max(0, now - startedAt)
-        ))
+        )
     end)
     self.QuestDiagnosticWaitKey = nil
     self.QuestDiagnosticWaitStartedAt = nil
+    self.QuestDiagnosticReport = nil
 end
 
 function MainFarm:_MoveTo(destination, session, threshold)
@@ -1974,6 +2013,9 @@ end
 function MainFarm:_RequestQuest(candidate, session)
     local key = questKey(candidate)
     local now = os.clock()
+    if self.QuestDiagnosticWaitKey and self.QuestDiagnosticWaitKey ~= key then
+        self:_EndQuestDiagnosticWait("candidate_changed_before_confirmation", now)
+    end
     if self.LastQuestAttemptKey == key then
         local elapsed = now - (self.LastQuestAttemptAt or 0)
         if elapsed < 8 then
@@ -1987,14 +2029,22 @@ function MainFarm:_RequestQuest(candidate, session)
     self.LastQuestAttemptAt = now
     self.QuestDiagnosticWaitKey = key
     self.QuestDiagnosticWaitStartedAt = now
-    pcall(function()
-        print(string.format(
-            "[QuestDiagnostic] StartQuest candidate quest_name=%s quest_id=%s",
-            diagnosticScalar(candidate.QuestName),
-            diagnosticScalar(candidate.Id)
-        ))
-    end)
+    self.QuestDiagnosticReport = {
+        CandidateQuestName = diagnosticScalar(candidate.QuestName),
+        CandidateQuestId = diagnosticScalar(candidate.Id),
+        RequestStage = "pcall_not_reached",
+        PcallSucceeded = nil,
+        ResultType = "n/a",
+        ResultSummary = "not returned",
+    }
     local requested, result = self.QuestService:RequestStart(candidate)
+    local requestDiagnostic = self.QuestService.LastStartDiagnostic
+    if type(requestDiagnostic) == "table" then
+        self.QuestDiagnosticReport.RequestStage = tostring(requestDiagnostic.Stage)
+        self.QuestDiagnosticReport.PcallSucceeded = requestDiagnostic.PcallSucceeded
+        self.QuestDiagnosticReport.ResultType = tostring(requestDiagnostic.ResultType)
+        self.QuestDiagnosticReport.ResultSummary = tostring(requestDiagnostic.ResultSummary)
+    end
     local stateReadOk, stateAfterRequest = pcall(function()
         return self.QuestService:GetActiveQuestState()
     end)
@@ -2052,8 +2102,10 @@ function MainFarm:_Step(session)
         self:_LogQuestDataSnapshot("confirmation_poll", questState, false)
         local now = os.clock()
         if questState == "active" then
+            self:_LogQuestDataSnapshot("confirmation_poll", questState, true)
             self:_EndQuestDiagnosticWait("active_state_observed", now)
         elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= 8 then
+            self:_LogQuestDataSnapshot("confirmation_poll", questState, true)
             self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
         end
     end
@@ -2221,6 +2273,7 @@ function MainFarm:Initialize(context)
     self.LastQuestAttemptAt = 0
     self.QuestDiagnosticWaitKey = nil
     self.QuestDiagnosticWaitStartedAt = nil
+    self.QuestDiagnosticReport = nil
     self.LastQuestDiagnosticSignature = nil
     self.LastQuestDiagnosticAt = 0
     self.LastStatus = nil
@@ -2279,6 +2332,7 @@ end
 function MainFarm:Stop()
     self.Session += 1
     self.Running = false
+    self:_EndQuestDiagnosticWait("stopped_before_confirmation", os.clock())
     if self.MovementService then
         self.MovementService:Cancel()
     end
