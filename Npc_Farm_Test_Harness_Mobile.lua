@@ -19,10 +19,14 @@ local MOVE_SPEED = 55 -- studs/second
 local ARRIVAL_DISTANCE = 9 -- Existing harness threshold; actual per-style reach is not in this repo.
 local MELEE_APPROACH_STANDOFF = ARRIVAL_DISTANCE - 2
 local MELEE_APPROACH_TOLERANCE = 1.5
+local MOVEMENT_REPATH_DISTANCE = 8
+local MOVEMENT_REPATH_INTERVAL = 0.35
+local FARM_DIAGNOSTIC_INTERVAL = 1
 local FIGHTING_STYLE_TOOLTIP = "Melee" -- BNN reference categorizes melee tools by ToolTip.
 local BNN_M1_HIT_SCAN_RANGE = 30 -- ClickM1's normal AttackFunction argument in the BNN source.
 local QUEST_ACCEPT_RANGE = 8
 local QUEST_ACCEPT_DELAY = 2
+local QUEST_REQUEST_RETRY_INTERVAL = 8
 local RESCAN_INTERVAL = 2
 local MAX_CONSECUTIVE_ERRORS = 3
 local QUEST_EXCLUSIONS = {
@@ -39,6 +43,10 @@ local currentTarget = nil
 local currentQuestName = nil
 local currentQuestGiver = nil
 local currentQuestTarget = nil
+local enemyDiscoveryStatus = "Not scanned"
+local movementStatus = "Idle"
+local activeQuestReadStatus = "Not checked"
+local questHudStatus = "Not checked"
 local questStatus = "Manual NPC mode"
 local questSelectorTestStatus = "not run"
 local combatTestStatus = "not run"
@@ -52,6 +60,9 @@ local movementToken = 0
 local farmSession = 0
 local activeTween = nil
 local farmState = "Stopped"
+local farmDetail = "Idle"
+local lastDiagnosticKey = nil
+local lastDiagnosticAt = 0
 local lastScan = 0
 local lastReport = "Not tested yet."
 local errors = {}
@@ -84,6 +95,23 @@ local function isAliveNpc(model)
     local root = model:FindFirstChild("HumanoidRootPart")
     return humanoid ~= nil and humanoid.Health > 0
         and root ~= nil and root:IsA("BasePart") and root:IsDescendantOf(model)
+end
+
+local function normalizeEnemyName(name)
+    if type(name) ~= "string" then return nil end
+    -- BNN's DetectPartSpawnMob removes an optional punctuation-wrapped level suffix.
+    return (name:gsub(" %p?Lv%.? %d+%p?", ""))
+end
+
+local function enemyNameMatchesTarget(model, targetName)
+    if not model or type(targetName) ~= "string" then return false end
+    local wanted = normalizeEnemyName(targetName)
+    if model.Name == targetName or normalizeEnemyName(model.Name) == wanted then
+        return true
+    end
+    local displayName = model:GetAttribute("DisplayName")
+    return type(displayName) == "string"
+        and (displayName == targetName or normalizeEnemyName(displayName) == wanted)
 end
 
 local function findNpcModels()
@@ -288,6 +316,19 @@ local function runCombatMockTests()
     local chosenOwned, ownedState = chooseFightingStyleTool({}, {owned})
     local ambiguous, ambiguousState = chooseFightingStyleTool({}, {owned, mockTool("SecondStyle", FIGHTING_STYLE_TOOLTIP)})
     local swordOnly, swordState = chooseFightingStyleTool({}, {mockTool("Sword", "Sword")})
+    local function mockNpc(name, displayName)
+        return {
+            Name = name,
+            GetAttribute = function(_, attribute)
+                return attribute == "DisplayName" and displayName or nil
+            end,
+        }
+    end
+    local enemyNameTestsPassed =
+        enemyNameMatchesTarget(mockNpc("Bandit", nil), "Bandit")
+        and enemyNameMatchesTarget(mockNpc("Bandit [Lv. 5]", nil), "Bandit")
+        and enemyNameMatchesTarget(mockNpc("Bandit", "Bandit [Lv. 5]"), "Bandit")
+        and not enemyNameMatchesTarget(mockNpc("Bandit Chief", nil), "Bandit")
     local targetA, targetB = {}, {}
     local attackTestsPassed = attackContextIsCurrent(true, 3, 3, targetA, targetA, true)
         and not attackContextIsCurrent(false, 3, 3, targetA, targetA, true)
@@ -298,9 +339,9 @@ local function runCombatMockTests()
         and chosenOwned == owned and ownedState == "needs-equip"
         and ambiguous == nil and string.find(ambiguousState, "ambiguous", 1, true) ~= nil
         and swordOnly == nil and swordState ~= nil
-    return styleTestsPassed and attackTestsPassed,
-        styleTestsPassed and attackTestsPassed
-            and "style choice, ambiguity, stop/session/target/death cancellation passed"
+    return styleTestsPassed and attackTestsPassed and enemyNameTestsPassed,
+        styleTestsPassed and attackTestsPassed and enemyNameTestsPassed
+            and "style choice, enemy-name normalization, and stop/session/target/death cancellation passed"
             or "combat mock assertion failed"
 end
 
@@ -376,6 +417,35 @@ local function getActiveQuestTarget(context)
         return nil, nil
     end
     return questData, targetName
+end
+
+local function getQuestHudStatus(targetName)
+    local playerGui = player:FindFirstChild("PlayerGui")
+    local mainGui = playerGui and playerGui:FindFirstChild("Main")
+    local questFrame = mainGui and mainGui:FindFirstChild("Quest")
+    if not questFrame or not questFrame:IsA("GuiObject") then
+        return nil, false, "Quest HUD unavailable"
+    end
+    if not questFrame.Visible then
+        return false, false, "Quest HUD not visible"
+    end
+    local container = questFrame:FindFirstChild("Container")
+    local questTitle = container and container:FindFirstChild("QuestTitle")
+    local titleLabel = questTitle and questTitle:FindFirstChild("Title")
+    local titleText
+    if titleLabel then
+        local ok, value = pcall(function() return titleLabel.Text end)
+        if ok then titleText = value end
+    end
+    if type(titleText) ~= "string" or titleText == "" then
+        return true, false, "Quest HUD visible but title text is unavailable"
+    end
+    local targetMatches = type(targetName) == "string"
+        and string.find(titleText, targetName, 1, true) ~= nil
+    if targetMatches then
+        return true, true, "Quest HUD title confirms target: " .. titleText
+    end
+    return true, false, "Quest HUD title does not match selected target: " .. titleText
 end
 
 -- Input: validated getQuestContext() result. Output: highest eligible non-excluded
@@ -503,8 +573,12 @@ local function setReport()
         "Quest giver: " .. tostring(currentQuestGiver or "(none)"),
         "Quest target: " .. tostring(currentQuestTarget or "(none)"),
         "Quest integration: " .. tostring(questStatus),
+        "Active quest read: " .. tostring(activeQuestReadStatus),
+        "Quest HUD check: " .. tostring(questHudStatus),
         "Quest selector mock: " .. tostring(questSelectorTestStatus),
         "Combat mock: " .. tostring(combatTestStatus),
+        "Enemy discovery: " .. tostring(enemyDiscoveryStatus),
+        "Movement: " .. tostring(movementStatus),
         "Target alive: " .. tostring(currentTarget ~= nil and isAliveNpc(currentTarget)),
         "Fighting style: " .. tostring(currentFightingStyleName or "(unidentified)"),
         "Fighting style status: " .. tostring(fightingStyleStatus),
@@ -516,6 +590,7 @@ local function setReport()
         "Target health drops observed after M1 request: " .. tostring(targetHealthDropsObserved),
         "Attack action status: " .. tostring(attackActionStatus),
         "Farm state: " .. tostring(farmState),
+        "Farm detail: " .. tostring(farmDetail),
         "Farm running: " .. tostring(running),
         "Errors: " .. (#errors == 0 and "none" or table.concat(errors, " | ")),
     }
@@ -527,8 +602,19 @@ local statusLabel
 
 local function setFarmState(state, message)
     farmState = state
-    if statusLabel and message then
+    farmDetail = message or state
+    if statusLabel and message and statusLabel.Text ~= message then
         statusLabel.Text = message
+    end
+    local detail = tostring(message or state)
+    local diagnosticKey = tostring(state) .. ": " .. detail
+    local now = os.clock()
+    if now - lastDiagnosticAt >= FARM_DIAGNOSTIC_INTERVAL
+        and (diagnosticKey ~= lastDiagnosticKey or now - lastDiagnosticAt >= 3 * FARM_DIAGNOSTIC_INTERVAL)
+    then
+        print("[NPC Farm] " .. diagnosticKey)
+        lastDiagnosticKey = diagnosticKey
+        lastDiagnosticAt = now
     end
 end
 
@@ -772,6 +858,7 @@ local function stopFarm()
     if tween then
         pcall(function() tween:Cancel() end)
     end
+    movementStatus = "Stopped: farm session ended"
     setCurrentTarget(nil)
     setCurrentFightingStyle(nil, "Not checked (farm stopped)")
     attackActionStatus = "No attack loop active"
@@ -792,6 +879,11 @@ local function moveToPoint(positionProvider, validityProvider, session, arrivalD
     local targetPosition = getTargetPosition()
     if not targetPosition then return false, "target-position-unavailable" end
 
+    local previousMovementTween = activeTween
+    activeTween = nil
+    if previousMovementTween then
+        pcall(function() previousMovementTween:Cancel() end)
+    end
     movementToken += 1
     local token = movementToken
     local destination = targetPosition + heightOffset
@@ -818,42 +910,62 @@ local function moveToPoint(positionProvider, validityProvider, session, arrivalD
         )
         activeTween = tween
         tween:Play()
+        movementStatus = string.format(
+            "Tween started toward updated goal (%.1f studs, %.1fs)",
+            distance,
+            duration
+        )
     end
 
     startTween(root, destination)
 
     local startTime = os.clock()
+    local lastRetargetAt = startTime
     while running and session == farmSession and token == movementToken do
         targetPosition = getTargetPosition()
         if not targetPosition then
             cancelTween()
+            movementStatus = "Stopped: movement target became invalid"
             return false, "target-invalid"
         end
         local currentCharacter, currentHumanoid, currentRoot = getCharacter()
         if currentCharacter ~= character or not currentRoot or currentRoot ~= root or not currentHumanoid then
             cancelTween()
+            movementStatus = "Stopped: character changed or became unavailable"
             return false, "character-changed"
         end
         local newDestination = targetPosition + heightOffset
-        if (newDestination - destination).Magnitude > 4 then
+        if (currentRoot.Position - targetPosition).Magnitude <= arrivalDistance then
+            cancelTween()
+            movementStatus = "Arrived within " .. tostring(arrivalDistance) .. "-stud threshold"
+            return true, "arrived"
+        end
+        local now = os.clock()
+        local goalShift = (newDestination - destination).Magnitude
+        local tweenCompleted = tween ~= nil and tween.PlaybackState == Enum.PlaybackState.Completed
+        local completedOffGoal = tweenCompleted
+            and (currentRoot.Position - newDestination).Magnitude > arrivalDistance
+        if now - lastRetargetAt >= MOVEMENT_REPATH_INTERVAL
+            and (goalShift >= MOVEMENT_REPATH_DISTANCE or completedOffGoal)
+        then
             cancelTween()
             destination = newDestination
             startTween(currentRoot, destination)
-        end
-        if (currentRoot.Position - targetPosition).Magnitude <= arrivalDistance then
-            cancelTween()
-            return true, "arrived"
+            lastRetargetAt = now
         end
         if os.clock() - startTime > 12 then
             cancelTween()
+            movementStatus = "Stopped: 12-second movement timeout"
             return false, "movement-timeout"
         end
         RunService.Heartbeat:Wait()
     end
     cancelTween()
     if not running or session ~= farmSession or token ~= movementToken then
+        movementStatus = "Stopped: session canceled or superseded"
         return false, "cancelled"
     end
+    movementStatus = "Stopped: movement loop interrupted"
     return false, "movement-interrupted"
 end
 
@@ -1112,6 +1224,8 @@ local function processQuestMode(session)
         currentQuestName = nil
         currentQuestGiver = nil
         currentQuestTarget = nil
+        activeQuestReadStatus = "Quest context unavailable"
+        questHudStatus = "Not checked: quest context unavailable"
         questStatus = contextError
         setFarmState("QuestUnavailable", "Quest data unavailable: " .. tostring(contextError))
         task.wait(RESCAN_INTERVAL)
@@ -1121,6 +1235,8 @@ local function processQuestMode(session)
 
     local activeQuest, activeTarget = getActiveQuestTarget(context)
     if activeQuest and activeTarget then
+        activeQuestReadStatus = "Active GuideModule.Data.QuestData.Task target: " .. activeTarget
+        questHudStatus = "GuideModule task read; HUD fallback not needed"
         currentQuestName = tostring(activeQuest.QuestName or activeQuest.Name or "Active quest")
         currentQuestGiver = tostring(activeQuest.NPCName or "(unknown)")
         currentQuestTarget = activeTarget
@@ -1129,6 +1245,18 @@ local function processQuestMode(session)
         questReadyAt = 0
         setFarmState("QuestActive", "Active quest: farming " .. activeTarget)
         return activeTarget
+    end
+    local activeQuestData = context.activeQuestData
+    if activeQuestData == nil then
+        activeQuestReadStatus = "GuideModule.Data.QuestData is nil; no active task exposed"
+    elseif type(activeQuestData) ~= "table" then
+        activeQuestReadStatus = "GuideModule.Data.QuestData is not a table"
+    elseif type(activeQuestData.Task) ~= "table" then
+        activeQuestReadStatus = "GuideModule.Data.QuestData.Task is missing or not a table"
+    elseif next(activeQuestData.Task) == nil then
+        activeQuestReadStatus = "GuideModule.Data.QuestData.Task is empty"
+    else
+        activeQuestReadStatus = "Quest task keys are not readable as an enemy name"
     end
 
     local selection = selectQuestForLevel(context)
@@ -1146,6 +1274,21 @@ local function processQuestMode(session)
     currentQuestGiver = selection.GiverName
     currentQuestTarget = selection.Mob
     questStatus = string.format("Level %d selected quest %s (%s)", context.level, selection.QuestName, selection.Mob)
+
+    local hudActive, hudMatchesTarget, hudReason = getQuestHudStatus(selection.Mob)
+    questHudStatus = hudReason
+    if hudActive and hudMatchesTarget then
+        activeQuestReadStatus = "GuideModule task unavailable; matching visible quest HUD used"
+        questStatus = "Active quest target confirmed from BNN quest HUD title"
+        questReadyKey = nil
+        questReadyAt = 0
+        setFarmState("QuestActiveHudFallback", "Quest HUD confirms " .. selection.Mob)
+        return selection.Mob
+    elseif hudActive then
+        setFarmState("QuestHudMismatch", hudReason)
+        task.wait(0.5)
+        return nil
+    end
 
     local giverPosition = normalizePosition(selection.Position)
     if not giverPosition then
@@ -1175,7 +1318,7 @@ local function processQuestMode(session)
         local arrived, moveReason = moveToQuestGiver(giverPosition, session)
         if not arrived and running and session == farmSession then
             questStatus = "Quest giver approach: " .. tostring(moveReason)
-            setFarmState("QuestGiverMoveFailed", "Quest giver movement interrupted")
+            setFarmState("QuestGiverMoveFailed", "Quest giver movement failed: " .. tostring(moveReason))
             task.wait(0.1)
         end
         return nil
@@ -1187,7 +1330,7 @@ local function processQuestMode(session)
         return nil
     end
     if os.clock() < questReadyAt then
-        setFarmState("QuestReady", "Waiting for quest state update")
+        setFarmState("QuestReady", "Waiting for active quest task: " .. activeQuestReadStatus)
         task.wait(0.2)
         return nil
     end
@@ -1196,12 +1339,17 @@ local function processQuestMode(session)
     setFarmState("RequestingQuest", "Requesting " .. selection.QuestName)
     local sent, detail = requestQuestStart(selection)
     if not running or session ~= farmSession then return nil end
+    questReadyAt = os.clock() + (sent and QUEST_REQUEST_RETRY_INTERVAL or QUEST_ACCEPT_DELAY)
     questStatus = detail
     if not sent then
         recordError(detail)
         setFarmState("QuestRequestFailed", "Quest request unavailable; see report")
     else
-        setFarmState("AwaitingQuest", "Request sent; awaiting active quest state")
+        setFarmState(
+            "AwaitingQuest",
+            "Request sent; " .. activeQuestReadStatus
+                .. " (retry in " .. tostring(QUEST_REQUEST_RETRY_INTERVAL) .. "s)"
+        )
     end
     return nil
 end
@@ -1267,10 +1415,23 @@ startButton.Activated:Connect(function()
                         setFarmState("Acquiring", "Searching for " .. targetName)
                         local candidates = findNpcModels()
                         targetCount = #candidates
+                        local enemiesFolder = Workspace:FindFirstChild("Enemies")
                         local best, bestDistance
+                        local matchingNameCount = 0
+                        local combatFolderMatchCount = 0
+                        local sampleNames = {}
                         for _, npc in ipairs(candidates) do
-                            if npc.Name == targetName and isAliveNpc(npc) then
+                            if #sampleNames < 3 then
+                                table.insert(sampleNames, npc.Name)
+                            end
+                            if enemyNameMatchesTarget(npc, targetName) and isAliveNpc(npc) then
+                                matchingNameCount += 1
                                 local npcRoot = npc:FindFirstChild("HumanoidRootPart")
+                                if enemiesFolder and npc:IsDescendantOf(enemiesFolder) then
+                                    combatFolderMatchCount += 1
+                                else
+                                    npcRoot = nil
+                                end
                                 if npcRoot and root then
                                     local distance = (root.Position - npcRoot.Position).Magnitude
                                     if not bestDistance or distance < bestDistance then
@@ -1281,6 +1442,13 @@ startButton.Activated:Connect(function()
                         end
 
                         if best then
+                            enemyDiscoveryStatus = string.format(
+                                "%d alive candidates; %d matching in Workspace.Enemies; selected %s at %.1f studs",
+                                targetCount,
+                                combatFolderMatchCount,
+                                best.Name,
+                                bestDistance
+                            )
                             setCurrentTarget(best)
                             setFarmState("Moving", "Moving to " .. best.Name)
                             local arrived, moveReason = moveNearTarget(best, session)
@@ -1323,15 +1491,32 @@ startButton.Activated:Connect(function()
                             elseif running and session == farmSession then
                                 setCurrentTarget(nil)
                                 if moveReason == "movement-timeout" then
-                                    setFarmState("Reacquiring", "Movement timed out; reacquiring target")
+                                    setFarmState("Reacquiring", "Movement timed out; reacquiring " .. targetName)
                                 else
-                                    setFarmState("Reacquiring", "Target or movement changed; reacquiring")
+                                    setFarmState("Reacquiring", "Movement stopped (" .. tostring(moveReason) .. "); reacquiring " .. targetName)
                                 end
                                 task.wait(0.1)
                             end
                         else
                             setCurrentTarget(nil)
-                            setFarmState("WaitingForTarget", "Waiting for " .. targetName .. " to spawn")
+                            local samples = #sampleNames > 0 and table.concat(sampleNames, ", ") or "(none)"
+                            if not enemiesFolder then
+                                enemyDiscoveryStatus = string.format(
+                                    "Workspace.Enemies missing; %d fallback candidates cannot pass BNN M1 validation; samples: %s",
+                                    targetCount,
+                                    samples
+                                )
+                            else
+                                enemyDiscoveryStatus = string.format(
+                                    "%d candidates; %d target-name matches; %d in Workspace.Enemies; waiting for %q; samples: %s",
+                                    targetCount,
+                                    matchingNameCount,
+                                    combatFolderMatchCount,
+                                    targetName,
+                                    samples
+                                )
+                            end
+                            setFarmState("WaitingForTarget", enemyDiscoveryStatus)
                             local markers = getSpawnMarkers(targetName)
                             spawnMarkerCount = #markers
                             task.wait(RESCAN_INTERVAL)
