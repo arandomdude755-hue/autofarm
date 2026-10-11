@@ -1,6 +1,7 @@
 -- Standalone UI-only client test. No module imports, remotes, gameplay state, or executor APIs.
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 if not player then
@@ -16,6 +17,7 @@ end
 
 local GUI_NAME = "CustomHubMobileUiTest"
 local CLEANUP_NAME = "CustomHubMobileUiTestCleanup"
+local BUBBLE_HINT_SEEN_ATTRIBUTE = "CustomHubMobileUiTestBubbleHintSeen"
 
 -- The local BindableFunction keeps the previous run's cleanup callback available
 -- without globals, arbitrary require paths, or executor-specific APIs.
@@ -150,8 +152,11 @@ local state = {
 
 local persistentConnections = {}
 local pageConnections = {}
+local activeTweens = {}
+local tweenCompletedConnections = {}
 local screenGui
 local root
+local windowScale
 local scroll
 local content
 local contentLayout
@@ -163,6 +168,10 @@ local sizeConstraint
 local minimizeButton
 local bubbleContainer
 local bubbleButton
+local bubbleScale
+local bubbleRing
+local bubbleRingStroke
+local bubbleDot
 local bubbleHint
 local statusLabel
 local tabButtons = {}
@@ -181,6 +190,10 @@ local bubbleDragInput
 local bubbleDragStart
 local bubbleDragOrigin
 local bubbleDragMoved = false
+local pressedButtonScale
+local pressedButtonInput
+local transitionGeneration = 0
+local hintAnimationGeneration = 0
 
 local function create(className, properties, parent)
     local object = Instance.new(className)
@@ -222,6 +235,97 @@ local function disconnectAll(bucket)
     end
 end
 
+local function cancelTween(instance)
+    local tween = activeTweens[instance]
+    if not tween then
+        return
+    end
+    activeTweens[instance] = nil
+    local connection = tweenCompletedConnections[instance]
+    tweenCompletedConnections[instance] = nil
+    if connection and connection.Connected then
+        connection:Disconnect()
+    end
+    tween:Cancel()
+end
+
+local function playTween(instance, duration, goals, onComplete, delayTime)
+    if not instance then
+        return
+    end
+    cancelTween(instance)
+    local tween = TweenService:Create(
+        instance,
+        TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, delayTime or 0),
+        goals
+    )
+    activeTweens[instance] = tween
+    local connection
+    connection = tween.Completed:Connect(function(playbackState)
+        if activeTweens[instance] == tween then
+            activeTweens[instance] = nil
+        end
+        if tweenCompletedConnections[instance] == connection then
+            tweenCompletedConnections[instance] = nil
+        end
+        if connection.Connected then
+            connection:Disconnect()
+        end
+        if playbackState == Enum.PlaybackState.Completed and onComplete then
+            onComplete()
+        end
+    end)
+    tweenCompletedConnections[instance] = connection
+    tween:Play()
+    return tween
+end
+
+local function cancelAllTweens()
+    local instances = {}
+    for instance in pairs(activeTweens) do
+        table.insert(instances, instance)
+    end
+    for _, instance in ipairs(instances) do
+        cancelTween(instance)
+    end
+    table.clear(activeTweens)
+    table.clear(tweenCompletedConnections)
+end
+
+local function attachButtonFeedback(button, connectionBucket)
+    local scale = create("UIScale", { Scale = 1 }, button)
+    connect(connectionBucket, button.MouseEnter, function()
+        if not touchEnabled then
+            playTween(scale, 0.1, { Scale = 1.025 })
+        end
+    end)
+    connect(connectionBucket, button.MouseLeave, function()
+        if pressedButtonScale ~= scale then
+            playTween(scale, 0.1, { Scale = 1 })
+        end
+    end)
+    connect(connectionBucket, button.InputBegan, function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        if pressedButtonScale and pressedButtonScale ~= scale and pressedButtonScale.Parent then
+            playTween(pressedButtonScale, 0.1, { Scale = 1 })
+        end
+        pressedButtonScale = scale
+        pressedButtonInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+        playTween(scale, 0.07, { Scale = 0.96 })
+    end)
+    connect(connectionBucket, button.Activated, function()
+        if pressedButtonScale == scale then
+            pressedButtonScale = nil
+            pressedButtonInput = nil
+        end
+        playTween(scale, 0.12, { Scale = 1 })
+    end)
+    return scale
+end
+
 local function setStatus(message, kind)
     local text = tostring(message)
     if #text > 88 then
@@ -248,25 +352,194 @@ local function setStatus(message, kind)
     end
 end
 
-local function minimizeWindow()
-    if isCleaned or not root or not bubbleContainer then
+local function setBubbleHintVisible(visible, immediate)
+    if not bubbleHint then
+        return
+    end
+    hintAnimationGeneration += 1
+    local generation = hintAnimationGeneration
+    local target = visible and 0 or 1
+
+    if visible then
+        bubbleHint.Visible = true
+        if not immediate then
+            bubbleHint.BackgroundTransparency = 1
+            for _, descendant in ipairs(bubbleHint:GetDescendants()) do
+                if descendant:IsA("TextLabel") then
+                    descendant.TextTransparency = 1
+                elseif descendant:IsA("UIStroke") then
+                    descendant.Transparency = 1
+                end
+            end
+        end
+    end
+
+    if immediate then
+        bubbleHint.BackgroundTransparency = target
+        for _, descendant in ipairs(bubbleHint:GetDescendants()) do
+            if descendant:IsA("TextLabel") then
+                descendant.TextTransparency = target
+            elseif descendant:IsA("UIStroke") then
+                descendant.Transparency = target
+            end
+        end
+        bubbleHint.Visible = visible
+        return
+    end
+
+    playTween(bubbleHint, 0.16, { BackgroundTransparency = target }, function()
+        if generation == hintAnimationGeneration and not visible and bubbleHint then
+            bubbleHint.Visible = false
+        end
+    end)
+    for _, descendant in ipairs(bubbleHint:GetDescendants()) do
+        if descendant:IsA("TextLabel") then
+            playTween(descendant, 0.14, { TextTransparency = target })
+        elseif descendant:IsA("UIStroke") then
+            playTween(descendant, 0.14, { Transparency = target })
+        end
+    end
+end
+
+local function animateBubbleParts(visible, immediate)
+    local target = visible and 0 or 1
+    local function apply(instance, property, value, duration)
+        if immediate then
+            instance[property] = value
+        else
+            playTween(instance, duration, { [property] = value })
+        end
+    end
+    if bubbleButton then
+        apply(bubbleButton, "BackgroundTransparency", target, 0.16)
+    end
+    if bubbleRing then
+        apply(bubbleRing, "BackgroundTransparency", visible and 0.94 or 1, 0.2)
+    end
+    if bubbleRingStroke then
+        apply(bubbleRingStroke, "Transparency", visible and 0.55 or 1, 0.2)
+    end
+    if bubbleDot then
+        apply(bubbleDot, "BackgroundTransparency", target, 0.14)
+    end
+    if bubbleButton then
+        for _, descendant in ipairs(bubbleButton:GetDescendants()) do
+            if descendant:IsA("TextLabel") then
+                apply(descendant, "TextTransparency", target, 0.14)
+            elseif descendant:IsA("UIStroke") then
+                apply(descendant, "Transparency", target, 0.14)
+            elseif descendant:IsA("Frame") and (descendant.Name == "UiStatusDot" or string.sub(descendant.Name, 1, 5) == "Grip_") then
+                local frameTarget = visible and (descendant.Name == "UiStatusDot" and 0 or 0.25) or 1
+                apply(descendant, "BackgroundTransparency", frameTarget, 0.14)
+            end
+        end
+    end
+end
+
+local function minimizeWindow(fromSelfTest)
+    if isCleaned or not root or not bubbleContainer or isMinimized then
         return false
     end
-    root.Visible = false
-    bubbleContainer.Visible = true
     isMinimized = true
     setStatus("Hub minimized; tap the bubble to restore.", "info")
+
+    if fromSelfTest then
+        transitionGeneration += 1
+        cancelTween(windowScale)
+        cancelTween(bubbleScale)
+        root.Visible = false
+        windowScale.Scale = 1
+        root.BackgroundTransparency = 0
+        bubbleContainer.Visible = true
+        bubbleScale.Scale = 1
+        bubbleButton.BackgroundTransparency = 0
+        bubbleRing.BackgroundTransparency = 0.94
+        bubbleRingStroke.Transparency = 0.55
+        bubbleDot.BackgroundTransparency = 0
+        animateBubbleParts(true, true)
+        setBubbleHintVisible(false, true)
+        return true
+    end
+
+    transitionGeneration += 1
+    local generation = transitionGeneration
+    if not root.Visible then
+        windowScale.Scale = 0.93
+        root.BackgroundTransparency = 0.18
+    end
+    root.Visible = true
+    bubbleContainer.Visible = true
+
+    if player:GetAttribute(BUBBLE_HINT_SEEN_ATTRIBUTE) ~= true then
+        player:SetAttribute(BUBBLE_HINT_SEEN_ATTRIBUTE, true)
+        setBubbleHintVisible(true)
+        local hintGeneration = hintAnimationGeneration
+        task.delay(3.25, function()
+            if not isCleaned and isMinimized and hintAnimationGeneration == hintGeneration then
+                setBubbleHintVisible(false)
+            end
+        end)
+    else
+        setBubbleHintVisible(false, true)
+    end
+
+    animateBubbleParts(true)
+    playTween(bubbleScale, 0.21, { Scale = 1 })
+    playTween(windowScale, 0.17, { Scale = 0.93 }, function()
+        if generation == transitionGeneration and isMinimized and root then
+            root.Visible = false
+            windowScale.Scale = 1
+            root.BackgroundTransparency = 0
+        end
+    end)
+    playTween(root, 0.17, { BackgroundTransparency = 0.18 })
     return true
 end
 
-local function restoreWindow()
-    if isCleaned or not root or not bubbleContainer then
+local function restoreWindow(fromSelfTest)
+    if isCleaned or not root or not bubbleContainer or not isMinimized then
         return false
     end
-    bubbleContainer.Visible = false
-    root.Visible = true
     isMinimized = false
     setStatus("Hub restored; UI-only preview.", "info")
+
+    if fromSelfTest then
+        transitionGeneration += 1
+        cancelTween(windowScale)
+        cancelTween(bubbleScale)
+        root.Visible = true
+        root.BackgroundTransparency = 0
+        windowScale.Scale = 1
+        bubbleContainer.Visible = false
+        bubbleScale.Scale = 0.78
+        bubbleButton.BackgroundTransparency = 1
+        bubbleRing.BackgroundTransparency = 1
+        bubbleRingStroke.Transparency = 1
+        bubbleDot.BackgroundTransparency = 1
+        animateBubbleParts(false, true)
+        setBubbleHintVisible(false, true)
+        return true
+    end
+
+    transitionGeneration += 1
+    local generation = transitionGeneration
+    root.Visible = true
+    bubbleContainer.Visible = true
+    setBubbleHintVisible(false)
+
+    playTween(windowScale, 0.2, { Scale = 1 })
+    playTween(root, 0.2, { BackgroundTransparency = 0 })
+    playTween(bubbleScale, 0.17, { Scale = 0.78 }, function()
+        if generation == transitionGeneration and not isMinimized and bubbleContainer then
+            bubbleContainer.Visible = false
+            bubbleScale.Scale = 0.78
+            bubbleButton.BackgroundTransparency = 1
+            bubbleRing.BackgroundTransparency = 1
+            bubbleRingStroke.Transparency = 1
+            bubbleDot.BackgroundTransparency = 1
+        end
+    end)
+    animateBubbleParts(false)
     return true
 end
 
@@ -356,7 +629,20 @@ local function updateIndicators()
         end
         local marker = button:FindFirstChild("ActiveMarker")
         if marker then
-            marker.Visible = selected
+            if selected and not marker.Visible then
+                marker.Size = UDim2.fromOffset(0, 2)
+                marker.BackgroundTransparency = 0.2
+                marker.Visible = true
+                playTween(marker, 0.14, {
+                    Size = UDim2.fromOffset(12, 2),
+                    BackgroundTransparency = 0,
+                })
+            elseif not selected then
+                cancelTween(marker)
+                marker.Visible = false
+                marker.Size = UDim2.fromOffset(0, 2)
+                marker.BackgroundTransparency = 1
+            end
         end
     end
 
@@ -528,6 +814,7 @@ renderTab = function(tabName)
         }, controlsContainer)
         addCorner(row, 3)
         addStroke(row)
+        attachButtonFeedback(row, pageConnections)
 
         create("TextLabel", {
             Name = "Title",
@@ -622,12 +909,16 @@ local function cleanup(fromSelfTest)
     isCleaned = true
     disconnectAll(pageConnections)
     disconnectAll(persistentConnections)
+    transitionGeneration += 1
+    hintAnimationGeneration += 1
+    cancelAllTweens()
 
     if screenGui then
         screenGui:Destroy()
         screenGui = nil
     end
     root = nil
+    windowScale = nil
     scroll = nil
     content = nil
     contentLayout = nil
@@ -639,6 +930,10 @@ local function cleanup(fromSelfTest)
     minimizeButton = nil
     bubbleContainer = nil
     bubbleButton = nil
+    bubbleScale = nil
+    bubbleRing = nil
+    bubbleRingStroke = nil
+    bubbleDot = nil
     bubbleHint = nil
     statusLabel = nil
     tabButtons = {}
@@ -653,6 +948,8 @@ local function cleanup(fromSelfTest)
     bubbleDragStart = nil
     bubbleDragOrigin = nil
     bubbleDragMoved = false
+    pressedButtonScale = nil
+    pressedButtonInput = nil
 
     local registry = closeRegistry
     closeRegistry = nil
@@ -686,6 +983,7 @@ local function mount()
     }, screenGui)
     addCorner(root, 4)
     addStroke(root)
+    windowScale = create("UIScale", { Scale = 1 }, root)
     sizeConstraint = create("UISizeConstraint", {
         MinSize = Vector2.new(280, 280),
         MaxSize = Vector2.new(760, 740),
@@ -754,6 +1052,7 @@ local function mount()
     }, titlebar)
     addCorner(minimizeButton, 3)
     addStroke(minimizeButton)
+    attachButtonFeedback(minimizeButton, persistentConnections)
     connect(persistentConnections, minimizeButton.Activated, minimizeWindow)
 
     local closeButton = create("TextButton", {
@@ -770,6 +1069,7 @@ local function mount()
     }, titlebar)
     addCorner(closeButton, 3)
     addStroke(closeButton)
+    attachButtonFeedback(closeButton, persistentConnections)
     connect(persistentConnections, closeButton.Activated, function()
         cleanup()
     end)
@@ -786,19 +1086,19 @@ local function mount()
         Visible = false,
         ZIndex = 20,
     }, screenGui)
-    local bubbleRing = create("Frame", {
+    bubbleRing = create("Frame", {
         Name = "Ring",
         Size = UDim2.fromScale(1, 1),
         BackgroundColor3 = Theme.Accent,
-        BackgroundTransparency = 0.94,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ZIndex = 20,
     }, bubbleContainer)
     addCorner(bubbleRing, 32)
-    create("UIStroke", {
+    bubbleRingStroke = create("UIStroke", {
         Color = Theme.Accent,
         Thickness = 1,
-        Transparency = 0.55,
+        Transparency = 1,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, bubbleRing)
 
@@ -808,22 +1108,27 @@ local function mount()
         Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(56, 56),
         BackgroundColor3 = Theme.Header,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         AutoButtonColor = false,
         Text = "",
         ZIndex = 21,
     }, bubbleContainer)
     addCorner(bubbleButton, 28)
+    bubbleScale = create("UIScale", { Scale = 0.78 }, bubbleButton)
     create("UIStroke", {
         Color = Theme.Border,
         Thickness = 2,
+        Transparency = 1,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, bubbleButton)
+    attachButtonFeedback(bubbleButton, persistentConnections)
     create("TextLabel", {
         Name = "Glyph",
         Position = UDim2.fromOffset(18, 5),
         Size = UDim2.fromOffset(20, 22),
         BackgroundTransparency = 1,
+        TextTransparency = 1,
         Font = Theme.StrongFont,
         Text = "⌂",
         TextColor3 = Theme.Accent,
@@ -835,18 +1140,20 @@ local function mount()
         Position = UDim2.fromOffset(0, 29),
         Size = UDim2.new(1, 0, 0, 12),
         BackgroundTransparency = 1,
+        TextTransparency = 1,
         Font = Theme.MonoFont,
         Text = "APEX",
         TextColor3 = Theme.Text,
         TextSize = 8,
         ZIndex = 22,
     }, bubbleButton)
-    local bubbleDot = create("Frame", {
+    bubbleDot = create("Frame", {
         Name = "UiStatusDot",
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, -8, 0, 8),
         Size = UDim2.fromOffset(7, 7),
         BackgroundColor3 = Theme.Accent,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ZIndex = 22,
     }, bubbleButton)
@@ -857,7 +1164,7 @@ local function mount()
             Position = UDim2.new(0.5, (index - 2) * 6 - width / 2, 1, -7),
             Size = UDim2.fromOffset(width, 1),
             BackgroundColor3 = Theme.MutedText,
-            BackgroundTransparency = 0.25,
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
             ZIndex = 22,
         }, bubbleButton)
@@ -867,16 +1174,23 @@ local function mount()
         Position = UDim2.new(0, -154, 0.5, -19),
         Size = UDim2.fromOffset(140, 38),
         BackgroundColor3 = Theme.Header,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
+        Visible = false,
         ZIndex = 20,
     }, bubbleContainer)
     addCorner(bubbleHint, 3)
     addStroke(bubbleHint)
+    local hintStroke = bubbleHint:FindFirstChildOfClass("UIStroke")
+    if hintStroke then
+        hintStroke.Transparency = 1
+    end
     create("TextLabel", {
         Name = "Title",
         Position = UDim2.fromOffset(8, 4),
         Size = UDim2.new(1, -16, 0, 13),
         BackgroundTransparency = 1,
+        TextTransparency = 1,
         Font = Theme.MonoFont,
         Text = "APEX  /  UI ONLY",
         TextColor3 = Theme.Accent,
@@ -889,6 +1203,7 @@ local function mount()
         Position = UDim2.fromOffset(8, 19),
         Size = UDim2.new(1, -16, 0, 13),
         BackgroundTransparency = 1,
+        TextTransparency = 1,
         Font = Theme.Font,
         Text = "Tap to restore • Drag to move",
         TextColor3 = Theme.MutedText,
@@ -962,6 +1277,16 @@ local function mount()
         root.Position = UDim2.fromOffset(x + size.X / 2, y + size.Y / 2)
     end)
     connect(persistentConnections, UserInputService.InputEnded, function(input)
+        if pressedButtonScale
+            and (input.UserInputType == Enum.UserInputType.MouseButton1 or input == pressedButtonInput) then
+            local scale = pressedButtonScale
+            pressedButtonScale = nil
+            pressedButtonInput = nil
+            if scale.Parent then
+                playTween(scale, 0.12, { Scale = 1 })
+            end
+        end
+
         if bubbleDragging
             and (input.UserInputType == Enum.UserInputType.MouseButton1 or input == bubbleDragInput) then
             bubbleDragging = false
@@ -1001,12 +1326,14 @@ local function mount()
         }, tabBar)
         addCorner(button, 3)
         addStroke(button)
+        attachButtonFeedback(button, persistentConnections)
         create("Frame", {
             Name = "ActiveMarker",
             AnchorPoint = Vector2.new(0.5, 1),
             Position = UDim2.new(0.5, 0, 1, -2),
-            Size = UDim2.fromOffset(12, 2),
+            Size = UDim2.fromOffset(0, 2),
             BackgroundColor3 = Theme.Accent,
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
             Visible = false,
         }, button)
@@ -1186,12 +1513,24 @@ task.spawn(function()
             and screenGui:FindFirstChild("Window"):FindFirstChild("Status") ~= nil
     end)
 
+    test("window, buttons, and bubble have tweenable animation scales", function()
+        return windowScale ~= nil
+            and bubbleScale ~= nil
+            and tabButtons.Main:FindFirstChildOfClass("UIScale") ~= nil
+            and bubbleButton:FindFirstChildOfClass("UIScale") ~= nil
+            and not bubbleHint.Visible
+    end)
+
     test("tab selection and active indicators", function()
         for _, tabName in ipairs(Tabs) do
             if not selectTab(tabName) or state.selectedTab ~= tabName then
                 return false
             end
             if tabButtons[tabName].BackgroundColor3 ~= Theme.Selected then
+                return false
+            end
+            local marker = tabButtons[tabName]:FindFirstChild("ActiveMarker")
+            if not marker or not marker.Visible then
                 return false
             end
         end
@@ -1236,14 +1575,19 @@ task.spawn(function()
     end)
 
     test("minimize and restore use the floating bubble without cleanup", function()
-        local minimized = minimizeWindow()
+        if isMinimized or isCleaned then
+            return false
+        end
+        local hintSeenBefore = player:GetAttribute(BUBBLE_HINT_SEEN_ATTRIBUTE)
+        local minimized = minimizeWindow(true)
         local hidden = root ~= nil and not root.Visible
             and bubbleContainer ~= nil and bubbleContainer.Visible
             and isMinimized and not isCleaned
-        local restored = restoreWindow()
+        local restored = restoreWindow(true)
         return minimized and hidden and restored
             and root.Visible and not bubbleContainer.Visible
             and not isMinimized and not isCleaned
+            and player:GetAttribute(BUBBLE_HINT_SEEN_ATTRIBUTE) == hintSeenBefore
     end)
 
     test("placeholder actions only update status", function()
@@ -1347,6 +1691,9 @@ task.spawn(function()
             if connection.Connected then
                 return false
             end
+        end
+        if next(activeTweens) ~= nil or next(tweenCompletedConnections) ~= nil then
+            return false
         end
         return true
     end)
