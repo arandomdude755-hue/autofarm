@@ -47,12 +47,17 @@ local enemyDiscoveryStatus = "Not scanned"
 local movementStatus = "Idle"
 local activeQuestReadStatus = "Not checked"
 local questHudStatus = "Not checked"
+local questRequestStatus = "No request sent this session"
+local questConfirmationStatus = "unknown: no quest-state evidence checked"
 local questStatus = "Manual NPC mode"
+local questSelectionStatus = "No quest selected"
 local questSelectorTestStatus = "not run"
 local combatTestStatus = "not run"
+local questStateTestStatus = "not run"
 local currentFightingStyleTool = nil
 local currentFightingStyleName = nil
 local fightingStyleStatus = "Not checked"
+local selfTestStyleStatus = "Not checked"
 local attackActionStatus = "No M1 request attempted"
 local questReadyKey = nil
 local questReadyAt = 0
@@ -324,25 +329,100 @@ local function runCombatMockTests()
             end,
         }
     end
-    local enemyNameTestsPassed =
-        enemyNameMatchesTarget(mockNpc("Bandit", nil), "Bandit")
-        and enemyNameMatchesTarget(mockNpc("Bandit [Lv. 5]", nil), "Bandit")
-        and enemyNameMatchesTarget(mockNpc("Bandit", "Bandit [Lv. 5]"), "Bandit")
-        and not enemyNameMatchesTarget(mockNpc("Bandit Chief", nil), "Bandit")
+    local exactNamePassed = enemyNameMatchesTarget(mockNpc("Bandit", nil), "Bandit")
+    local levelSuffixPassed = enemyNameMatchesTarget(mockNpc("Bandit [Lv. 5]", nil), "Bandit")
+    local displayNamePassed = enemyNameMatchesTarget(
+        mockNpc("Bandit Variant", "Bandit [Lv. 5]"),
+        "Bandit"
+    )
+    local unrelatedNameRejected = not enemyNameMatchesTarget(mockNpc("Bandit Chief", nil), "Bandit")
+    local enemyNameTestsPassed = exactNamePassed and levelSuffixPassed
+        and displayNamePassed and unrelatedNameRejected
     local targetA, targetB = {}, {}
-    local attackTestsPassed = attackContextIsCurrent(true, 3, 3, targetA, targetA, true)
-        and not attackContextIsCurrent(false, 3, 3, targetA, targetA, true)
-        and not attackContextIsCurrent(true, 2, 3, targetA, targetA, true)
-        and not attackContextIsCurrent(true, 3, 3, targetA, targetB, true)
-        and not attackContextIsCurrent(true, 3, 3, targetA, targetA, false)
-    local styleTestsPassed = chosenEquipped == equipped and equippedState == "equipped"
-        and chosenOwned == owned and ownedState == "needs-equip"
-        and ambiguous == nil and string.find(ambiguousState, "ambiguous", 1, true) ~= nil
-        and swordOnly == nil and swordState ~= nil
-    return styleTestsPassed and attackTestsPassed and enemyNameTestsPassed,
-        styleTestsPassed and attackTestsPassed and enemyNameTestsPassed
-            and "style choice, enemy-name normalization, and stop/session/target/death cancellation passed"
-            or "combat mock assertion failed"
+    local currentContextAccepted = attackContextIsCurrent(true, 3, 3, targetA, targetA, true)
+    local stoppedContextRejected = not attackContextIsCurrent(false, 3, 3, targetA, targetA, true)
+    local staleSessionRejected = not attackContextIsCurrent(true, 2, 3, targetA, targetA, true)
+    local changedTargetRejected = not attackContextIsCurrent(true, 3, 3, targetA, targetB, true)
+    local deadTargetRejected = not attackContextIsCurrent(true, 3, 3, targetA, targetA, false)
+    local attackTestsPassed = currentContextAccepted and stoppedContextRejected
+        and staleSessionRejected and changedTargetRejected and deadTargetRejected
+    local equippedStyleSelected = chosenEquipped == equipped and equippedState == "equipped"
+    local ownedStyleRequiresEquip = chosenOwned == owned and ownedState == "needs-equip"
+    local ambiguousStylesRejected = ambiguous == nil
+        and string.find(ambiguousState, "ambiguous", 1, true) ~= nil
+    local nonMeleeToolRejected = swordOnly == nil and swordState ~= nil
+    local styleTestsPassed = equippedStyleSelected and ownedStyleRequiresEquip
+        and ambiguousStylesRejected and nonMeleeToolRejected
+    local passed = styleTestsPassed and attackTestsPassed and enemyNameTestsPassed
+    local function resultLabel(value) return value and "PASS" or "FAIL" end
+    return passed, string.format(
+        "style equip/owned/ambiguous/sword=%s/%s/%s/%s; context active/stopped/session/target/dead=%s/%s/%s/%s/%s; names exact/suffix/display/negative=%s/%s/%s/%s",
+        resultLabel(equippedStyleSelected),
+        resultLabel(ownedStyleRequiresEquip),
+        resultLabel(ambiguousStylesRejected),
+        resultLabel(nonMeleeToolRejected),
+        resultLabel(currentContextAccepted),
+        resultLabel(stoppedContextRejected),
+        resultLabel(staleSessionRejected),
+        resultLabel(changedTargetRejected),
+        resultLabel(deadTargetRejected),
+        resultLabel(exactNamePassed),
+        resultLabel(levelSuffixPassed),
+        resultLabel(displayNamePassed),
+        resultLabel(unrelatedNameRejected)
+    )
+end
+
+-- Classifies only observed quest state. A mismatch means the selected target
+-- is not confirmed active; it is not proof that the server explicitly rejected
+-- the request. Remote return values are intentionally not accepted as evidence.
+local function classifyQuestConfirmation(targetName, activeTarget, hudVisible, hudTitleReadable, hudMatchesTarget)
+    if type(targetName) ~= "string" or targetName == "" then
+        return "unknown", "selected target is unavailable"
+    end
+    if type(activeTarget) == "string" and activeTarget ~= "" then
+        if activeTarget == targetName then
+            return "accepted", "GuideModule active task matches selected target"
+        end
+        return "rejected", "GuideModule active task targets a different enemy"
+    end
+    if hudVisible then
+        if not hudTitleReadable then
+            return "unknown", "quest HUD is visible but title text is unreadable"
+        end
+        if hudMatchesTarget then
+            return "accepted", "visible quest HUD title matches selected target"
+        end
+        return "rejected", "visible quest HUD title does not match selected target"
+    end
+    return "unknown", "no active GuideModule task or visible quest HUD confirmation"
+end
+
+local function runQuestStateMockTests()
+    local acceptedGuide = classifyQuestConfirmation("Bandit", "Bandit", false, false, false)
+    local acceptedHud = classifyQuestConfirmation("Bandit", nil, true, true, true)
+    local rejectedGuide = classifyQuestConfirmation("Bandit", "Monkey", false, false, false)
+    local rejectedHud = classifyQuestConfirmation("Bandit", nil, true, true, false)
+    local unknownHidden = classifyQuestConfirmation("Bandit", nil, false, false, false)
+    local unknownUnreadable = classifyQuestConfirmation("Bandit", nil, true, false, false)
+    local unknownUnavailable = classifyQuestConfirmation("Bandit", nil, nil, false, false)
+    local passed = acceptedGuide == "accepted"
+        and acceptedHud == "accepted"
+        and rejectedGuide == "rejected"
+        and rejectedHud == "rejected"
+        and unknownHidden == "unknown"
+        and unknownUnreadable == "unknown"
+        and unknownUnavailable == "unknown"
+    return passed, string.format(
+        "Guide/HUD accepted=%s/%s; Guide/HUD mismatch=%s/%s; hidden/unreadable/unavailable=%s/%s/%s",
+        acceptedGuide,
+        acceptedHud,
+        rejectedGuide,
+        rejectedHud,
+        unknownHidden,
+        unknownUnreadable,
+        unknownUnavailable
+    )
 end
 
 local function normalizePosition(value)
@@ -424,10 +504,10 @@ local function getQuestHudStatus(targetName)
     local mainGui = playerGui and playerGui:FindFirstChild("Main")
     local questFrame = mainGui and mainGui:FindFirstChild("Quest")
     if not questFrame or not questFrame:IsA("GuiObject") then
-        return nil, false, "Quest HUD unavailable"
+        return nil, false, false, "Quest HUD unavailable"
     end
     if not questFrame.Visible then
-        return false, false, "Quest HUD not visible"
+        return false, false, false, "Quest HUD not visible"
     end
     local container = questFrame:FindFirstChild("Container")
     local questTitle = container and container:FindFirstChild("QuestTitle")
@@ -438,14 +518,14 @@ local function getQuestHudStatus(targetName)
         if ok then titleText = value end
     end
     if type(titleText) ~= "string" or titleText == "" then
-        return true, false, "Quest HUD visible but title text is unavailable"
+        return true, false, false, "Quest HUD visible but title text is unavailable"
     end
     local targetMatches = type(targetName) == "string"
         and string.find(titleText, targetName, 1, true) ~= nil
     if targetMatches then
-        return true, true, "Quest HUD title confirms target: " .. titleText
+        return true, true, true, "Quest HUD title confirms target: " .. titleText
     end
-    return true, false, "Quest HUD title does not match selected target: " .. titleText
+    return true, false, true, "Quest HUD title does not match selected target: " .. titleText
 end
 
 -- Input: validated getQuestContext() result. Output: highest eligible non-excluded
@@ -543,7 +623,7 @@ end
 
 -- BNN-compatible integration point; this repo does not contain the game's quest server.
 -- Inputs: selected quest record {QuestName: string, Id: number}.
--- Output: request-sent boolean and diagnostic text; this does not confirm server acceptance.
+-- Output: InvokeServer-call-completed boolean and response summary; this does not confirm acceptance.
 -- Assumption from the BNN reference: ReplicatedStorage.Remotes.CommF_ accepts
 -- InvokeServer("StartQuest", questName, questId). Replace this adapter if the replica differs.
 local function requestQuestStart(selection)
@@ -552,13 +632,23 @@ local function requestQuestStart(selection)
     if not remote or not remote:IsA("RemoteFunction") then
         return false, "BNN-compatible Remotes.CommF_ RemoteFunction is unavailable"
     end
+    local response
     local ok, err = pcall(function()
-        remote:InvokeServer("StartQuest", tostring(selection.QuestName), selection.Id)
+        response = remote:InvokeServer("StartQuest", tostring(selection.QuestName), selection.Id)
     end)
     if not ok then
         return false, "StartQuest request failed: " .. tostring(err)
     end
-    return true, "StartQuest request sent; awaiting GuideModule quest state"
+    local responseSummary
+    if type(response) == "string" then
+        responseSummary = response:gsub("%c", " "):sub(1, 100)
+    elseif type(response) == "boolean" or type(response) == "number" then
+        responseSummary = tostring(response)
+    else
+        responseSummary = typeof(response)
+    end
+    return true, "StartQuest InvokeServer returned " .. responseSummary
+        .. "; acceptance still requires active quest evidence"
 end
 
 local function setReport()
@@ -572,9 +662,13 @@ local function setReport()
         "Quest: " .. tostring(currentQuestName or "(none)"),
         "Quest giver: " .. tostring(currentQuestGiver or "(none)"),
         "Quest target: " .. tostring(currentQuestTarget or "(none)"),
-        "Quest integration: " .. tostring(questStatus),
+        "Quest selection: " .. tostring(questSelectionStatus),
+        "Quest runtime state: " .. tostring(questStatus),
+        "Quest start request: " .. tostring(questRequestStatus),
+        "Quest confirmation: " .. tostring(questConfirmationStatus),
         "Active quest read: " .. tostring(activeQuestReadStatus),
         "Quest HUD check: " .. tostring(questHudStatus),
+        "Quest-state mock: " .. tostring(questStateTestStatus),
         "Quest selector mock: " .. tostring(questSelectorTestStatus),
         "Combat mock: " .. tostring(combatTestStatus),
         "Enemy discovery: " .. tostring(enemyDiscoveryStatus),
@@ -582,6 +676,7 @@ local function setReport()
         "Target alive: " .. tostring(currentTarget ~= nil and isAliveNpc(currentTarget)),
         "Fighting style: " .. tostring(currentFightingStyleName or "(unidentified)"),
         "Fighting style status: " .. tostring(fightingStyleStatus),
+        "Self-Test style candidate: " .. tostring(selfTestStyleStatus),
         "Engage threshold: " .. tostring(ARRIVAL_DISTANCE) .. " studs (harness setting, not style-verified)",
         "BNN combat dependencies: " .. tostring(bnnCombatDependencyStatus),
         "NPCs detected: " .. tostring(targetCount),
@@ -747,7 +842,9 @@ local function refreshNpcList()
         currentQuestName = nil
         currentQuestGiver = nil
         currentQuestTarget = nil
-        questStatus = "Level-based quest mode selected"
+        questSelectionStatus = "Level-based quest mode selected"
+        questStatus = "Awaiting quest selection and active-state confirmation"
+        questConfirmationStatus = "unknown: no quest-state evidence checked"
         questReadyKey = nil
         questReadyAt = 0
         selectedLabel.Text = "Mode: Auto quest (level)"
@@ -781,6 +878,7 @@ local function refreshNpcList()
             currentQuestName = nil
             currentQuestGiver = nil
             currentQuestTarget = nil
+            questSelectionStatus = "Manual NPC mode"
             questStatus = "Manual NPC mode"
             questReadyKey = nil
             questReadyAt = 0
@@ -1224,6 +1322,7 @@ local function processQuestMode(session)
         currentQuestName = nil
         currentQuestGiver = nil
         currentQuestTarget = nil
+        questSelectionStatus = "Quest data unavailable"
         activeQuestReadStatus = "Quest context unavailable"
         questHudStatus = "Not checked: quest context unavailable"
         questStatus = contextError
@@ -1235,11 +1334,20 @@ local function processQuestMode(session)
 
     local activeQuest, activeTarget = getActiveQuestTarget(context)
     if activeQuest and activeTarget then
+        local confirmation, confirmationReason = classifyQuestConfirmation(
+            activeTarget,
+            activeTarget,
+            false,
+            false,
+            false
+        )
+        questConfirmationStatus = confirmation .. ": " .. confirmationReason
         activeQuestReadStatus = "Active GuideModule.Data.QuestData.Task target: " .. activeTarget
         questHudStatus = "GuideModule task read; HUD fallback not needed"
         currentQuestName = tostring(activeQuest.QuestName or activeQuest.Name or "Active quest")
         currentQuestGiver = tostring(activeQuest.NPCName or "(unknown)")
         currentQuestTarget = activeTarget
+        questSelectionStatus = "Active task target from GuideModule: " .. activeTarget
         questStatus = "Active task read from GuideModule.Data.QuestData"
         questReadyKey = nil
         questReadyAt = 0
@@ -1264,7 +1372,8 @@ local function processQuestMode(session)
         currentQuestName = nil
         currentQuestGiver = nil
         currentQuestTarget = nil
-        questStatus = "No eligible BNN-shaped quest entry found"
+        questSelectionStatus = "No eligible BNN-shaped quest entry found"
+        questStatus = "No eligible quest candidate"
         setFarmState("NoEligibleQuest", "No eligible quest found for level " .. tostring(context.level))
         task.wait(RESCAN_INTERVAL)
         return nil
@@ -1273,11 +1382,25 @@ local function processQuestMode(session)
     currentQuestName = selection.QuestName
     currentQuestGiver = selection.GiverName
     currentQuestTarget = selection.Mob
-    questStatus = string.format("Level %d selected quest %s (%s)", context.level, selection.QuestName, selection.Mob)
+    questSelectionStatus = string.format(
+        "Level %d candidate: %s / %s",
+        context.level,
+        selection.QuestName,
+        selection.Mob
+    )
+    questStatus = "Selected level candidate; awaiting active quest confirmation"
 
-    local hudActive, hudMatchesTarget, hudReason = getQuestHudStatus(selection.Mob)
+    local hudActive, hudMatchesTarget, hudTitleReadable, hudReason = getQuestHudStatus(selection.Mob)
     questHudStatus = hudReason
-    if hudActive and hudMatchesTarget then
+    local confirmation, confirmationReason = classifyQuestConfirmation(
+        selection.Mob,
+        nil,
+        hudActive,
+        hudTitleReadable,
+        hudMatchesTarget
+    )
+    questConfirmationStatus = confirmation .. ": " .. confirmationReason
+    if confirmation == "accepted" then
         activeQuestReadStatus = "GuideModule task unavailable; matching visible quest HUD used"
         questStatus = "Active quest target confirmed from BNN quest HUD title"
         questReadyKey = nil
@@ -1285,7 +1408,7 @@ local function processQuestMode(session)
         setFarmState("QuestActiveHudFallback", "Quest HUD confirms " .. selection.Mob)
         return selection.Mob
     elseif hudActive then
-        setFarmState("QuestHudMismatch", hudReason)
+        setFarmState("QuestHudNoConfirmation", confirmation .. ": " .. hudReason)
         task.wait(0.5)
         return nil
     end
@@ -1337,17 +1460,18 @@ local function processQuestMode(session)
 
     questReadyAt = os.clock() + QUEST_ACCEPT_DELAY
     setFarmState("RequestingQuest", "Requesting " .. selection.QuestName)
-    local sent, detail = requestQuestStart(selection)
+    local invoked, detail = requestQuestStart(selection)
     if not running or session ~= farmSession then return nil end
-    questReadyAt = os.clock() + (sent and QUEST_REQUEST_RETRY_INTERVAL or QUEST_ACCEPT_DELAY)
+    questReadyAt = os.clock() + (invoked and QUEST_REQUEST_RETRY_INTERVAL or QUEST_ACCEPT_DELAY)
     questStatus = detail
-    if not sent then
+    questRequestStatus = detail
+    if not invoked then
         recordError(detail)
         setFarmState("QuestRequestFailed", "Quest request unavailable; see report")
     else
         setFarmState(
             "AwaitingQuest",
-            "Request sent; " .. activeQuestReadStatus
+            "Awaiting active quest evidence; " .. activeQuestReadStatus
                 .. " (retry in " .. tostring(QUEST_REQUEST_RETRY_INTERVAL) .. "s)"
         )
     end
@@ -1367,6 +1491,8 @@ startButton.Activated:Connect(function()
     end
     running = true
     farmSession += 1
+    questRequestStatus = "No request sent this session"
+    questConfirmationStatus = "unknown: waiting for active quest evidence"
     local session = farmSession
     startButton.Text = "RUNNING..."
     setFarmState(
@@ -1586,13 +1712,22 @@ selfTestButton.Activated:Connect(function()
         collectFightingStyleTools(character),
         collectFightingStyleTools(backpack)
     )
-    setCurrentFightingStyle(styleCandidate, styleSelectionStatus)
+    selfTestStyleStatus = styleCandidate
+        and (styleCandidate.Name .. " (" .. styleSelectionStatus .. ")")
+        or styleSelectionStatus
     local summary = string.format("Test: %d NPCs • %d markers", targetCount, spawnMarkerCount)
     local selectorTestPassed, selectorTestDetail = runQuestSelectorMockTest()
     questSelectorTestStatus = selectorTestPassed and "PASS: " .. selectorTestDetail or "FAIL: " .. selectorTestDetail
     summary = summary .. (selectorTestPassed and " • quest mock PASS" or " • quest mock FAIL")
     if not selectorTestPassed then
         recordError(selectorTestDetail)
+    end
+    local questStatePassed, questStateDetail = runQuestStateMockTests()
+    questStateTestStatus = questStatePassed and "PASS: " .. questStateDetail
+        or "FAIL: " .. questStateDetail
+    summary = summary .. (questStatePassed and " • quest-state mock PASS" or " • quest-state mock FAIL")
+    if not questStatePassed then
+        recordError("quest-state mock failed: " .. questStateDetail)
     end
     local combatTestPassed, combatTestDetail = runCombatMockTests()
     combatTestStatus = combatTestPassed and "PASS: " .. combatTestDetail or "FAIL: " .. combatTestDetail
@@ -1605,10 +1740,7 @@ selfTestButton.Activated:Connect(function()
         if context then
             local selection = selectQuestForLevel(context)
             if selection then
-                currentQuestName = selection.QuestName
-                currentQuestGiver = selection.GiverName
-                currentQuestTarget = selection.Mob
-                questStatus = string.format(
+                questSelectionStatus = string.format(
                     "Level %d candidate: %s / %s",
                     context.level,
                     tostring(selection.QuestName),
@@ -1616,11 +1748,11 @@ selfTestButton.Activated:Connect(function()
                 )
                 summary = summary .. " • quest candidate: " .. tostring(selection.Mob)
             else
-                questStatus = "No eligible BNN-shaped quest entry found"
+                questSelectionStatus = "No eligible BNN-shaped quest entry found"
                 summary = summary .. " • no eligible quest"
             end
         else
-            questStatus = contextError
+            questSelectionStatus = tostring(contextError)
             summary = summary .. " • quest data unavailable"
         end
     end
