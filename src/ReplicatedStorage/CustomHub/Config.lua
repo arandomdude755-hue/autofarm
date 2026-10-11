@@ -1,0 +1,146 @@
+local Config = {
+    Name = "Custom Hub",
+    Version = "UI shell",
+    Defaults = {
+        SelectedTab = "Main",
+        Compact = true,
+        StatusMaxCharacters = 88,
+    },
+    FarmSettings = {
+        -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
+        WeaponCategory = "Melee",
+    },
+    Layout = {
+        MobileWidth = 0.92,
+        MobileHeight = 0.78,
+        DesktopWidth = 0.72,
+        DesktopHeight = 0.78,
+        ExpandedWidth = 0.96,
+        ExpandedHeight = 0.88,
+        MinSize = Vector2.new(270, 330),
+        MaxSize = Vector2.new(500, 680),
+        HeaderTop = 7,
+        HeaderHeight = 30,
+        CloseWidth = 54,
+        CloseHeight = 28,
+        TitleRightInset = 84,
+        TabsTop = 42,
+        TabHeight = 34,
+        StatusTop = 82,
+        StatusHeight = 44,
+        StatusInset = 8,
+        StatusTextTop = 4,
+        ContentTop = 138,
+        PageDescriptionHeight = 46,
+        ScrollContentInset = 8,
+        ScrollBarThickness = 4,
+        RowHeight = 72,
+        RowInset = 10,
+        RowTitleTop = 7,
+        RowTitleHeight = 22,
+        RowDetailTop = 31,
+        RowDetailHeight = 32,
+        ToggleValueTop = 8,
+        ToggleValueWidth = 90,
+        ToggleValueHeight = 18,
+        ToggleGap = 8,
+        Spacing = 8,
+        Padding = 10,
+        BorderThickness = 1,
+    },
+    Theme = {
+        Background = Color3.fromRGB(24, 26, 30),
+        Panel = Color3.fromRGB(32, 35, 40),
+        Control = Color3.fromRGB(40, 44, 50),
+        Selected = Color3.fromRGB(54, 81, 103),
+        Border = Color3.fromRGB(62, 67, 75),
+        Text = Color3.fromRGB(237, 239, 243),
+        MutedText = Color3.fromRGB(165, 172, 181),
+        Accent = Color3.fromRGB(111, 166, 204),
+        Success = Color3.fromRGB(128, 190, 151),
+        Warning = Color3.fromRGB(222, 184, 105),
+        Error = Color3.fromRGB(224, 116, 108),
+        Font = Enum.Font.Gotham,
+        StrongFont = Enum.Font.GothamSemibold,
+        TextSizes = {
+            Title = 17,
+            Control = 14,
+            Body = 13,
+            Detail = 12,
+            Tab = 11,
+            Status = 11,
+        },
+    },
+    Tabs = {
+        "Main",
+        "Farm",
+        "Player",
+        "Teleport",
+        "Settings",
+    },
+    Pages = {
+        Main = {
+            Description = "Hub status and safe UI checks.",
+            Controls = {
+                {
+                    Kind = "button",
+                    Label = "Run UI self-check",
+                    Detail = "Checks the shell action path only; no gameplay action.",
+                    Action = "main.selfCheck",
+                },
+            },
+        },
+        Farm = {
+            Description = "Level-based quest farming with target reacquisition.",
+            Controls = {
+                {
+                    Kind = "featureToggle",
+                    Label = "Main Farm",
+                    Detail = "Selects a level quest, confirms it, then finds and engages its target.",
+                    Action = "farm.main",
+                },
+            },
+        },
+        Player = {
+            Description = "Player utilities are not connected yet.",
+            Controls = {
+                {
+                    Kind = "button",
+                    Label = "Character status",
+                    Detail = "Placeholder; does not read or change character state.",
+                    Action = "player.status",
+                },
+            },
+        },
+        Teleport = {
+            Description = "Travel actions remain unavailable in the UI shell.",
+            Controls = {
+                {
+                    Kind = "button",
+                    Label = "Travel status",
+                    Detail = "Placeholder; no movement or remote is invoked.",
+                    Action = "teleport.status",
+                },
+            },
+        },
+        Settings = {
+            Description = "Local presentation settings for this UI shell.",
+            Controls = {
+                {
+                    Kind = "settingToggle",
+                    Label = "Compact layout",
+                    Detail = "Changes only the shell's on-screen size.",
+                    Action = "settings.compact",
+                },
+                {
+                    Kind = "button",
+                    Label = "Reset UI settings",
+                    Detail = "Restores this shell's local presentation defaults.",
+                    Action = "settings.reset",
+                },
+            },
+        },
+    },
+}
+
+return Config

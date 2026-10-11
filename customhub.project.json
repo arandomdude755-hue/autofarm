@@ -1,0 +1,21 @@
+{
+  "name": "CustomHubMainFarm",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "CustomHub": {
+        "$path": "src/ReplicatedStorage/CustomHub"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "CustomHub.client.lua": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/CustomHub.client.lua"
+        }
+      }
+    }
+  }
+}
