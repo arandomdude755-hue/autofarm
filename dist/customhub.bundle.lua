@@ -339,6 +339,21 @@ function Compatibility:GetPlayerGui()
     return playerGui
 end
 
+function Compatibility:GetUnparentedInstances()
+    local getterOk, getter = pcall(function()
+        return getnilinstances
+    end)
+    if not getterOk or type(getter) ~= "function" then
+        return nil
+    end
+
+    local callOk, instances = pcall(getter)
+    if not callOk or type(instances) ~= "table" then
+        return nil
+    end
+    return instances
+end
+
 function Compatibility:IsTouchEnabled()
     return UserInputService.TouchEnabled
 end
@@ -2308,8 +2323,15 @@ __bundleFactories["CustomHub.Features.Farm.EnemyService"] = function()
 local EnemyService = {}
 EnemyService.__index = EnemyService
 
+local HIDDEN_SPAWN_REFRESH_INTERVAL = 1
+local HIDDEN_SPAWN_RETRY_INTERVAL = 5
+
 local function normalizeEnemyName(name)
     return (name:gsub(" %p?Lv%.? %d+%p?", ""))
+end
+
+local function matchesSpawnName(spawnName, targetName, normalizedTarget)
+    return spawnName == targetName or normalizeEnemyName(spawnName) == normalizedTarget
 end
 
 function EnemyService.new(compatibility)
@@ -2318,7 +2340,87 @@ function EnemyService.new(compatibility)
         Workspace = compatibility.Workspace,
         CollisionOriginals = {},
         IgnoredSpawns = {},
+        HiddenSpawnCache = nil,
     }, EnemyService)
+end
+
+function EnemyService:_GetEnemySpawnsFolder()
+    local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
+    if not worldOrigin or worldOrigin.Parent ~= self.Workspace then
+        return nil
+    end
+
+    local enemySpawns = worldOrigin:FindFirstChild("EnemySpawns")
+    if not enemySpawns
+        or not enemySpawns:IsA("Folder")
+        or enemySpawns.Parent ~= worldOrigin
+    then
+        return nil
+    end
+    return enemySpawns
+end
+
+function EnemyService:_RefreshHiddenSpawnCache()
+    local now = os.clock()
+    local current = self.HiddenSpawnCache
+    if current and now < current.ExpiresAt then
+        return current
+    end
+
+    local cache = {
+        Parts = {},
+        Available = false,
+        ExpiresAt = now + HIDDEN_SPAWN_RETRY_INTERVAL,
+    }
+    local getter = self.Compatibility and self.Compatibility.GetUnparentedInstances
+    if type(getter) == "function" then
+        local callOk, instances = pcall(getter, self.Compatibility)
+        if callOk and type(instances) == "table" then
+            cache.Available = true
+            cache.ExpiresAt = now + HIDDEN_SPAWN_REFRESH_INTERVAL
+            local scanOk = pcall(function()
+                for _, instance in pairs(instances) do
+                    local readOk, isBasePart, name, parent = pcall(function()
+                        return instance:IsA("BasePart"), instance.Name, instance.Parent
+                    end)
+                    if readOk and isBasePart and parent == nil and type(name) == "string" then
+                        cache.Parts[instance] = name
+                    end
+                end
+            end)
+            if not scanOk then
+                cache.Parts = {}
+                cache.Available = false
+                cache.ExpiresAt = now + HIDDEN_SPAWN_RETRY_INTERVAL
+            end
+        end
+    end
+
+    self.HiddenSpawnCache = cache
+    return cache
+end
+
+function EnemyService:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
+    local normalizedTarget = normalizeEnemyName(targetName)
+    for spawnPart in pairs(self.IgnoredSpawns) do
+        local readOk, isBasePart, name, parent = pcall(function()
+            return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent
+        end)
+        local matchingName = readOk
+            and isBasePart
+            and type(name) == "string"
+            and matchesSpawnName(name, targetName, normalizedTarget)
+        local replicated = matchingName
+            and enemySpawns ~= nil
+            and parent == enemySpawns
+        local hidden = matchingName
+            and parent == nil
+            and hiddenCache.Available
+            and hiddenCache.Parts[spawnPart] == name
+        if not replicated and not hidden then
+            self.IgnoredSpawns[spawnPart] = nil
+        end
+    end
 end
 
 function EnemyService:IsAlive(model)
@@ -2352,39 +2454,123 @@ function EnemyService:FindNearest(targetName, origin)
 end
 
 function EnemyService:FindSpawn(targetName, origin)
-    local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
-    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
-    if not enemySpawns or type(targetName) ~= "string" then
-        return nil, false
+    local diagnostic = {
+        TargetName = targetName,
+        NormalMarkerFound = false,
+        HiddenMarkerFound = false,
+        HiddenDiscoveryAvailable = false,
+        SelectedSource = "none",
+        SelectedName = nil,
+        SelectedDistance = nil,
+    }
+    if type(targetName) ~= "string" then
+        return nil, false, diagnostic
     end
 
+    local enemySpawns = self:_GetEnemySpawnsFolder()
+    local hiddenCache = self:_RefreshHiddenSpawnCache()
+    diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
     local normalizedTarget = normalizeEnemyName(targetName)
+    self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
+
     local hasMatchingSpawn = false
     local nearest, nearestDistance = nil, math.huge
-    for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
-        if spawnPart:IsA("BasePart") then
-            local normalizedSpawn = normalizeEnemyName(spawnPart.Name)
-            if spawnPart.Name == targetName or normalizedSpawn == normalizedTarget then
-                hasMatchingSpawn = true
-                if not self.IgnoredSpawns[spawnPart] then
-                    local distance = typeof(origin) == "Vector3"
-                        and (spawnPart.Position - origin).Magnitude
-                        or 0
-                    if distance < nearestDistance then
-                        nearest, nearestDistance = spawnPart, distance
-                    end
-                end
+    local function considerSpawn(spawnPart, expectedParent, expectedName, source)
+        local readOk, isBasePart, name, parent, position = pcall(function()
+            return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent, spawnPart.Position
+        end)
+        if not readOk
+            or not isBasePart
+            or parent ~= expectedParent
+            or type(name) ~= "string"
+            or (expectedName and name ~= expectedName)
+            or not matchesSpawnName(name, targetName, normalizedTarget)
+        then
+            return
+        end
+
+        hasMatchingSpawn = true
+        if source == "EnemySpawns" then
+            diagnostic.NormalMarkerFound = true
+        elseif source == "unparented-cache" then
+            diagnostic.HiddenMarkerFound = true
+        end
+        if self.IgnoredSpawns[spawnPart] then
+            return
+        end
+        local distance = typeof(origin) == "Vector3"
+            and (position - origin).Magnitude
+            or 0
+        if distance < nearestDistance then
+            nearest, nearestDistance = spawnPart, distance
+            diagnostic.SelectedSource = source
+            diagnostic.SelectedName = name
+            diagnostic.SelectedDistance = distance
+        end
+    end
+
+    if enemySpawns then
+        local childrenOk, children = pcall(function()
+            return enemySpawns:GetChildren()
+        end)
+        if childrenOk then
+            for _, spawnPart in ipairs(children) do
+                considerSpawn(spawnPart, enemySpawns, nil, "EnemySpawns")
             end
         end
     end
-    if nearest then
-        return nearest, false
+
+    -- Include cached unparented candidates in nearest selection, but refresh the
+    -- potentially expensive runtime enumeration no more than once per cache interval.
+    if hiddenCache.Available and os.clock() < hiddenCache.ExpiresAt then
+        for spawnPart, cachedName in pairs(hiddenCache.Parts) do
+            if matchesSpawnName(cachedName, targetName, normalizedTarget) then
+                considerSpawn(spawnPart, nil, cachedName, "unparented-cache")
+            end
+        end
     end
-    return nil, hasMatchingSpawn
+
+    if nearest then
+        return nearest, false, diagnostic
+    end
+    return nil, hasMatchingSpawn, diagnostic
 end
 
-function EnemyService:MarkSpawnIgnored(spawnPart)
-    if spawnPart and spawnPart.Parent then
+function EnemyService:IsSpawnAvailable(spawnPart, targetName)
+    if not spawnPart or type(targetName) ~= "string" then
+        return false
+    end
+    local readOk, isBasePart, name, parent = pcall(function()
+        return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent
+    end)
+    if not readOk
+        or not isBasePart
+        or type(name) ~= "string"
+        or self.IgnoredSpawns[spawnPart]
+    then
+        return false
+    end
+
+    local normalizedTarget = normalizeEnemyName(targetName)
+    if not matchesSpawnName(name, targetName, normalizedTarget) then
+        return false
+    end
+
+    local enemySpawns = self:_GetEnemySpawnsFolder()
+    if enemySpawns ~= nil and parent == enemySpawns then
+        return true
+    end
+
+    local hiddenCache = self.HiddenSpawnCache
+    return parent == nil
+        and hiddenCache ~= nil
+        and hiddenCache.Available
+        and os.clock() < hiddenCache.ExpiresAt
+        and hiddenCache.Parts[spawnPart] == name
+end
+
+function EnemyService:MarkSpawnIgnored(spawnPart, targetName)
+    if self:IsSpawnAvailable(spawnPart, targetName) then
         self.IgnoredSpawns[spawnPart] = true
     end
 end
@@ -3164,6 +3350,7 @@ local CombatService = __bundleLoad("CustomHub.Features.Farm.CombatService")
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
+local MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH = 1400
 local NPC_SCAN_INTERVAL = 0.35
 local SPAWN_SCAN_INTERVAL = 0.5
 local SPAWN_LOAD_GRACE = 1
@@ -3378,6 +3565,114 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
     end)
 end
 
+function MainFarm:_PrintSpawnDiagnosticReport(report)
+    pcall(function()
+        local selected
+        if report.SelectedName then
+            local distance = type(report.SelectedDistance) == "number"
+                and report.SelectedDistance == report.SelectedDistance
+                and report.SelectedDistance < math.huge
+                and string.format("%.1f", report.SelectedDistance)
+                or "n/a"
+            selected = "source=" .. tostring(report.SelectedSource)
+                .. " name=" .. diagnosticScalar(report.SelectedName)
+                .. " distance=" .. distance
+        else
+            selected = "none"
+        end
+
+        local moveAccepted = report.MovementAccepted == nil
+            and "not_called"
+            or tostring(report.MovementAccepted == true)
+        local availability = report.IsSpawnAvailable == nil
+            and "not_called_no_candidate"
+            or tostring(report.IsSpawnAvailable == true)
+        local lines = {
+            "===== [SpawnDiagnostic] REPORT BEGIN =====",
+            "Target NPC: " .. diagnosticScalar(report.TargetName),
+            "Normal EnemySpawns marker: " .. tostring(report.NormalMarkerFound == true),
+            "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
+                .. " (discovery_available="
+                .. tostring(report.HiddenDiscoveryAvailable == true) .. ")",
+            "Selected candidate: " .. selected,
+            "IsSpawnAvailable: " .. availability,
+            "MovementService:MoveTo accepted=" .. moveAccepted
+                .. " started_this_call=" .. tostring(report.MovementStarted == true)
+                .. " result=" .. diagnosticScalar(report.MovementResult or "not_called"),
+            "===== [SpawnDiagnostic] REPORT END =====",
+        }
+        local text = table.concat(lines, "\n")
+        if #text > MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH then
+            local endMarker = "\n===== [SpawnDiagnostic] REPORT END ====="
+            text = text:sub(1, MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH - #endMarker - 18)
+                .. "\n...[truncated]" .. endMarker
+        end
+
+        local copied = false
+        local clipboardCallOk = pcall(function()
+            if type(setclipboard) == "function" then
+                setclipboard(text)
+                copied = true
+            end
+        end)
+        if clipboardCallOk and copied then
+            print("[SpawnDiagnostic] Clipboard copy succeeded.")
+        else
+            print(text)
+        end
+    end)
+end
+
+function MainFarm:_RecordSpawnDiagnostic(
+    targetName,
+    discovery,
+    candidate,
+    isAvailable,
+    movementAccepted,
+    movementResult
+)
+    local report = type(discovery) == "table" and discovery or {}
+    report.TargetName = targetName
+    report.IsSpawnAvailable = isAvailable
+    report.MovementAccepted = movementAccepted
+    report.MovementResult = movementResult
+    report.MovementStarted = movementAccepted == true
+        and (
+            movementResult == "moving"
+            or movementResult == "retargeted"
+            or (
+                type(movementResult) == "string"
+                and movementResult:sub(1, 10) == "moving to "
+            )
+        )
+    if candidate and not report.SelectedName then
+        local candidateNameOk, candidateName = pcall(function()
+            return candidate.Name
+        end)
+        if candidateNameOk then
+            report.SelectedName = candidateName
+        end
+    end
+
+    local signature = table.concat({
+        tostring(report.TargetName),
+        tostring(report.NormalMarkerFound == true),
+        tostring(report.HiddenMarkerFound == true),
+        tostring(report.HiddenDiscoveryAvailable == true),
+        tostring(report.SelectedSource),
+        tostring(report.SelectedName),
+        tostring(report.IsSpawnAvailable),
+        tostring(report.MovementAccepted),
+        tostring(report.MovementStarted),
+        tostring(report.MovementResult),
+    }, "|")
+    if signature == self.LastSpawnDiagnosticSignature then
+        return
+    end
+    self.LastSpawnDiagnosticSignature = signature
+    self:_PrintSpawnDiagnosticReport(report)
+end
+
 function MainFarm:_EndQuestDiagnosticWait(reason, now)
     local key = self.QuestDiagnosticWaitKey
     if not key then
@@ -3426,11 +3721,15 @@ function MainFarm:_ClearTarget(preserveMovement)
 end
 
 function MainFarm:_ResetSpawnSearch(targetName)
+    if self.SpawnSearchTarget ~= targetName then
+        self.LastSpawnDiagnosticSignature = nil
+    end
     if self.EnemyService then
         self.EnemyService:ClearIgnoredSpawns()
     end
     self.SpawnSearchTarget = targetName
     self.SpawnCandidate = nil
+    self.SpawnCandidateDiagnostic = nil
     self.SpawnLoading = nil
     self.SpawnRetryAt = nil
     self.SpawnEmptyCycles = 0
@@ -3728,22 +4027,47 @@ function MainFarm:_Step(session)
         end
 
         local spawnPart = self.SpawnCandidate
+        local spawnDiagnostic = self.SpawnCandidateDiagnostic
         local allSpawnsVisited = false
         if now >= (self.NextSpawnSearchAt or 0) then
-            spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget, root.Position)
+            spawnPart, allSpawnsVisited, spawnDiagnostic =
+                self.EnemyService:FindSpawn(activeTarget, root.Position)
             self.SpawnCandidate = spawnPart
+            self.SpawnCandidateDiagnostic = spawnDiagnostic
             self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
         end
         if spawnPart then
-            if not spawnPart.Parent then
+            local spawnAvailable =
+                self.EnemyService:IsSpawnAvailable(spawnPart, activeTarget)
+            if not spawnAvailable then
+                self:_RecordSpawnDiagnostic(
+                    activeTarget,
+                    spawnDiagnostic,
+                    spawnPart,
+                    false,
+                    nil,
+                    "not_called_unavailable"
+                )
                 self.SpawnCandidate = nil
                 self.SpawnLoading = nil
                 self.NextSpawnSearchAt = 0
-                self:_SetStatus("A matching enemy spawn marker was removed; rescanning", "warning")
+                self:_SetStatus(
+                    "A matching enemy spawn marker is stale or ignored; rescanning",
+                    "warning"
+                )
                 return
             end
             local spawnDestination = spawnPart.CFrame * CFrame.new(0, 60, 0)
-            self:_MoveTo(spawnDestination, session, 100, true)
+            local movementAccepted, movementResult =
+                self:_MoveTo(spawnDestination, session, 100, true)
+            self:_RecordSpawnDiagnostic(
+                activeTarget,
+                spawnDiagnostic,
+                spawnPart,
+                true,
+                movementAccepted,
+                movementResult
+            )
             if (spawnPart.Position - root.Position).Magnitude <= 100 then
                 if not self.SpawnLoading
                     or self.SpawnLoading.TargetName ~= activeTarget
@@ -3755,7 +4079,7 @@ function MainFarm:_Step(session)
                         ArrivedAt = now,
                     }
                 elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
-                    self.EnemyService:MarkSpawnIgnored(spawnPart)
+                    self.EnemyService:MarkSpawnIgnored(spawnPart, activeTarget)
                     self.SpawnLoading = nil
                     self.SpawnCandidate = nil
                     self.NextSpawnSearchAt = 0
@@ -3780,6 +4104,14 @@ function MainFarm:_Step(session)
                 self:_SetStatus("Travelling to supported spawn for " .. activeTarget, "info")
             end
         else
+            self:_RecordSpawnDiagnostic(
+                activeTarget,
+                spawnDiagnostic,
+                nil,
+                nil,
+                nil,
+                "not_called_no_candidate"
+            )
             if allSpawnsVisited then
                 self.EnemyService:ClearIgnoredSpawns()
                 self.SpawnCandidate = nil
@@ -3921,6 +4253,8 @@ function MainFarm:Initialize(context)
     self.QuestDiagnosticReport = nil
     self.LastQuestDiagnosticSignature = nil
     self.LastQuestDiagnosticAt = 0
+    self.SpawnCandidateDiagnostic = nil
+    self.LastSpawnDiagnosticSignature = nil
     self.LastStatus = nil
     self.SpawnSearchTarget = nil
     self.SpawnCandidate = nil

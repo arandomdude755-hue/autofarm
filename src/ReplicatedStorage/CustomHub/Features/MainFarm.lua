@@ -5,6 +5,7 @@ local CombatService = require(script.Parent.Farm.CombatService)
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
+local MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH = 1400
 local NPC_SCAN_INTERVAL = 0.35
 local SPAWN_SCAN_INTERVAL = 0.5
 local SPAWN_LOAD_GRACE = 1
@@ -219,6 +220,114 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
     end)
 end
 
+function MainFarm:_PrintSpawnDiagnosticReport(report)
+    pcall(function()
+        local selected
+        if report.SelectedName then
+            local distance = type(report.SelectedDistance) == "number"
+                and report.SelectedDistance == report.SelectedDistance
+                and report.SelectedDistance < math.huge
+                and string.format("%.1f", report.SelectedDistance)
+                or "n/a"
+            selected = "source=" .. tostring(report.SelectedSource)
+                .. " name=" .. diagnosticScalar(report.SelectedName)
+                .. " distance=" .. distance
+        else
+            selected = "none"
+        end
+
+        local moveAccepted = report.MovementAccepted == nil
+            and "not_called"
+            or tostring(report.MovementAccepted == true)
+        local availability = report.IsSpawnAvailable == nil
+            and "not_called_no_candidate"
+            or tostring(report.IsSpawnAvailable == true)
+        local lines = {
+            "===== [SpawnDiagnostic] REPORT BEGIN =====",
+            "Target NPC: " .. diagnosticScalar(report.TargetName),
+            "Normal EnemySpawns marker: " .. tostring(report.NormalMarkerFound == true),
+            "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
+                .. " (discovery_available="
+                .. tostring(report.HiddenDiscoveryAvailable == true) .. ")",
+            "Selected candidate: " .. selected,
+            "IsSpawnAvailable: " .. availability,
+            "MovementService:MoveTo accepted=" .. moveAccepted
+                .. " started_this_call=" .. tostring(report.MovementStarted == true)
+                .. " result=" .. diagnosticScalar(report.MovementResult or "not_called"),
+            "===== [SpawnDiagnostic] REPORT END =====",
+        }
+        local text = table.concat(lines, "\n")
+        if #text > MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH then
+            local endMarker = "\n===== [SpawnDiagnostic] REPORT END ====="
+            text = text:sub(1, MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH - #endMarker - 18)
+                .. "\n...[truncated]" .. endMarker
+        end
+
+        local copied = false
+        local clipboardCallOk = pcall(function()
+            if type(setclipboard) == "function" then
+                setclipboard(text)
+                copied = true
+            end
+        end)
+        if clipboardCallOk and copied then
+            print("[SpawnDiagnostic] Clipboard copy succeeded.")
+        else
+            print(text)
+        end
+    end)
+end
+
+function MainFarm:_RecordSpawnDiagnostic(
+    targetName,
+    discovery,
+    candidate,
+    isAvailable,
+    movementAccepted,
+    movementResult
+)
+    local report = type(discovery) == "table" and discovery or {}
+    report.TargetName = targetName
+    report.IsSpawnAvailable = isAvailable
+    report.MovementAccepted = movementAccepted
+    report.MovementResult = movementResult
+    report.MovementStarted = movementAccepted == true
+        and (
+            movementResult == "moving"
+            or movementResult == "retargeted"
+            or (
+                type(movementResult) == "string"
+                and movementResult:sub(1, 10) == "moving to "
+            )
+        )
+    if candidate and not report.SelectedName then
+        local candidateNameOk, candidateName = pcall(function()
+            return candidate.Name
+        end)
+        if candidateNameOk then
+            report.SelectedName = candidateName
+        end
+    end
+
+    local signature = table.concat({
+        tostring(report.TargetName),
+        tostring(report.NormalMarkerFound == true),
+        tostring(report.HiddenMarkerFound == true),
+        tostring(report.HiddenDiscoveryAvailable == true),
+        tostring(report.SelectedSource),
+        tostring(report.SelectedName),
+        tostring(report.IsSpawnAvailable),
+        tostring(report.MovementAccepted),
+        tostring(report.MovementStarted),
+        tostring(report.MovementResult),
+    }, "|")
+    if signature == self.LastSpawnDiagnosticSignature then
+        return
+    end
+    self.LastSpawnDiagnosticSignature = signature
+    self:_PrintSpawnDiagnosticReport(report)
+end
+
 function MainFarm:_EndQuestDiagnosticWait(reason, now)
     local key = self.QuestDiagnosticWaitKey
     if not key then
@@ -267,11 +376,15 @@ function MainFarm:_ClearTarget(preserveMovement)
 end
 
 function MainFarm:_ResetSpawnSearch(targetName)
+    if self.SpawnSearchTarget ~= targetName then
+        self.LastSpawnDiagnosticSignature = nil
+    end
     if self.EnemyService then
         self.EnemyService:ClearIgnoredSpawns()
     end
     self.SpawnSearchTarget = targetName
     self.SpawnCandidate = nil
+    self.SpawnCandidateDiagnostic = nil
     self.SpawnLoading = nil
     self.SpawnRetryAt = nil
     self.SpawnEmptyCycles = 0
@@ -569,22 +682,47 @@ function MainFarm:_Step(session)
         end
 
         local spawnPart = self.SpawnCandidate
+        local spawnDiagnostic = self.SpawnCandidateDiagnostic
         local allSpawnsVisited = false
         if now >= (self.NextSpawnSearchAt or 0) then
-            spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget, root.Position)
+            spawnPart, allSpawnsVisited, spawnDiagnostic =
+                self.EnemyService:FindSpawn(activeTarget, root.Position)
             self.SpawnCandidate = spawnPart
+            self.SpawnCandidateDiagnostic = spawnDiagnostic
             self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
         end
         if spawnPart then
-            if not spawnPart.Parent then
+            local spawnAvailable =
+                self.EnemyService:IsSpawnAvailable(spawnPart, activeTarget)
+            if not spawnAvailable then
+                self:_RecordSpawnDiagnostic(
+                    activeTarget,
+                    spawnDiagnostic,
+                    spawnPart,
+                    false,
+                    nil,
+                    "not_called_unavailable"
+                )
                 self.SpawnCandidate = nil
                 self.SpawnLoading = nil
                 self.NextSpawnSearchAt = 0
-                self:_SetStatus("A matching enemy spawn marker was removed; rescanning", "warning")
+                self:_SetStatus(
+                    "A matching enemy spawn marker is stale or ignored; rescanning",
+                    "warning"
+                )
                 return
             end
             local spawnDestination = spawnPart.CFrame * CFrame.new(0, 60, 0)
-            self:_MoveTo(spawnDestination, session, 100, true)
+            local movementAccepted, movementResult =
+                self:_MoveTo(spawnDestination, session, 100, true)
+            self:_RecordSpawnDiagnostic(
+                activeTarget,
+                spawnDiagnostic,
+                spawnPart,
+                true,
+                movementAccepted,
+                movementResult
+            )
             if (spawnPart.Position - root.Position).Magnitude <= 100 then
                 if not self.SpawnLoading
                     or self.SpawnLoading.TargetName ~= activeTarget
@@ -596,7 +734,7 @@ function MainFarm:_Step(session)
                         ArrivedAt = now,
                     }
                 elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
-                    self.EnemyService:MarkSpawnIgnored(spawnPart)
+                    self.EnemyService:MarkSpawnIgnored(spawnPart, activeTarget)
                     self.SpawnLoading = nil
                     self.SpawnCandidate = nil
                     self.NextSpawnSearchAt = 0
@@ -621,6 +759,14 @@ function MainFarm:_Step(session)
                 self:_SetStatus("Travelling to supported spawn for " .. activeTarget, "info")
             end
         else
+            self:_RecordSpawnDiagnostic(
+                activeTarget,
+                spawnDiagnostic,
+                nil,
+                nil,
+                nil,
+                "not_called_no_candidate"
+            )
             if allSpawnsVisited then
                 self.EnemyService:ClearIgnoredSpawns()
                 self.SpawnCandidate = nil
@@ -762,6 +908,8 @@ function MainFarm:Initialize(context)
     self.QuestDiagnosticReport = nil
     self.LastQuestDiagnosticSignature = nil
     self.LastQuestDiagnosticAt = 0
+    self.SpawnCandidateDiagnostic = nil
+    self.LastSpawnDiagnosticSignature = nil
     self.LastStatus = nil
     self.SpawnSearchTarget = nil
     self.SpawnCandidate = nil

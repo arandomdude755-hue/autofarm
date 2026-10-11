@@ -29,6 +29,21 @@ function Compatibility:GetPlayerGui()
     return playerGui
 end
 
+function Compatibility:GetUnparentedInstances()
+    local getterOk, getter = pcall(function()
+        return getnilinstances
+    end)
+    if not getterOk or type(getter) ~= "function" then
+        return nil
+    end
+
+    local callOk, instances = pcall(getter)
+    if not callOk or type(instances) ~= "table" then
+        return nil
+    end
+    return instances
+end
+
 function Compatibility:IsTouchEnabled()
     return UserInputService.TouchEnabled
 end

@@ -68,13 +68,76 @@ require("NextEnemySearchAt = now + NPC_SCAN_INTERVAL" in step
         and "NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL" in step,
         "NPC and spawn scans must be throttled")
 require("local nearest, nearestDistance = nil, math.huge" in ENEMY
-        and "spawnPart.Position - origin" in ENEMY,
+        and "position - origin" in ENEMY,
         "multiple matching spawn markers must be selected by proximity")
-require('"EnemySpawns"' in ENEMY and "getnilinstances" not in ENEMY,
-        "spawn lookup must stay within replicated Workspace data")
+require(
+    '"EnemySpawns"' in ENEMY
+    and "GetUnparentedInstances" in ENEMY
+    and "getnilinstances" not in ENEMY,
+    "generic spawn lookup must use replicated markers and the guarded compatibility adapter",
+)
+require(
+    "function EnemyService:IsSpawnAvailable(spawnPart, targetName)" in ENEMY
+    and "enemySpawns ~= nil" in ENEMY
+    and "hiddenCache.Parts[spawnPart] == name" in ENEMY
+    and "os.clock() < hiddenCache.ExpiresAt" in ENEMY,
+    "spawn availability must validate the real folder or a fresh cached unparented marker",
+)
+require(
+    "self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)" in ENEMY
+    and "self.IgnoredSpawns[spawnPart]" in ENEMY,
+    "stale and ignored spawn markers must not be selected",
+)
+require(
+    "IsSpawnAvailable(spawnPart, activeTarget)" in step
+    and "MarkSpawnIgnored(spawnPart, activeTarget)" in step,
+    "Main Farm must validate candidates and ignore only the current eligible marker",
+)
+spawn_find = ENEMY[ENEMY.index("function EnemyService:FindSpawn"):ENEMY.index(
+    "function EnemyService:IsSpawnAvailable"
+)]
+spawn_diagnostic = FARM[
+    FARM.index("function MainFarm:_PrintSpawnDiagnosticReport"):
+    FARM.index("function MainFarm:_EndQuestDiagnosticWait")
+]
+require(
+    "NormalMarkerFound" in spawn_find
+    and "HiddenMarkerFound" in spawn_find
+    and "SelectedDistance = distance" in spawn_find
+    and "return nearest, false, diagnostic" in spawn_find,
+    "the existing spawn scan must return its normal/hidden match and selected-distance evidence",
+)
+require(
+    "spawnPart, allSpawnsVisited, spawnDiagnostic =" in step
+    and step.count("FindSpawn(activeTarget, root.Position)") == 1
+    and step.count("self.EnemyService:IsSpawnAvailable(spawnPart, activeTarget)") == 1
+    and step.count("_MoveTo(spawnDestination, session, 100, true)") == 1
+    and "local movementAccepted, movementResult =" in step
+    and "self:_RecordSpawnDiagnostic(" in step,
+    "diagnostics must reuse the single scan, availability check, and movement call",
+)
+require(
+    "[SpawnDiagnostic] REPORT BEGIN" in spawn_diagnostic
+    and "Normal EnemySpawns marker" in spawn_diagnostic
+    and "Hidden unparented marker" in spawn_diagnostic
+    and "Selected candidate:" in spawn_diagnostic
+    and "IsSpawnAvailable:" in spawn_diagnostic
+    and "started_this_call=" in spawn_diagnostic
+    and "MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH" in spawn_diagnostic
+    and "setclipboard(text)" in spawn_diagnostic,
+    "spawn report must be bounded, copyable, and include the requested state",
+)
+require(
+    ":FindSpawn(" not in spawn_diagnostic
+    and ":IsSpawnAvailable(" not in spawn_diagnostic
+    and ":_MoveTo(" not in spawn_diagnostic,
+    "report formatting must not repeat scans, availability checks, or movement",
+)
 require("Speed = 190" in FARM and "route and 190" in MOVEMENT,
         "movement speed must remain 190")
 
 print("PASS: request confirmation is state-based and a timed-out quest is not retried automatically")
 print("PASS: normal quest transitions preserve a held movement session; explicit cleanup remains")
 print("PASS: NPC/spawn search is throttled, spawn-load bounded, nearest-first, and retryable")
+print("PASS: generic hidden-marker discovery is cached, freshness-checked, and excludes ignored markers")
+print("PASS: bounded spawn diagnostics reuse the single search and movement results")

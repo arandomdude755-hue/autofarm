@@ -131,12 +131,26 @@ require(
 )
 
 all_lua = [path for path in CUSTOM_HUB.rglob("*.lua")]
+compatibility_path = CUSTOM_HUB / "Compatibility.lua"
 for path in all_lua:
     text = path.read_text(encoding="utf-8")
-    require("getgenv(" not in text and "getnilinstances(" not in text,
+    require("getgenv(" not in text,
             f"Executor-only API leaked into CustomHub module: {path.relative_to(ROOT)}")
+    require("getnilinstances(" not in text,
+            f"Direct optional instance API call found: {path.relative_to(ROOT)}")
+    if path != compatibility_path:
+        require("getnilinstances" not in text,
+                f"Optional instance API escaped Compatibility: {path.relative_to(ROOT)}")
     require(all(line == line.rstrip() for line in text.splitlines()),
             f"Trailing whitespace: {path.relative_to(ROOT)}")
+
+compatibility_text = compatibility_path.read_text(encoding="utf-8")
+require(
+    "function Compatibility:GetUnparentedInstances()" in compatibility_text
+    and "return getnilinstances" in compatibility_text
+    and "pcall(getter)" in compatibility_text,
+    "optional unparented-instance discovery must be guarded in Compatibility",
+)
 
 print("PASS: production CustomHub Rojo mapping and LocalScript entrypoint")
 print("PASS: Main Farm toggle is connected without a visual layout rewrite")
