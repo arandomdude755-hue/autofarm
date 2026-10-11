@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = "tests/Standalone_CustomHub_UI_Test.client.lua"
 SCRIPT = (ROOT / SCRIPT_PATH).read_text(encoding="utf-8")
+UI_MODULE_PATH = "src/ReplicatedStorage/CustomHub/UI.lua"
+UI_MODULE = (ROOT / UI_MODULE_PATH).read_text(encoding="utf-8")
 DOCS = (ROOT / "docs/BNN_SOURCE_INVENTORY.md").read_text(encoding="utf-8")
 
 
@@ -31,6 +33,39 @@ require("BindableFunction" in SCRIPT and "previousCleanup:Invoke()" in SCRIPT,
 require("script.Destroying" in SCRIPT and "closeButton.Activated" in SCRIPT,
         "LocalScript/Close cleanup path is missing")
 require("connection:Disconnect()" in SCRIPT, "Explicit connection cleanup is missing")
+
+for token in (
+    'Name = "Minimize"',
+    'Text = "Min"',
+    'Name = "Restore"',
+    'Text = "Restore"',
+    "function UI:_SetMinimized(minimized)",
+    "self.Root.Visible = not minimized",
+    "self.RestoreButton.Visible = minimized",
+    "self.RestoreButton.Position = clampDragPosition(",
+    "UserInputService.InputChanged",
+    "UserInputService.InputEnded",
+):
+    require(token in UI_MODULE, f"production UI minimize/restore path is missing: {token}")
+
+require(UI_MODULE.count('Name = "Minimize"') == 1,
+        "production UI creates duplicate minimize buttons")
+require(UI_MODULE.count('Name = "Restore"') == 1,
+        "production UI creates duplicate restore buttons")
+require(UI_MODULE.count("UserInputService.InputChanged") == 1
+        and UI_MODULE.count("UserInputService.InputEnded") == 1,
+        "restore drag input listeners are duplicated")
+minimize_start = UI_MODULE.index("function UI:_SetMinimized(minimized)")
+minimize_end = UI_MODULE.index("\nfunction UI:_Refresh", minimize_start)
+minimize_method = UI_MODULE[minimize_start:minimize_end]
+require("create(" not in minimize_method and "_Connect(" not in minimize_method,
+        "minimize/restore toggles create UI or event connections")
+close_handler_start = UI_MODULE.index(
+    "self:_Connect(self.PersistentConnections, closeButton.Activated"
+)
+close_handler_end = UI_MODULE.index("\n\n", close_handler_start)
+require("self.OnClose()" in UI_MODULE[close_handler_start:close_handler_end],
+        "existing close button no longer calls the original close callback")
 
 for marker in (
     "tab selection and active indicators",
@@ -66,6 +101,7 @@ for path in [
     ROOT / SCRIPT_PATH,
     ROOT / "tests/check_ui_architecture.py",
     ROOT / "docs/BNN_SOURCE_INVENTORY.md",
+    ROOT / UI_MODULE_PATH,
 ]:
     text = path.read_text(encoding="utf-8")
     require(all(line == line.rstrip() for line in text.splitlines()),

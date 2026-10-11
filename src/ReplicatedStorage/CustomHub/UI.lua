@@ -1,6 +1,12 @@
 local UI = {}
 UI.__index = UI
 
+local UserInputService = game:GetService("UserInputService")
+local MINIMIZE_BUTTON_WIDTH = 42
+local HEADER_BUTTON_GAP = 6
+local RESTORE_BUTTON_SIZE = Vector2.new(60, 32)
+local RESTORE_DRAG_THRESHOLD = 8
+
 local function create(className, properties, parent)
     local instance = Instance.new(className)
     for property, value in pairs(properties) do
@@ -8,6 +14,29 @@ local function create(className, properties, parent)
     end
     instance.Parent = parent
     return instance
+end
+
+local function clampDragPosition(origin, delta, viewport, size)
+    local halfX = math.min(size.X / 2, viewport.X / 2)
+    local halfY = math.min(size.Y / 2, viewport.Y / 2)
+    local startCenterX = viewport.X * origin.X.Scale + origin.X.Offset
+    local startCenterY = viewport.Y * origin.Y.Scale + origin.Y.Offset
+    local centerX = math.clamp(
+        startCenterX + delta.X,
+        halfX,
+        math.max(halfX, viewport.X - halfX)
+    )
+    local centerY = math.clamp(
+        startCenterY + delta.Y,
+        halfY,
+        math.max(halfY, viewport.Y - halfY)
+    )
+    return UDim2.new(
+        origin.X.Scale,
+        centerX - viewport.X * origin.X.Scale,
+        origin.Y.Scale,
+        centerY - viewport.Y * origin.Y.Scale
+    )
 end
 
 local function disconnectAll(connections)
@@ -30,6 +59,11 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         OnClose = onClose,
         Gui = nil,
         Root = nil,
+        MinimizeButton = nil,
+        RestoreButton = nil,
+        IsMinimized = false,
+        RestoreDrag = nil,
+        RestoreDragMoved = false,
         StatusLabel = nil,
         TabButtons = {},
         ToggleLabels = {},
@@ -66,6 +100,21 @@ function UI:_ApplySize(snapshot)
         height = layout.ExpandedHeight
     end
     self.Root.Size = UDim2.fromScale(width, height)
+end
+
+function UI:_SetMinimized(minimized)
+    if not self.Root or not self.RestoreButton or self.IsMinimized == minimized then
+        return false
+    end
+
+    self.IsMinimized = minimized
+    self.Root.Visible = not minimized
+    self.RestoreButton.Visible = minimized
+    if not minimized then
+        self.RestoreDrag = nil
+        self.RestoreDragMoved = false
+    end
+    return true
 end
 
 function UI:_Refresh(snapshot)
@@ -283,7 +332,15 @@ function UI:Mount()
     local title = create("TextLabel", {
         Name = "Title",
         Position = UDim2.fromOffset(layout.Padding, layout.HeaderTop),
-        Size = UDim2.new(1, -layout.TitleRightInset, 0, layout.HeaderHeight),
+        Size = UDim2.new(
+            1,
+            -math.max(
+                layout.TitleRightInset,
+                layout.Padding * 2 + layout.CloseWidth + HEADER_BUTTON_GAP + MINIMIZE_BUTTON_WIDTH
+            ),
+            0,
+            layout.HeaderHeight
+        ),
         BackgroundTransparency = 1,
         Font = theme.StrongFont,
         Text = self.Config.Name,
@@ -308,6 +365,111 @@ function UI:Mount()
     self:_Connect(self.PersistentConnections, closeButton.Activated, function()
         if self.OnClose then
             self.OnClose()
+        end
+    end)
+
+    self.MinimizeButton = create("TextButton", {
+        Name = "Minimize",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(
+            1,
+            -(layout.Padding + layout.CloseWidth + HEADER_BUTTON_GAP),
+            0,
+            layout.HeaderTop
+        ),
+        Size = UDim2.fromOffset(MINIMIZE_BUTTON_WIDTH, layout.CloseHeight),
+        BackgroundColor3 = theme.Control,
+        BorderSizePixel = 0,
+        AutoButtonColor = true,
+        Font = theme.Font,
+        Text = "Min",
+        TextColor3 = theme.MutedText,
+        TextSize = theme.TextSizes.Detail,
+    }, self.Root)
+    self:_Connect(self.PersistentConnections, self.MinimizeButton.Activated, function()
+        self:_SetMinimized(true)
+    end)
+
+    self.RestoreButton = create("TextButton", {
+        Name = "Restore",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(1, -38, 0.68, 0),
+        Size = UDim2.fromOffset(RESTORE_BUTTON_SIZE.X, RESTORE_BUTTON_SIZE.Y),
+        BackgroundColor3 = theme.Control,
+        BorderSizePixel = 0,
+        AutoButtonColor = true,
+        Font = theme.StrongFont,
+        Text = "Restore",
+        TextColor3 = theme.Text,
+        TextSize = theme.TextSizes.Detail,
+        Visible = false,
+        ZIndex = 20,
+    }, self.Gui)
+    create("UICorner", {
+        CornerRadius = UDim.new(0, RESTORE_BUTTON_SIZE.Y / 2),
+    }, self.RestoreButton)
+    create("UIStroke", {
+        Color = theme.Border,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, self.RestoreButton)
+    self:_Connect(self.PersistentConnections, self.RestoreButton.Activated, function()
+        if self.RestoreDragMoved then
+            self.RestoreDragMoved = false
+            return
+        end
+        self:_SetMinimized(false)
+    end)
+    self:_Connect(self.PersistentConnections, self.RestoreButton.InputBegan, function(input)
+        if not self.IsMinimized
+            or (input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch)
+        then
+            return
+        end
+
+        self.RestoreDragMoved = false
+        self.RestoreDrag = {
+            Input = input.UserInputType == Enum.UserInputType.Touch and input or nil,
+            Start = input.Position,
+            Origin = self.RestoreButton.Position,
+        }
+    end)
+    self:_Connect(self.PersistentConnections, UserInputService.InputChanged, function(input)
+        local drag = self.RestoreDrag
+        if not drag or not self.RestoreButton or not self.RestoreButton.Parent then
+            return
+        end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input ~= drag.Input then
+            return
+        end
+
+        local delta = input.Position - drag.Start
+        if delta.Magnitude >= RESTORE_DRAG_THRESHOLD then
+            self.RestoreDragMoved = true
+        end
+        if not self.RestoreDragMoved then
+            return
+        end
+
+        local viewport = self.Compatibility:GetViewportSize()
+        if typeof(viewport) ~= "Vector2" then
+            viewport = Vector2.new(390, 844)
+        end
+        self.RestoreButton.Position = clampDragPosition(
+            drag.Origin,
+            delta,
+            viewport,
+            self.RestoreButton.AbsoluteSize
+        )
+    end)
+    self:_Connect(self.PersistentConnections, UserInputService.InputEnded, function(input)
+        local drag = self.RestoreDrag
+        if drag and (
+            input.UserInputType == Enum.UserInputType.MouseButton1
+                or input == drag.Input
+        ) then
+            self.RestoreDrag = nil
         end
     end)
 
@@ -409,6 +571,11 @@ function UI:Destroy()
         self.Gui = nil
         self.Root = nil
     end
+    self.MinimizeButton = nil
+    self.RestoreButton = nil
+    self.IsMinimized = false
+    self.RestoreDrag = nil
+    self.RestoreDragMoved = false
 end
 
 return UI
