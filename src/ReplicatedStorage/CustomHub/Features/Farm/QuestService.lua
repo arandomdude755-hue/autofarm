@@ -1,6 +1,52 @@
 local QuestService = {}
 QuestService.__index = QuestService
 
+local MAX_DIAGNOSTIC_STRING_LENGTH = 120
+
+local function redactLiteral(text, value)
+    if type(value) ~= "string" or value == "" then
+        return text
+    end
+
+    local parts = {}
+    local cursor = 1
+    while cursor <= #text do
+        local first, last = string.find(text, value, cursor, true)
+        if not first then
+            parts[#parts + 1] = text:sub(cursor)
+            break
+        end
+        parts[#parts + 1] = text:sub(cursor, first - 1)
+        parts[#parts + 1] = "[redacted]"
+        cursor = last + 1
+    end
+    return table.concat(parts)
+end
+
+local function diagnosticScalarRepresentation(value, player)
+    local valueType = typeof(value)
+    if type(value) == "string" then
+        local text = value:sub(1, MAX_DIAGNOSTIC_STRING_LENGTH * 4):gsub("[%c]", " ")
+        if player then
+            text = redactLiteral(text, player.Name)
+            text = redactLiteral(text, player.DisplayName)
+            text = redactLiteral(text, tostring(player.UserId))
+        end
+        text = text:gsub("https?://%S+", "[redacted-url]")
+        text = text:gsub("@[%w_%-]+", "[redacted-handle]")
+        text = text:gsub("%d%d%d%d%d+", "[redacted-id]")
+        if #text > MAX_DIAGNOSTIC_STRING_LENGTH then
+            text = text:sub(1, MAX_DIAGNOSTIC_STRING_LENGTH - 3) .. "..."
+        end
+        return string.format("%q", text)
+    end
+
+    if value == nil or type(value) == "boolean" or type(value) == "number" then
+        return tostring(value)
+    end
+    return "<" .. tostring(valueType) .. ">"
+end
+
 local excludedQuestNames = {
     BartiloQuest = true,
     Trainees = true,
@@ -129,6 +175,14 @@ function QuestService:RequestStart(candidate)
     end
     local ok, result = pcall(function()
         return commF:InvokeServer("StartQuest", tostring(candidate.QuestName), candidate.Id)
+    end)
+    pcall(function()
+        print(string.format(
+            "[QuestDiagnostic] StartQuest pcall_succeeded=%s result_type=%s result_repr=%s",
+            tostring(ok),
+            tostring(typeof(result)),
+            diagnosticScalarRepresentation(result, self.Player)
+        ))
     end)
     if not ok then
         return false, tostring(result)

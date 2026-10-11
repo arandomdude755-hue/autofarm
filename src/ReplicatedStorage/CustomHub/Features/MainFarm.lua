@@ -3,11 +3,28 @@ local EnemyService = require(script.Parent.Farm.EnemyService)
 local MovementService = require(script.Parent.Farm.MovementService)
 local CombatService = require(script.Parent.Farm.CombatService)
 
+local QUEST_DIAGNOSTIC_INTERVAL = 1
+
 local MainFarm = {
     Running = false,
     Session = 0,
     Context = nil,
 }
+
+local function diagnosticScalar(value)
+    local valueType = typeof(value)
+    if type(value) == "string" then
+        local text = value:gsub("[%c]", " ")
+        if #text > 80 then
+            text = text:sub(1, 77) .. "..."
+        end
+        return string.format("%q", text)
+    end
+    if type(value) == "number" or type(value) == "boolean" then
+        return tostring(value)
+    end
+    return "<" .. tostring(valueType) .. ">"
+end
 
 local function questKey(candidate)
     return tostring(candidate.QuestName) .. ":" .. tostring(candidate.Id)
@@ -74,6 +91,62 @@ function MainFarm:_IsCurrent(session)
     return self.Running and self.Session == session
 end
 
+function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
+    pcall(function()
+        local guide = self.QuestService and self.QuestService.Guide
+        local guideData = type(guide) == "table" and guide.Data or nil
+        local guideDataType = type(guideData)
+        local questData = guideDataType == "table" and guideData.QuestData or nil
+        local questDataType = type(questData)
+        local taskType = questDataType == "table" and type(questData.Task) or "n/a"
+        local questDataPresent = questData ~= nil
+        local signature = table.concat({
+            tostring(guideDataType),
+            questDataPresent and "present" or "nil",
+            tostring(questDataType),
+            tostring(taskType),
+            tostring(questState),
+        }, "|")
+        local now = os.clock()
+        if not force
+            and signature == self.LastQuestDiagnosticSignature
+            and now - (self.LastQuestDiagnosticAt or 0) < QUEST_DIAGNOSTIC_INTERVAL
+        then
+            return
+        end
+
+        self.LastQuestDiagnosticSignature = signature
+        self.LastQuestDiagnosticAt = now
+        print(string.format(
+            "[QuestDiagnostic] quest_state phase=%s reader_state=%s guide_data_type=%s quest_data_present=%s quest_data_type=%s task_type=%s",
+            tostring(phase),
+            tostring(questState),
+            tostring(guideDataType),
+            tostring(questDataPresent),
+            tostring(questDataType),
+            tostring(taskType)
+        ))
+    end)
+end
+
+function MainFarm:_EndQuestDiagnosticWait(reason, now)
+    local key = self.QuestDiagnosticWaitKey
+    if not key then
+        return
+    end
+
+    pcall(function()
+        local startedAt = self.QuestDiagnosticWaitStartedAt or now
+        print(string.format(
+            "[QuestDiagnostic] confirmation_wait_end reason=%s elapsed_seconds=%.2f",
+            tostring(reason),
+            math.max(0, now - startedAt)
+        ))
+    end)
+    self.QuestDiagnosticWaitKey = nil
+    self.QuestDiagnosticWaitStartedAt = nil
+end
+
 function MainFarm:_MoveTo(destination, session, threshold)
     if not self.MovementService then
         return false
@@ -104,14 +177,37 @@ end
 function MainFarm:_RequestQuest(candidate, session)
     local key = questKey(candidate)
     local now = os.clock()
-    if self.LastQuestAttemptKey == key and now - (self.LastQuestAttemptAt or 0) < 8 then
-        self:_SetStatus("Waiting for active quest confirmation", "warning")
-        return
+    if self.LastQuestAttemptKey == key then
+        local elapsed = now - (self.LastQuestAttemptAt or 0)
+        if elapsed < 8 then
+            self:_SetStatus("Waiting for active quest confirmation", "warning")
+            return
+        end
+        self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
     end
 
     self.LastQuestAttemptKey = key
     self.LastQuestAttemptAt = now
+    self.QuestDiagnosticWaitKey = key
+    self.QuestDiagnosticWaitStartedAt = now
+    pcall(function()
+        print(string.format(
+            "[QuestDiagnostic] StartQuest candidate quest_name=%s quest_id=%s",
+            diagnosticScalar(candidate.QuestName),
+            diagnosticScalar(candidate.Id)
+        ))
+    end)
     local requested, result = self.QuestService:RequestStart(candidate)
+    local stateReadOk, stateAfterRequest = pcall(function()
+        return self.QuestService:GetActiveQuestState()
+    end)
+    if not stateReadOk then
+        stateAfterRequest = "diagnostic_read_error"
+    end
+    self:_LogQuestDataSnapshot("post_request", stateAfterRequest, true)
+    if stateAfterRequest == "active" then
+        self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
+    end
     if not self:_IsCurrent(session) then
         return
     end
@@ -155,6 +251,15 @@ function MainFarm:_Step(session)
     end
 
     local questState, activeTarget = self.QuestService:GetActiveQuestState()
+    if self.QuestDiagnosticWaitKey then
+        self:_LogQuestDataSnapshot("confirmation_poll", questState, false)
+        local now = os.clock()
+        if questState == "active" then
+            self:_EndQuestDiagnosticWait("active_state_observed", now)
+        elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= 8 then
+            self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+        end
+    end
     if questState == "unknown" then
         self:_ClearTarget()
         self.MovementService:Cancel()
@@ -317,6 +422,10 @@ function MainFarm:Initialize(context)
     self.CombatDependencyError = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.QuestDiagnosticWaitKey = nil
+    self.QuestDiagnosticWaitStartedAt = nil
+    self.LastQuestDiagnosticSignature = nil
+    self.LastQuestDiagnosticAt = 0
     self.LastStatus = nil
 
     local player = context.Compatibility.Player
@@ -386,6 +495,8 @@ function MainFarm:Stop()
     self.TargetName = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
+    self.QuestDiagnosticWaitKey = nil
+    self.QuestDiagnosticWaitStartedAt = nil
     if self.Context and self.Context.State then
         self.Context.State:SetFeatureEnabled("farm.main", false)
     end
