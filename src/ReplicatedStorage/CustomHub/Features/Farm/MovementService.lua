@@ -255,7 +255,7 @@ function MovementService:MoveTo(destination, options)
         RouteName = route and route.Name,
         Route = route,
         Threshold = threshold,
-        Speed = route and 350 or (tonumber(options.Speed) or 300),
+        Speed = route and 190 or (tonumber(options.Speed) or 300),
         IsCurrent = isCurrent,
         Generation = generation,
         CollisionOriginals = collisionOriginals,

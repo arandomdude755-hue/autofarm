@@ -79,7 +79,7 @@ function MainFarm:_MoveTo(destination, session, threshold)
         return false
     end
     return self.MovementService:MoveTo(destination, {
-        Speed = 300,
+        Speed = 190,
         Threshold = threshold,
         IsCurrent = function()
             return self:_IsCurrent(session)
