@@ -5,6 +5,11 @@ local CombatService = require(script.Parent.Farm.CombatService)
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
+local NPC_SCAN_INTERVAL = 0.35
+local SPAWN_SCAN_INTERVAL = 0.5
+local SPAWN_LOAD_GRACE = 1
+local SPAWN_CYCLE_RETRY_INTERVAL = 2
+local MAX_EMPTY_SPAWN_CYCLES = 2
 
 local MainFarm = {
     Running = false,
@@ -31,18 +36,28 @@ local function questKey(candidate)
     return tostring(candidate.QuestName) .. ":" .. tostring(candidate.Id)
 end
 
+local function boundedReason(value)
+    local text = tostring(value or "no validated active-quest signal observed")
+        :gsub("[%c]", " ")
+    if #text > 120 then
+        text = text:sub(1, 117) .. "..."
+    end
+    return text
+end
+
 local function questDataSummary(label, snapshot)
     if type(snapshot) ~= "table" then
         return label .. ": unavailable"
     end
     return string.format(
-        "%s: reader=%s Guide.Data=%s QuestData.present=%s type=%s Task.type=%s",
+        "%s: reader=%s Guide.Data=%s QuestData.present=%s type=%s Task.type=%s evidence=%s",
         label,
         tostring(snapshot.ReaderState),
         tostring(snapshot.GuideDataType),
         tostring(snapshot.QuestDataPresent),
         tostring(snapshot.QuestDataType),
-        tostring(snapshot.TaskType)
+        tostring(snapshot.TaskType),
+        boundedReason(snapshot.ReaderEvidence)
     )
 end
 
@@ -107,7 +122,7 @@ function MainFarm:_IsCurrent(session)
     return self.Running and self.Session == session
 end
 
-function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
+function MainFarm:_LogQuestDataSnapshot(phase, questState, force, readerEvidence)
     pcall(function()
         local report = self.QuestDiagnosticReport
         if type(report) ~= "table" then
@@ -128,6 +143,7 @@ function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
             tostring(questDataType),
             tostring(taskType),
             tostring(questState),
+            boundedReason(readerEvidence),
         }, "|")
         local now = os.clock()
         if not force
@@ -145,6 +161,7 @@ function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
             QuestDataPresent = tostring(questDataPresent),
             QuestDataType = tostring(questDataType),
             TaskType = tostring(taskType),
+            ReaderEvidence = boundedReason(readerEvidence),
         }
         report.LatestQuestData = snapshot
         if phase == "post_request" then
@@ -221,31 +238,60 @@ function MainFarm:_EndQuestDiagnosticWait(reason, now)
     self.QuestDiagnosticReport = nil
 end
 
-function MainFarm:_MoveTo(destination, session, threshold)
+function MainFarm:_MoveTo(destination, session, threshold, keepSession)
     if not self.MovementService then
         return false
     end
     return self.MovementService:MoveTo(destination, {
         Speed = 190,
         Threshold = threshold,
+        KeepSession = keepSession == true,
         IsCurrent = function()
             return self:_IsCurrent(session)
         end,
     })
 end
 
-function MainFarm:_ClearTarget()
+function MainFarm:_ClearTarget(preserveMovement)
     local hadTarget = self.Target ~= nil or self.TargetName ~= nil
     if hadTarget then
         if self.EnemyService then
             self.EnemyService:RestoreTargetCollision()
         end
-        if self.MovementService then
+        if self.MovementService and not preserveMovement then
             self.MovementService:Cancel()
         end
     end
     self.Target = nil
     self.TargetName = nil
+end
+
+function MainFarm:_ResetSpawnSearch(targetName)
+    if self.EnemyService then
+        self.EnemyService:ClearIgnoredSpawns()
+    end
+    self.SpawnSearchTarget = targetName
+    self.SpawnCandidate = nil
+    self.SpawnLoading = nil
+    self.SpawnRetryAt = nil
+    self.SpawnEmptyCycles = 0
+    self.SpawnSearchExhausted = false
+    self.NextSpawnSearchAt = 0
+    self.NextEnemySearchAt = 0
+end
+
+function MainFarm:_TimeoutQuestConfirmation(key, now)
+    if key ~= self.QuestDiagnosticWaitKey and key ~= self.LastQuestAttemptKey then
+        return
+    end
+    local reason = boundedReason(self.LastQuestStateReason)
+    self.TimedOutQuestKey = key
+    self.QuestTimeoutReason = reason
+    self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+    self:_SetStatus(
+        "Quest confirmation timed out after 8 seconds: " .. reason,
+        "error"
+    )
 end
 
 function MainFarm:_RequestQuest(candidate, session)
@@ -254,13 +300,26 @@ function MainFarm:_RequestQuest(candidate, session)
     if self.QuestDiagnosticWaitKey and self.QuestDiagnosticWaitKey ~= key then
         self:_EndQuestDiagnosticWait("candidate_changed_before_confirmation", now)
     end
+    if self.TimedOutQuestKey == key then
+        self:_SetStatus(
+            "Quest confirmation timed out: " .. boundedReason(self.QuestTimeoutReason)
+                .. "; toggle Main Farm to retry",
+            "error"
+        )
+        return
+    end
     if self.LastQuestAttemptKey == key then
         local elapsed = now - (self.LastQuestAttemptAt or 0)
         if elapsed < 8 then
-            self:_SetStatus("Waiting for active quest confirmation", "warning")
+            self:_SetStatus(
+                "Waiting for active quest confirmation; "
+                    .. boundedReason(self.LastQuestStateReason),
+                "warning"
+            )
             return
         end
-        self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+        self:_TimeoutQuestConfirmation(key, now)
+        return
     end
 
     self.LastQuestAttemptKey = key
@@ -275,7 +334,13 @@ function MainFarm:_RequestQuest(candidate, session)
         ResultType = "n/a",
         ResultSummary = "not returned",
     }
-    local requested, result = self.QuestService:RequestStart(candidate)
+    self.PendingQuestTargetName = candidate.Mob
+    self:_SetStatus(
+        "Requesting quest: " .. tostring(candidate.QuestName) .. " (ID "
+            .. tostring(candidate.Id) .. ")",
+        "info"
+    )
+    local requested = self.QuestService:RequestStart(candidate)
     local requestDiagnostic = self.QuestService.LastStartDiagnostic
     if type(requestDiagnostic) == "table" then
         self.QuestDiagnosticReport.RequestStage = tostring(requestDiagnostic.Stage)
@@ -283,26 +348,52 @@ function MainFarm:_RequestQuest(candidate, session)
         self.QuestDiagnosticReport.ResultType = tostring(requestDiagnostic.ResultType)
         self.QuestDiagnosticReport.ResultSummary = tostring(requestDiagnostic.ResultSummary)
     end
-    local stateReadOk, stateAfterRequest = pcall(function()
+    local stateReadOk, stateAfterRequest, activeTargetAfterRequest, readerEvidence = pcall(function()
         return self.QuestService:GetActiveQuestState()
     end)
     if not stateReadOk then
         stateAfterRequest = "diagnostic_read_error"
+        activeTargetAfterRequest = nil
+        readerEvidence = "active quest state reader raised an error"
     end
-    self:_LogQuestDataSnapshot("post_request", stateAfterRequest, true)
+    self.LastQuestStateReason = readerEvidence
+    self:_LogQuestDataSnapshot("post_request", stateAfterRequest, true, readerEvidence)
     if stateAfterRequest == "active" then
-        self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
+        if activeTargetAfterRequest == candidate.Mob then
+            self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
+            self.TimedOutQuestKey = nil
+            self.LastQuestAttemptKey = nil
+            self.PendingQuestTargetName = nil
+            self.PendingQuestKey = nil
+            self.PendingQuestReachedAt = nil
+            self:_SetStatus(
+                "Quest confirmed by " .. boundedReason(readerEvidence),
+                "success"
+            )
+        else
+            self:_EndQuestDiagnosticWait("active_state_target_mismatch", os.clock())
+            self.PendingQuestTargetName = nil
+            self.PendingQuestKey = nil
+            self.PendingQuestReachedAt = nil
+            self:_SetStatus(
+                "A different active quest target was observed; following its validated target",
+                "warning"
+            )
+        end
     end
     if not self:_IsCurrent(session) then
         return
     end
-    if requested then
+    if stateAfterRequest ~= "active" then
+        local message = requested
+            and "StartQuest call returned; waiting for state evidence (response is not acceptance)"
+            or "StartQuest call raised; quest acceptance remains unconfirmed"
+        self:_SetStatus(message, "warning")
+    elseif activeTargetAfterRequest ~= candidate.Mob then
         self:_SetStatus(
-            "Quest request sent; waiting for GuideModule.Data.QuestData.Task confirmation",
+            "A different active quest target was observed; following its validated target",
             "warning"
         )
-    else
-        self:_SetStatus("Quest request failed: " .. tostring(result), "error")
     end
 end
 
@@ -332,36 +423,75 @@ function MainFarm:_Step(session)
         self.Character = character
         self.Target = nil
         self.TargetName = nil
+        self:_ResetSpawnSearch(nil)
         self:_SetStatus("Character ready; reacquiring farm state", "info")
     end
 
-    local questState, activeTarget = self.QuestService:GetActiveQuestState()
+    local questState, activeTarget, readerEvidence = self.QuestService:GetActiveQuestState()
+    self.LastQuestStateReason = readerEvidence
     if self.QuestDiagnosticWaitKey then
-        self:_LogQuestDataSnapshot("confirmation_poll", questState, false)
+        self:_LogQuestDataSnapshot("confirmation_poll", questState, false, readerEvidence)
         local now = os.clock()
         if questState == "active" then
-            self:_LogQuestDataSnapshot("confirmation_poll", questState, true)
-            self:_EndQuestDiagnosticWait("active_state_observed", now)
+            self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
+            if activeTarget == self.PendingQuestTargetName then
+                self:_EndQuestDiagnosticWait("active_state_observed", now)
+                self.TimedOutQuestKey = nil
+                self.LastQuestAttemptKey = nil
+                self.PendingQuestTargetName = nil
+                self.PendingQuestKey = nil
+                self.PendingQuestReachedAt = nil
+                self:_SetStatus(
+                    "Quest confirmed by " .. boundedReason(readerEvidence),
+                    "success"
+                )
+            else
+                self:_EndQuestDiagnosticWait("active_state_target_mismatch", now)
+                self.PendingQuestTargetName = nil
+                self.PendingQuestKey = nil
+                self.PendingQuestReachedAt = nil
+                self:_SetStatus(
+                    "A different active quest target was observed; following its validated target",
+                    "warning"
+                )
+            end
         elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= 8 then
-            self:_LogQuestDataSnapshot("confirmation_poll", questState, true)
-            self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+            self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
+            self:_TimeoutQuestConfirmation(self.QuestDiagnosticWaitKey, now)
         end
     end
-    if questState == "unknown" then
-        self:_ClearTarget()
-        self.MovementService:Cancel()
+    if questState == "active"
+        and self.PendingQuestTargetName
+        and activeTarget == self.PendingQuestTargetName
+    then
+        self.TimedOutQuestKey = nil
+        self.QuestTimeoutReason = nil
+        self.LastQuestAttemptKey = nil
+        self.PendingQuestTargetName = nil
+        self.PendingQuestKey = nil
+        self.PendingQuestReachedAt = nil
         self:_SetStatus(
-            "Waiting: GuideModule.Data quest state is unavailable; quest is not assumed active",
+            "Quest confirmed by " .. boundedReason(readerEvidence),
+            "success"
+        )
+    end
+    if questState == "unknown" then
+        self:_ClearTarget(true)
+        self:_SetStatus(
+            "Waiting: no reliable active quest state; movement session held safely",
             "warning"
         )
         return
     elseif questState == "active-unknown" then
-        self:_ClearTarget()
-        self.MovementService:Cancel()
-        self:_SetStatus("Waiting: an active quest exists but its target is not exposed", "warning")
+        self:_ClearTarget(true)
+        self:_SetStatus(
+            "Waiting: quest UI is active but its catalog target is unresolved; "
+                .. boundedReason(readerEvidence),
+            "warning"
+        )
         return
     elseif questState == "none" then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         local candidate, selectionError = self.QuestService:SelectLevelQuest()
         if not candidate then
             self.MovementService:Cancel()
@@ -377,9 +507,6 @@ function MainFarm:_Step(session)
         end
         local candidateKey = questKey(candidate)
         if self.PendingQuestKey ~= candidateKey then
-            if self.PendingQuestKey and self.MovementService then
-                self.MovementService:Cancel()
-            end
             self.PendingQuestKey = candidateKey
             self.PendingQuestReachedAt = nil
         end
@@ -388,7 +515,7 @@ function MainFarm:_Step(session)
             or CFrame.new(giverPosition)
         if (root.Position - giverCFrame.Position).Magnitude > 8 then
             self.PendingQuestReachedAt = nil
-            self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8)
+            self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8, true)
             self:_SetStatus("Approaching quest giver: " .. tostring(candidate.Name), "info")
             return
         end
@@ -404,43 +531,149 @@ function MainFarm:_Step(session)
     end
 
     if self.TargetName ~= activeTarget then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
+        self:_ResetSpawnSearch(activeTarget)
         self.TargetName = activeTarget
     end
 
-    local target = self.EnemyService:FindNearest(activeTarget, root.Position)
+    local now = os.clock()
+    local target
+    if self.Target and self.TargetName == activeTarget and self.EnemyService:IsAlive(self.Target) then
+        target = self.Target
+    elseif now >= (self.NextEnemySearchAt or 0) then
+        target = self.EnemyService:FindNearest(activeTarget, root.Position)
+        self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    end
     if not target then
         if self.Target then
-            self:_ClearTarget()
+            self:_ClearTarget(true)
+            self.TargetName = activeTarget
         end
-        local spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget)
+        if self.SpawnSearchExhausted then
+            self:_SetStatus(
+                "No living " .. activeTarget
+                    .. " was found after two spawn cycles; continuing throttled scans of loaded NPCs",
+                "warning"
+            )
+            return
+        end
+        if self.SpawnRetryAt and now < self.SpawnRetryAt then
+            self:_SetStatus(
+                "No living " .. activeTarget .. " after checking known spawns; retrying shortly",
+                "warning"
+            )
+            return
+        elseif self.SpawnRetryAt then
+            self.SpawnRetryAt = nil
+            self.NextSpawnSearchAt = 0
+        end
+
+        local spawnPart = self.SpawnCandidate
+        local allSpawnsVisited = false
+        if now >= (self.NextSpawnSearchAt or 0) then
+            spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget, root.Position)
+            self.SpawnCandidate = spawnPart
+            self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
+        end
         if spawnPart then
-            self:_MoveTo(spawnPart.CFrame * CFrame.new(0, 60, 0), session, 100)
-            if (spawnPart.Position - root.Position).Magnitude <= 100 then
-                self.EnemyService:MarkSpawnIgnored(spawnPart)
+            if not spawnPart.Parent then
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self.NextSpawnSearchAt = 0
+                self:_SetStatus("A matching enemy spawn marker was removed; rescanning", "warning")
+                return
             end
-            self:_SetStatus("Waiting near supported spawn: " .. activeTarget, "info")
+            local spawnDestination = spawnPart.CFrame * CFrame.new(0, 60, 0)
+            self:_MoveTo(spawnDestination, session, 100, true)
+            if (spawnPart.Position - root.Position).Magnitude <= 100 then
+                if not self.SpawnLoading
+                    or self.SpawnLoading.TargetName ~= activeTarget
+                    or self.SpawnLoading.Part ~= spawnPart
+                then
+                    self.SpawnLoading = {
+                        TargetName = activeTarget,
+                        Part = spawnPart,
+                        ArrivedAt = now,
+                    }
+                elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
+                    self.EnemyService:MarkSpawnIgnored(spawnPart)
+                    self.SpawnLoading = nil
+                    self.SpawnCandidate = nil
+                    self.NextSpawnSearchAt = 0
+                    self.NextEnemySearchAt = 0
+                    self:_SetStatus(
+                        "No living " .. activeTarget .. " loaded at this spawn; checking the next location",
+                        "warning"
+                    )
+                    return
+                end
+                local elapsed = self.SpawnLoading and now - self.SpawnLoading.ArrivedAt or 0
+                self:_SetStatus(
+                    "Waiting for " .. activeTarget .. " to load at spawn ("
+                        .. tostring(math.max(0, math.ceil(SPAWN_LOAD_GRACE - elapsed)))
+                        .. "s)",
+                    "info"
+                )
+            else
+                if self.SpawnLoading and self.SpawnLoading.Part ~= spawnPart then
+                    self.SpawnLoading = nil
+                end
+                self:_SetStatus("Travelling to supported spawn for " .. activeTarget, "info")
+            end
         else
             if allSpawnsVisited then
                 self.EnemyService:ClearIgnoredSpawns()
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self.SpawnEmptyCycles = (self.SpawnEmptyCycles or 0) + 1
+                if self.SpawnEmptyCycles >= MAX_EMPTY_SPAWN_CYCLES then
+                    self.SpawnSearchExhausted = true
+                    self.SpawnRetryAt = nil
+                    self.NextSpawnSearchAt = math.huge
+                    self:_SetStatus(
+                        "No living " .. activeTarget
+                            .. " after two spawn cycles; continuing throttled scans of loaded NPCs",
+                        "warning"
+                    )
+                else
+                    self.SpawnRetryAt = now + SPAWN_CYCLE_RETRY_INTERVAL
+                    self.NextSpawnSearchAt = self.SpawnRetryAt
+                    self:_SetStatus(
+                        "No living " .. activeTarget
+                            .. " at known spawns; retrying once after a short pause",
+                        "warning"
+                    )
+                end
+            else
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self:_SetStatus(
+                    "No eligible " .. activeTarget
+                        .. " is loaded and no matching Workspace._WorldOrigin.EnemySpawns marker is available",
+                    "warning"
+                )
             end
-            self.MovementService:Cancel()
-            self:_SetStatus(
-                "Waiting for living " .. activeTarget .. " or a Workspace._WorldOrigin.EnemySpawns marker",
-                "warning"
-            )
         end
         return
     end
 
+    if self.SpawnSearchTarget ~= activeTarget or self.SpawnSearchExhausted then
+        self:_ResetSpawnSearch(activeTarget)
+    end
+    self.SpawnEmptyCycles = 0
+    self.SpawnSearchExhausted = false
+    self.SpawnCandidate = nil
+    self.SpawnLoading = nil
+    self.SpawnRetryAt = nil
+    self.NextSpawnSearchAt = 0
     if self.Target ~= target then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self.Target = target
         self.TargetName = activeTarget
         self:_SetStatus("Target acquired: " .. activeTarget, "success")
     end
     if not self.EnemyService:IsAlive(target) then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self:_SetStatus("Target died or became invalid; reacquiring", "info")
         return
     end
@@ -476,13 +709,13 @@ function MainFarm:_Step(session)
             local targetOffset = weaponCategory == "Blox Fruit"
                 and CFrame.new(-7, 20, 0)
                 or CFrame.new(7, 20, 0)
-            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end
         end
     else
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self:_SetStatus("Target died or became invalid; reacquiring", "info")
     end
 end
@@ -494,6 +727,11 @@ function MainFarm:_Run(session)
             if self.MovementService then
                 self.MovementService:Cancel()
             end
+            if self.EnemyService then
+                self.EnemyService:RestoreTargetCollision()
+            end
+            self.Target = nil
+            self.TargetName = nil
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
         task.wait()
@@ -515,12 +753,22 @@ function MainFarm:Initialize(context)
     self.CombatDependencyError = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.TimedOutQuestKey = nil
+    self.QuestTimeoutReason = nil
+    self.PendingQuestTargetName = nil
+    self.LastQuestStateReason = nil
     self.QuestDiagnosticWaitKey = nil
     self.QuestDiagnosticWaitStartedAt = nil
     self.QuestDiagnosticReport = nil
     self.LastQuestDiagnosticSignature = nil
     self.LastQuestDiagnosticAt = 0
     self.LastStatus = nil
+    self.SpawnSearchTarget = nil
+    self.SpawnCandidate = nil
+    self.SpawnLoading = nil
+    self.SpawnRetryAt = nil
+    self.NextSpawnSearchAt = 0
+    self.NextEnemySearchAt = 0
 
     local player = context.Compatibility.Player
     if player then
@@ -537,6 +785,7 @@ function MainFarm:Initialize(context)
             self.Target = nil
             self.TargetName = nil
             self.Character = nil
+            self:_ResetSpawnSearch(nil)
             self:_SetStatus("Character changed; farm session will reacquire after respawn", "warning")
         end)
         self.CharacterRemovingConnection = player.CharacterRemoving:Connect(function()
@@ -547,6 +796,7 @@ function MainFarm:Initialize(context)
                 self.CombatService:Cancel()
             end
             self:_ClearTarget()
+            self:_ResetSpawnSearch(nil)
         end)
     end
     return true
@@ -571,9 +821,17 @@ function MainFarm:Start()
     self.Running = true
     self.CombatDependencyAttempted = false
     self.CombatDependencyError = nil
+    self.LastQuestAttemptKey = nil
+    self.LastQuestAttemptAt = 0
+    self.TimedOutQuestKey = nil
+    self.QuestTimeoutReason = nil
+    self.PendingQuestTargetName = nil
+    self.PendingQuestKey = nil
+    self.PendingQuestReachedAt = nil
+    self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
-    self:_SetStatus("Main Farm enabled; reading authoritative quest state", "success")
+    self:_SetStatus("Main Farm enabled; reading available quest state", "success")
     task.spawn(self._Run, self, session)
     return true
 end
@@ -597,6 +855,13 @@ function MainFarm:Stop()
     self.TargetName = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
+    self.PendingQuestTargetName = nil
+    self.LastQuestAttemptKey = nil
+    self.LastQuestAttemptAt = 0
+    self.TimedOutQuestKey = nil
+    self.QuestTimeoutReason = nil
+    self.LastQuestStateReason = nil
+    self:_ResetSpawnSearch(nil)
     self.QuestDiagnosticWaitKey = nil
     self.QuestDiagnosticWaitStartedAt = nil
     if self.Context and self.Context.State then

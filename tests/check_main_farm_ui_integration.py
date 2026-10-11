@@ -26,13 +26,17 @@ def function_body(source, signature, next_signature):
 farm_config = CONFIG[CONFIG.index("Farm = {"):CONFIG.index("Player = {")]
 require('Kind = "featureToggle"' in farm_config,
         "Farm page must expose Main Farm as an actual feature toggle")
+require('Label = "Auto Farm Level"' in farm_config,
+        "Farm toggle must be labelled Auto Farm Level")
 require('Action = "farm.main"' in farm_config,
         "Farm toggle must use MainFarm's registered action")
-require('Kind = "settingCycle"' in farm_config
-        and 'Action = "farm.weaponCategory.cycle"' in farm_config
-        and 'Setting = "WeaponCategory"' in farm_config,
-        "Farm page must expose the configured weapon-category selector")
-require('WeaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG,
+require('Kind = "settingSelect"' in farm_config
+        and 'Action = "farm.weaponCategory.select"' in farm_config
+        and 'Setting = "WeaponCategory"' in farm_config
+        and "Options = weaponCategories" in farm_config,
+        "Farm page must expose directly selectable weapon categories")
+require('local weaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG
+        and "WeaponCategories = weaponCategories" in CONFIG,
         "Weapon selector must use the supported category choices")
 
 activate = function_body(UI, "function UI:_ActivateControl(control)", "\nfunction UI:_AddControl")
@@ -40,26 +44,31 @@ require("snapshot.featureEnabled[control.Action] ~= true" in activate,
         "Feature toggle must derive its next value from the actual state snapshot")
 require("self.Dispatch(control.Action," in activate,
         "UI activation must dispatch the configured action")
-require("row.Activated" in UI and "self:_ActivateControl(control)" in UI,
+require("row.Activated" in UI and "pcall(self._ActivateControl, self, control)" in UI,
         "The visible Farm row must route taps into the UI activation handler")
 refresh = function_body(UI, "function UI:_Refresh(snapshot)", "\nfunction UI:_ClearPage")
 require("snapshot.featureEnabled[entry.Control.Action] == true" in refresh,
         "UI toggle indicator must reflect MainFarm's actual enabled state")
 require('entry.Label.Text = enabled and "ON" or "OFF"' in refresh,
         "UI must show the resulting enabled state")
-require('self.Config.FarmSettings or {}' in refresh
-        and 'entry.Control.Setting' in refresh,
-        "UI must display the current shared setting-cycle value")
+require("self.SelectorEntries" in refresh
+        and "farmSettings[entry.Setting]" in refresh
+        and "option.Button.BackgroundColor3" in refresh,
+        "UI must show the selected value using the shared setting")
 
 require("self.FeatureManager:Dispatch(actionId, payload)" in HUB,
         "Hub must route UI actions to FeatureManager")
 require("Modules = { MainFarm, PlaceholderFeatures }" in MANAGER,
         "FeatureManager must own the existing MainFarm module")
 dispatch = function_body(MANAGER, "function FeatureManager:Dispatch", "\nfunction FeatureManager:Cleanup")
-require('actionId == "farm.weaponCategory.cycle"' in dispatch
-        and "farmSettings.WeaponCategory = categories[nextIndex]" in dispatch
+require('actionId == "farm.weaponCategory.select"' in dispatch
+        and "category == payload" in dispatch
+        and "farmSettings.WeaponCategory = selectedCategory" in dispatch
         and '"Weapon category: " .. tostring(farmSettings.WeaponCategory)' in dispatch,
-        "Weapon-category action must update the same config read by MainFarm")
+        "Direct category selection must update the config read by MainFarm")
+require('Name = "Option_" .. tostring(value)' in UI
+        and "self.Dispatch,\n                        control.Action,\n                        value" in UI,
+        "Each weapon option must dispatch its selected value immediately")
 require("for _, featureModule in ipairs(self.Modules) do" in dispatch
         and "featureModule.Handle" in dispatch,
         "FeatureManager must dispatch the action to the registered feature modules")
@@ -95,7 +104,8 @@ require(collision.count("Heartbeat:Connect") == 1
         "Farm collision maintenance must use one connection and restore it on stop")
 
 require("farmSettings.WeaponCategory" in MAIN_FARM
-        and "farmSettings.AttackNoAnimation" in MAIN_FARM,
+        and "farmSettings.AttackNoAnimation" in MAIN_FARM
+        and "self.CombatService:EquipWeapon(weaponCategory)" in MAIN_FARM,
         "MainFarm must read the shared FarmSettings configuration")
 require("self.QuestService:GetActiveQuestState()" in MAIN_FARM
         and "self.QuestService:SelectLevelQuest()" in MAIN_FARM,
@@ -103,4 +113,5 @@ require("self.QuestService:GetActiveQuestState()" in MAIN_FARM
 
 print("PASS: Farm UI activation dispatches to the existing MainFarm feature")
 print("PASS: toggle state reflects MainFarm start/stop and repeated enable is guarded")
+print("PASS: weapon-category options select values directly and update shared config")
 print("PASS: quest and farm settings are read by the existing feature/services")

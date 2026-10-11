@@ -3,6 +3,7 @@ QuestService.__index = QuestService
 
 local MAX_TRACKED_QUEST_TEXT_LENGTH = 160
 local MAX_TRACKED_QUEST_PROGRESS_LENGTH = 32
+local MAX_MAIN_QUEST_TITLE_LENGTH = 160
 
 local excludedQuestNames = {
     BartiloQuest = true,
@@ -54,8 +55,55 @@ local function parseTrackedQuestProgress(text)
         or current == math.huge
         or total == math.huge
         or total <= 0
-        or current > total
+        or current >= total
     then
+        return nil
+    end
+    return current, total
+end
+
+local function titleContainsTarget(title, targetName)
+    if type(title) ~= "string" or type(targetName) ~= "string" then
+        return false
+    end
+
+    local titleWords = {}
+    for word in title:lower():gmatch("[%w]+") do
+        table.insert(titleWords, word)
+    end
+    local targetWords = {}
+    for word in targetName:lower():gmatch("[%w]+") do
+        table.insert(targetWords, word)
+    end
+    if #targetWords == 0 or #targetWords > #titleWords then
+        return false
+    end
+
+    for startIndex = 1, #titleWords - #targetWords + 1 do
+        local matches = true
+        for offset, expected in ipairs(targetWords) do
+            local actual = titleWords[startIndex + offset - 1]
+            local finalWord = offset == #targetWords
+            if actual ~= expected and not (finalWord and actual == expected .. "s") then
+                matches = false
+                break
+            end
+        end
+        if matches then
+            return true
+        end
+    end
+    return false
+end
+
+local function parseMainQuestTitleProgress(title)
+    if type(title) ~= "string" then
+        return nil
+    end
+    local currentText, totalText = title:match("%((%d+)%s*/%s*(%d+)%)%s*$")
+    local current = tonumber(currentText)
+    local total = tonumber(totalText)
+    if not current or not total or total <= 0 or current >= total then
         return nil
     end
     return current, total
@@ -93,6 +141,56 @@ local function findEligibleQuestTarget(self, guideData, targetName, progressTota
         end
     end
     return nil
+end
+
+local function findEligibleTargetFromTitle(self, guideData, title, progressTotal)
+    local level = self:GetPlayerLevel()
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if not level or type(npcList) ~= "table" or type(self.Quests) ~= "table" then
+        return nil, "quest catalog or eligible NPC list is unavailable"
+    end
+
+    local bestTarget, bestLength, ambiguous = nil, 0, false
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table"
+            and not excludedQuestNames[npcEntry.InternalQuestName]
+            and type(npcEntry.Levels) == "table"
+        then
+            local questGroup = self.Quests[npcEntry.InternalQuestName]
+            if type(questGroup) == "table" then
+                for questId, requiredLevel in pairs(npcEntry.Levels) do
+                    local numericLevel = tonumber(requiredLevel)
+                    local quest = questGroup[questId]
+                    if numericLevel and numericLevel >= 0 and numericLevel <= level
+                        and type(quest) == "table" and type(quest.Task) == "table"
+                    then
+                        for mobName, count in pairs(quest.Task) do
+                            local numericCount = tonumber(count)
+                            if type(mobName) == "string" and numericCount and numericCount > 1
+                                and numericCount == progressTotal
+                                and titleContainsTarget(title, mobName)
+                            then
+                                local nameLength = #mobName
+                                if nameLength > bestLength then
+                                    bestTarget, bestLength, ambiguous = mobName, nameLength, false
+                                elseif nameLength == bestLength and bestTarget ~= mobName then
+                                    ambiguous = true
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if ambiguous then
+        return nil, "visible quest title matches multiple catalog targets"
+    end
+    if not bestTarget then
+        return nil, "visible quest title does not map to a level-eligible catalog target"
+    end
+    return bestTarget
 end
 
 local function readTrackedQuestTarget(self, guideData)
@@ -141,6 +239,72 @@ local function readTrackedQuestTarget(self, guideData)
     return targetName
 end
 
+local function readFirstSeaQuestHud(self, guideData)
+    local ok, state, targetName, reason = pcall(function()
+        local compatibility = self.Compatibility
+        if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
+            return "unknown", nil, "PlayerGui reader is unavailable"
+        end
+
+        local playerGui = compatibility:GetPlayerGui()
+        local main = playerGui and playerGui:FindFirstChild("Main")
+        if not main then
+            return "unknown", nil, "PlayerGui.Main is unavailable"
+        end
+        if main:IsA("ScreenGui") and not main.Enabled then
+            return "unknown", nil, "PlayerGui.Main ScreenGui is disabled"
+        end
+
+        local questFrame = main:FindFirstChild("Quest")
+        if not questFrame or not questFrame:IsA("GuiObject") then
+            return "unknown", nil, "PlayerGui.Main.Quest is unavailable"
+        end
+        if not questFrame.Visible then
+            return "none", nil, "PlayerGui.Main.Quest.Visible is false"
+        end
+
+        local container = questFrame:FindFirstChild("Container")
+        local questTitle = container and container:FindFirstChild("QuestTitle")
+        local titleLabel = questTitle and questTitle:FindFirstChild("Title")
+        local titleIsText = titleLabel and (
+            titleLabel:IsA("TextLabel")
+                or titleLabel:IsA("TextButton")
+                or titleLabel:IsA("TextBox")
+        )
+        if not titleIsText or not titleLabel.Visible
+            or not container or (container:IsA("GuiObject") and not container.Visible)
+            or not questTitle or (questTitle:IsA("GuiObject") and not questTitle.Visible)
+        then
+            return "active-unknown", nil, "visible quest panel has no visible readable title label"
+        end
+
+        local title = usableTrackedQuestText(titleLabel.Text, MAX_MAIN_QUEST_TITLE_LENGTH)
+        if not title then
+            return "active-unknown", nil, "visible quest panel title is empty or malformed"
+        end
+        local _, progressTotal = parseMainQuestTitleProgress(title)
+        if not progressTotal then
+            return "active-unknown", nil, "visible quest title has no valid incomplete current/total progress"
+        end
+        local mappedTarget, mappingError = findEligibleTargetFromTitle(
+            self,
+            guideData,
+            title,
+            progressTotal
+        )
+        if not mappedTarget then
+            return "active-unknown", nil, mappingError
+        end
+        return "active", mappedTarget,
+            "visible Main.Quest title/progress maps to the level-eligible quest catalog"
+    end)
+
+    if not ok then
+        return "unknown", nil, "First Sea quest HUD read failed safely"
+    end
+    return state, targetName, reason
+end
+
 function QuestService.new(compatibility)
     local quests, guide, loadError = compatibility:GetQuestModules()
     if not quests then
@@ -166,25 +330,35 @@ function QuestService:GetActiveQuestState()
     if type(questData) == "table" and type(questData.Task) == "table" then
         local targetName = next(questData.Task)
         if type(targetName) == "string" and targetName ~= "" then
-            return "active", targetName
+            return "active", targetName, "GuideModule.Data.QuestData.Task"
         end
     end
 
     local trackedTarget = readTrackedQuestTarget(self, guideData)
     if trackedTarget then
-        return "active", trackedTarget
+        return "active", trackedTarget, "TrackedQuestFrame title/target/progress mapped to quest catalog"
+    end
+
+    local firstSea = false
+    if self.Compatibility and type(self.Compatibility.IsFirstSea) == "function" then
+        local seaReadOk, isFirstSea = pcall(self.Compatibility.IsFirstSea, self.Compatibility)
+        firstSea = seaReadOk and isFirstSea == true
+    end
+    if firstSea then
+        local hudState, hudTarget, hudReason = readFirstSeaQuestHud(self, guideData)
+        return hudState, hudTarget, hudReason
     end
 
     if type(guideData) ~= "table" then
-        return "unknown", nil
+        return "unknown", nil, "GuideModule.Data is unavailable"
     end
     if questData == nil then
-        return "none", nil
+        return "none", nil, "GuideModule.Data.QuestData is absent"
     end
     if type(questData) ~= "table" or type(questData.Task) ~= "table" then
-        return "unknown", nil
+        return "unknown", nil, "GuideModule.Data.QuestData.Task is not a table"
     end
-    return "active-unknown", nil
+    return "active-unknown", nil, "GuideModule exposes a quest record without a readable task"
 end
 
 function QuestService:SelectLevelQuest()

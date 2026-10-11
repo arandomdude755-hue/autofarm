@@ -44,7 +44,7 @@ function EnemyService:FindNearest(targetName, origin)
     return nearest, nearestDistance
 end
 
-function EnemyService:FindSpawn(targetName)
+function EnemyService:FindSpawn(targetName, origin)
     local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
     local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
     if not enemySpawns or type(targetName) ~= "string" then
@@ -53,16 +53,25 @@ function EnemyService:FindSpawn(targetName)
 
     local normalizedTarget = normalizeEnemyName(targetName)
     local hasMatchingSpawn = false
+    local nearest, nearestDistance = nil, math.huge
     for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
         if spawnPart:IsA("BasePart") then
             local normalizedSpawn = normalizeEnemyName(spawnPart.Name)
             if spawnPart.Name == targetName or normalizedSpawn == normalizedTarget then
                 hasMatchingSpawn = true
                 if not self.IgnoredSpawns[spawnPart] then
-                    return spawnPart, false
+                    local distance = typeof(origin) == "Vector3"
+                        and (spawnPart.Position - origin).Magnitude
+                        or 0
+                    if distance < nearestDistance then
+                        nearest, nearestDistance = spawnPart, distance
+                    end
                 end
             end
         end
+    end
+    if nearest then
+        return nearest, false
     end
     return nil, hasMatchingSpawn
 end

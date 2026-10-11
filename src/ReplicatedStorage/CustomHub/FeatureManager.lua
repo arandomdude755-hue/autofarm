@@ -42,23 +42,24 @@ function FeatureManager:Dispatch(actionId, payload)
         return true
     end
 
-    if actionId == "farm.weaponCategory.cycle" then
+    if actionId == "farm.weaponCategory.select" then
         local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
         local categories = farmSettings and farmSettings.WeaponCategories
-        if type(categories) ~= "table" or #categories == 0 then
-            self.State:SetStatus("Weapon category settings are unavailable.", "error")
-            return false, "Weapon category settings are unavailable"
-        end
-
-        local currentIndex
-        for index, category in ipairs(categories) do
-            if category == farmSettings.WeaponCategory then
-                currentIndex = index
-                break
+        local selectedCategory
+        if type(categories) == "table" and type(payload) == "string" then
+            for _, category in ipairs(categories) do
+                if category == payload then
+                    selectedCategory = category
+                    break
+                end
             end
         end
-        local nextIndex = currentIndex and (currentIndex % #categories + 1) or 1
-        farmSettings.WeaponCategory = categories[nextIndex]
+        if not selectedCategory then
+            self.State:SetStatus("Weapon category settings are unavailable.", "error")
+            return false, "Unsupported weapon category"
+        end
+
+        farmSettings.WeaponCategory = selectedCategory
         self.State:SetStatus(
             "Weapon category: " .. tostring(farmSettings.WeaponCategory),
             "success"

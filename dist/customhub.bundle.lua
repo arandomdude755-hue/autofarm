@@ -27,6 +27,8 @@ end
 
 __bundleFactories["CustomHub.Config"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Config.lua
+local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
+
 local Config = {
     Name = "Custom Hub",
     Version = "UI shell",
@@ -37,7 +39,7 @@ local Config = {
     },
     FarmSettings = {
         -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
-        WeaponCategories = { "Melee", "Sword", "Blox Fruit" },
+        WeaponCategories = weaponCategories,
         WeaponCategory = "Melee",
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
@@ -49,58 +51,64 @@ local Config = {
         DesktopHeight = 0.78,
         ExpandedWidth = 0.96,
         ExpandedHeight = 0.88,
-        MinSize = Vector2.new(270, 330),
-        MaxSize = Vector2.new(500, 680),
+        MinSize = Vector2.new(280, 300),
+        MaxSize = Vector2.new(760, 740),
         HeaderTop = 7,
-        HeaderHeight = 30,
-        CloseWidth = 54,
-        CloseHeight = 28,
+        HeaderHeight = 40,
+        CloseWidth = 28,
+        CloseHeight = 26,
         TitleRightInset = 84,
-        TabsTop = 42,
-        TabHeight = 34,
-        StatusTop = 82,
-        StatusHeight = 44,
+        TabsTop = 40,
+        TabHeight = 36,
+        StatusTop = 0,
+        StatusHeight = 30,
         StatusInset = 8,
-        StatusTextTop = 4,
-        ContentTop = 138,
-        PageDescriptionHeight = 46,
-        ScrollContentInset = 8,
-        ScrollBarThickness = 4,
-        RowHeight = 72,
+        StatusTextTop = 0,
+        ContentTop = 76,
+        PageDescriptionHeight = 38,
+        SectionHeight = 26,
+        ScrollContentInset = 18,
+        ScrollBarThickness = 3,
+        RowHeight = 68,
+        SelectorRowHeight = 94,
         RowInset = 10,
         RowTitleTop = 7,
-        RowTitleHeight = 22,
-        RowDetailTop = 31,
-        RowDetailHeight = 32,
-        ToggleValueTop = 8,
-        ToggleValueWidth = 90,
-        ToggleValueHeight = 18,
+        RowTitleHeight = 20,
+        RowDetailTop = 30,
+        RowDetailHeight = 24,
+        ToggleValueTop = 10,
+        ToggleValueWidth = 58,
+        ToggleValueHeight = 22,
         ToggleGap = 8,
-        Spacing = 8,
-        Padding = 10,
+        Spacing = 6,
+        Padding = 8,
         BorderThickness = 1,
     },
     Theme = {
-        Background = Color3.fromRGB(24, 26, 30),
-        Panel = Color3.fromRGB(32, 35, 40),
-        Control = Color3.fromRGB(40, 44, 50),
-        Selected = Color3.fromRGB(54, 81, 103),
-        Border = Color3.fromRGB(62, 67, 75),
+        Background = Color3.fromRGB(18, 21, 28),
+        Header = Color3.fromRGB(23, 27, 36),
+        TabBar = Color3.fromRGB(20, 24, 32),
+        Panel = Color3.fromRGB(22, 26, 34),
+        Control = Color3.fromRGB(27, 32, 42),
+        Selected = Color3.fromRGB(30, 36, 48),
+        Border = Color3.fromRGB(43, 49, 62),
+        AccentBorder = Color3.fromRGB(69, 117, 190),
         Text = Color3.fromRGB(237, 239, 243),
-        MutedText = Color3.fromRGB(165, 172, 181),
-        Accent = Color3.fromRGB(111, 166, 204),
-        Success = Color3.fromRGB(128, 190, 151),
+        MutedText = Color3.fromRGB(157, 165, 177),
+        Accent = Color3.fromRGB(79, 139, 224),
+        Success = Color3.fromRGB(106, 190, 145),
         Warning = Color3.fromRGB(222, 184, 105),
         Error = Color3.fromRGB(224, 116, 108),
         Font = Enum.Font.Gotham,
         StrongFont = Enum.Font.GothamSemibold,
+        MonoFont = Enum.Font.Code,
         TextSizes = {
-            Title = 17,
-            Control = 14,
-            Body = 13,
-            Detail = 12,
-            Tab = 11,
-            Status = 11,
+            Title = 12,
+            Control = 13,
+            Body = 12,
+            Detail = 10,
+            Tab = 10,
+            Status = 9,
         },
     },
     Tabs = {
@@ -112,6 +120,8 @@ local Config = {
     },
     Pages = {
         Main = {
+            Section = "Hub Overview",
+            Meta = "LOCAL UI",
             Description = "Hub status and safe UI checks.",
             Controls = {
                 {
@@ -123,24 +133,29 @@ local Config = {
             },
         },
         Farm = {
+            Section = "Auto Farm",
+            Meta = "CONFIGURED",
             Description = "Level-based quest farming with target reacquisition.",
             Controls = {
                 {
                     Kind = "featureToggle",
-                    Label = "Main Farm",
+                    Label = "Auto Farm Level",
                     Detail = "Selects a level quest, confirms it, then finds and engages its target.",
                     Action = "farm.main",
                 },
                 {
-                    Kind = "settingCycle",
+                    Kind = "settingSelect",
                     Label = "Weapon category",
-                    Detail = "Tap to cycle through Melee, Sword, and Blox Fruit.",
-                    Action = "farm.weaponCategory.cycle",
+                    Detail = "Choose Main Farm's equipped weapon category.",
+                    Action = "farm.weaponCategory.select",
                     Setting = "WeaponCategory",
+                    Options = weaponCategories,
                 },
             },
         },
         Player = {
+            Section = "Player Tools",
+            Meta = "LOCAL",
             Description = "Player utilities are not connected yet.",
             Controls = {
                 {
@@ -152,6 +167,8 @@ local Config = {
             },
         },
         Teleport = {
+            Section = "Travel",
+            Meta = "PLACEHOLDER",
             Description = "Travel actions remain unavailable in the UI shell.",
             Controls = {
                 {
@@ -163,6 +180,8 @@ local Config = {
             },
         },
         Settings = {
+            Section = "Interface & Display",
+            Meta = "LOCAL",
             Description = "Local presentation settings for this UI shell.",
             Controls = {
                 {
@@ -418,6 +437,13 @@ function Compatibility:IsThirdSea()
         or game.PlaceId == 7449423635
 end
 
+function Compatibility:IsFirstSea()
+    local mapName = self.Workspace:GetAttribute("MAP")
+    return mapName == "Sea1"
+        or game.PlaceId == 2753915549
+        or game.PlaceId == 85211729168715
+end
+
 return Compatibility
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Compatibility.lua
 end
@@ -468,23 +494,24 @@ function FeatureManager:Dispatch(actionId, payload)
         return true
     end
 
-    if actionId == "farm.weaponCategory.cycle" then
+    if actionId == "farm.weaponCategory.select" then
         local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
         local categories = farmSettings and farmSettings.WeaponCategories
-        if type(categories) ~= "table" or #categories == 0 then
-            self.State:SetStatus("Weapon category settings are unavailable.", "error")
-            return false, "Weapon category settings are unavailable"
-        end
-
-        local currentIndex
-        for index, category in ipairs(categories) do
-            if category == farmSettings.WeaponCategory then
-                currentIndex = index
-                break
+        local selectedCategory
+        if type(categories) == "table" and type(payload) == "string" then
+            for _, category in ipairs(categories) do
+                if category == payload then
+                    selectedCategory = category
+                    break
+                end
             end
         end
-        local nextIndex = currentIndex and (currentIndex % #categories + 1) or 1
-        farmSettings.WeaponCategory = categories[nextIndex]
+        if not selectedCategory then
+            self.State:SetStatus("Weapon category settings are unavailable.", "error")
+            return false, "Unsupported weapon category"
+        end
+
+        farmSettings.WeaponCategory = selectedCategory
         self.State:SetStatus(
             "Weapon category: " .. tostring(farmSettings.WeaponCategory),
             "success"
@@ -535,18 +562,31 @@ local UI = {}
 UI.__index = UI
 
 local UserInputService = game:GetService("UserInputService")
-local MINIMIZE_BUTTON_WIDTH = 42
+local TweenService = game:GetService("TweenService")
+local MINIMIZE_BUTTON_WIDTH = 28
 local HEADER_BUTTON_GAP = 6
-local RESTORE_BUTTON_SIZE = Vector2.new(60, 32)
+local RESTORE_BUTTON_SIZE = Vector2.new(56, 56)
 local RESTORE_DRAG_THRESHOLD = 8
+local HEADER_HEIGHT = 40
+local TAB_BAR_HEIGHT = 36
+local FOOTER_HEIGHT = 30
 
 local function create(className, properties, parent)
     local instance = Instance.new(className)
     for property, value in pairs(properties) do
         instance[property] = value
     end
+    if className == "TextLabel" or className == "TextButton" or className == "TextBox" then
+        instance.AutoLocalize = false
+    end
     instance.Parent = parent
     return instance
+end
+
+local function addCorner(parent, radius)
+    create("UICorner", {
+        CornerRadius = UDim.new(0, radius or 4),
+    }, parent)
 end
 
 local function clampDragPosition(origin, delta, viewport, size)
@@ -592,23 +632,54 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         OnClose = onClose,
         Gui = nil,
         Root = nil,
+        Header = nil,
         MinimizeButton = nil,
         RestoreButton = nil,
+        RestoreHalo = nil,
+        RestorePing = nil,
+        SizeConstraint = nil,
         IsMinimized = false,
         RestoreDrag = nil,
         RestoreDragMoved = false,
+        WindowDrag = nil,
         StatusLabel = nil,
+        StatusDot = nil,
         TabButtons = {},
+        TabMarkers = {},
         ToggleLabels = {},
+        SelectorEntries = {},
+        ActiveTweens = {},
+        TweenCompletedConnections = {},
+        PressedButtonScale = nil,
+        PressedButtonInput = nil,
         PersistentConnections = {},
         PageConnections = {},
         StateConnection = nil,
         Scroll = nil,
         Content = nil,
         ContentLayout = nil,
+        ControlsContainer = nil,
+        ControlGridLayout = nil,
+        ActiveControls = nil,
         ActiveTab = nil,
         _contentSizeConnection = nil,
+        ViewportConnection = nil,
     }, UI)
+end
+
+function UI:_WatchViewport(camera)
+    if self.ViewportConnection and self.ViewportConnection.Connected then
+        self.ViewportConnection:Disconnect()
+    end
+    self.ViewportConnection = nil
+    if not camera then
+        return
+    end
+    self.ViewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+        self:_ApplySize(self.State:GetSnapshot())
+        self:_UpdateControlGridLayout()
+        self:_ClampRestoreButton()
+    end)
 end
 
 function UI:_Connect(bucket, signal, callback)
@@ -617,22 +688,136 @@ function UI:_Connect(bucket, signal, callback)
     return connection
 end
 
+function UI:_CancelTween(instance)
+    if not instance then
+        return
+    end
+    local tween = self.ActiveTweens[instance]
+    if not tween then
+        return
+    end
+    self.ActiveTweens[instance] = nil
+    local connection = self.TweenCompletedConnections[instance]
+    self.TweenCompletedConnections[instance] = nil
+    if connection and connection.Connected then
+        connection:Disconnect()
+    end
+    tween:Cancel()
+end
+
+function UI:_PlayTween(instance, duration, goals, onComplete, repeatCount, reverses)
+    if not instance or not instance.Parent then
+        return
+    end
+    self:_CancelTween(instance)
+    local tween = TweenService:Create(
+        instance,
+        TweenInfo.new(
+            duration,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out,
+            repeatCount or 0,
+            reverses == true
+        ),
+        goals
+    )
+    self.ActiveTweens[instance] = tween
+    local connection
+    connection = tween.Completed:Connect(function(playbackState)
+        if self.ActiveTweens[instance] == tween then
+            self.ActiveTweens[instance] = nil
+        end
+        if self.TweenCompletedConnections[instance] == connection then
+            self.TweenCompletedConnections[instance] = nil
+        end
+        if connection.Connected then
+            connection:Disconnect()
+        end
+        if playbackState == Enum.PlaybackState.Completed and onComplete then
+            onComplete()
+        end
+    end)
+    self.TweenCompletedConnections[instance] = connection
+    tween:Play()
+end
+
+function UI:_CancelTweensIn(instance)
+    self:_CancelTween(instance)
+    for _, descendant in ipairs(instance:GetDescendants()) do
+        self:_CancelTween(descendant)
+    end
+end
+
+function UI:_CancelAllTweens()
+    local instances = {}
+    for instance in pairs(self.ActiveTweens) do
+        table.insert(instances, instance)
+    end
+    for _, instance in ipairs(instances) do
+        self:_CancelTween(instance)
+    end
+    table.clear(self.ActiveTweens)
+    table.clear(self.TweenCompletedConnections)
+end
+
+function UI:_AttachButtonFeedback(button, bucket, pressedScale)
+    local scale = create("UIScale", { Scale = 1 }, button)
+    self:_Connect(bucket, button.MouseEnter, function()
+        if not self.Compatibility:IsTouchEnabled() then
+            self:_PlayTween(scale, 0.1, { Scale = 1.025 })
+        end
+    end)
+    self:_Connect(bucket, button.MouseLeave, function()
+        if self.PressedButtonScale ~= scale then
+            self:_PlayTween(scale, 0.1, { Scale = 1 })
+        end
+    end)
+    self:_Connect(bucket, button.InputBegan, function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        if self.PressedButtonScale and self.PressedButtonScale ~= scale
+            and self.PressedButtonScale.Parent then
+            self:_PlayTween(self.PressedButtonScale, 0.1, { Scale = 1 })
+        end
+        self.PressedButtonScale = scale
+        self.PressedButtonInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+        self:_PlayTween(scale, 0.07, { Scale = pressedScale or 0.96 })
+    end)
+    self:_Connect(bucket, button.Activated, function()
+        if self.PressedButtonScale == scale then
+            self.PressedButtonScale = nil
+            self.PressedButtonInput = nil
+        end
+        self:_PlayTween(scale, 0.12, { Scale = 1 })
+    end)
+    return scale
+end
+
 function UI:_ApplySize(snapshot)
     if not self.Root then
         return
     end
-    local layout = self.Config.Layout
     local touch = self.Compatibility:IsTouchEnabled()
-    local width
-    local height
-    if snapshot.compact then
-        width = touch and layout.MobileWidth or layout.DesktopWidth
-        height = touch and layout.MobileHeight or layout.DesktopHeight
-    else
-        width = layout.ExpandedWidth
-        height = layout.ExpandedHeight
+    local viewport = self.Compatibility:GetViewportSize()
+    if typeof(viewport) ~= "Vector2" then
+        viewport = Vector2.new(390, 844)
     end
-    self.Root.Size = UDim2.fromScale(width, height)
+    local landscape = viewport.X > viewport.Y
+    local widthScale = snapshot.compact and (touch and 0.92 or 0.72) or 0.96
+    local maxWidth = landscape and 760 or 500
+    local maxHeight = math.min(landscape and 420 or 740, math.max(1, viewport.Y - 32))
+    local minHeight = math.min(landscape and 300 or 320, maxHeight)
+    local pageHeight = self.ContentLayout and self.ContentLayout.AbsoluteContentSize.Y or 0
+    local desiredHeight = HEADER_HEIGHT + TAB_BAR_HEIGHT + pageHeight + FOOTER_HEIGHT + 14
+    local width = math.min(viewport.X * widthScale, maxWidth, math.max(1, viewport.X - 16))
+    local height = math.clamp(desiredHeight, minHeight, maxHeight)
+    if self.SizeConstraint then
+        self.SizeConstraint.MinSize = Vector2.new(math.min(280, width), minHeight)
+        self.SizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
+    end
+    self.Root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
 end
 
 function UI:_SetMinimized(minimized)
@@ -646,8 +831,51 @@ function UI:_SetMinimized(minimized)
     if not minimized then
         self.RestoreDrag = nil
         self.RestoreDragMoved = false
+        self:_CancelTween(self.RestoreHalo)
+        self:_CancelTween(self.RestorePing)
+        if self.RestoreHalo then
+            self.RestoreHalo.Size = UDim2.fromOffset(70, 70)
+            self.RestoreHalo.BackgroundTransparency = 0.86
+        end
+        if self.RestorePing then
+            self.RestorePing.Size = UDim2.fromOffset(7, 7)
+            self.RestorePing.BackgroundTransparency = 1
+        end
+    else
+        if self.RestoreHalo then
+            self.RestoreHalo.Size = UDim2.fromOffset(70, 70)
+            self.RestoreHalo.BackgroundTransparency = 0.84
+            self:_PlayTween(self.RestoreHalo, 1.05, {
+                Size = UDim2.fromOffset(78, 78),
+                BackgroundTransparency = 0.97,
+            }, nil, -1, true)
+        end
+        if self.RestorePing then
+            self.RestorePing.Size = UDim2.fromOffset(7, 7)
+            self.RestorePing.BackgroundTransparency = 0.25
+            self:_PlayTween(self.RestorePing, 0.9, {
+                Size = UDim2.fromOffset(20, 20),
+                BackgroundTransparency = 1,
+            }, nil, -1, false)
+        end
     end
     return true
+end
+
+function UI:_ClampRestoreButton()
+    if not self.RestoreButton then
+        return
+    end
+    local viewport = self.Compatibility:GetViewportSize()
+    if typeof(viewport) ~= "Vector2" then
+        viewport = Vector2.new(390, 844)
+    end
+    self.RestoreButton.Position = clampDragPosition(
+        self.RestoreButton.Position,
+        Vector2.zero,
+        viewport,
+        self.RestoreButton.AbsoluteSize
+    )
 end
 
 function UI:_Refresh(snapshot)
@@ -666,10 +894,28 @@ function UI:_Refresh(snapshot)
     else
         self.StatusLabel.TextColor3 = theme.MutedText
     end
+    if self.StatusDot then
+        self.StatusDot.BackgroundColor3 = self.StatusLabel.TextColor3
+    end
+    if self.RestorePing then
+        self.RestorePing.BackgroundColor3 = self.StatusLabel.TextColor3
+    end
 
     for tabName, button in pairs(self.TabButtons) do
-        button.BackgroundColor3 = tabName == snapshot.selectedTab and theme.Selected or theme.Control
+        local selected = tabName == snapshot.selectedTab
+        button.BackgroundColor3 = selected and theme.Selected or theme.TabBar
         button.TextColor3 = tabName == snapshot.selectedTab and theme.Text or theme.MutedText
+        local stroke = button:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            stroke.Color = selected and theme.AccentBorder or theme.Border
+            stroke.Transparency = selected and 0.18 or 0.72
+        end
+        local marker = self.TabMarkers[tabName]
+        if marker then
+            marker.Visible = selected
+            marker.Size = UDim2.fromOffset(selected and 12 or 0, 2)
+            marker.BackgroundTransparency = selected and 0 or 1
+        end
     end
 
     for _, entry in ipairs(self.ToggleLabels) do
@@ -677,12 +923,28 @@ function UI:_Refresh(snapshot)
         if entry.Control.Kind == "featureToggle" then
             enabled = snapshot.featureEnabled[entry.Control.Action] == true
             entry.Label.Text = enabled and "ON" or "OFF"
+            entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
+            entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
         elseif entry.Control.Kind == "settingToggle" then
             enabled = snapshot.compact
             entry.Label.Text = enabled and "On" or "Off"
-        elseif entry.Control.Kind == "settingCycle" then
-            local farmSettings = self.Config.FarmSettings or {}
-            entry.Label.Text = tostring(farmSettings[entry.Control.Setting] or "Unset")
+            entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
+            entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
+        end
+    end
+
+    for _, entry in ipairs(self.SelectorEntries) do
+        local farmSettings = self.Config.FarmSettings or {}
+        local selectedValue = farmSettings[entry.Setting]
+        for _, option in ipairs(entry.Options) do
+            local selected = option.Value == selectedValue
+            option.Button.BackgroundColor3 = selected and theme.Accent or theme.TabBar
+            option.Button.TextColor3 = selected and theme.Text or theme.MutedText
+            local stroke = option.Button:FindFirstChildOfClass("UIStroke")
+            if stroke then
+                stroke.Color = selected and theme.AccentBorder or theme.Border
+                stroke.Transparency = selected and 0.12 or 0.65
+            end
         end
     end
 
@@ -700,11 +962,59 @@ end
 function UI:_ClearPage()
     disconnectAll(self.PageConnections)
     self.ToggleLabels = {}
+    self.SelectorEntries = {}
+    self.ControlsContainer = nil
+    self.ControlGridLayout = nil
+    self.ActiveControls = nil
     for _, child in ipairs(self.Content:GetChildren()) do
         if child ~= self.ContentLayout then
+            self:_CancelTweensIn(child)
             child:Destroy()
         end
     end
+end
+
+function UI:_SyncControlGridHeight()
+    if self.ControlsContainer and self.ControlGridLayout then
+        self.ControlsContainer.Size = UDim2.new(
+            1,
+            -2,
+            0,
+            self.ControlGridLayout.AbsoluteContentSize.Y
+        )
+    end
+end
+
+function UI:_UpdateControlGridLayout()
+    if not self.ControlsContainer or not self.ControlGridLayout then
+        return
+    end
+
+    local viewport = self.Compatibility:GetViewportSize()
+    if typeof(viewport) ~= "Vector2" then
+        viewport = Vector2.new(390, 844)
+    end
+    local landscape = viewport.X > viewport.Y
+    local columnCount = landscape
+        and self.ControlsContainer.AbsoluteSize.X >= 620
+        and self.ActiveControls
+        and #self.ActiveControls > 1
+        and 2
+        or 1
+    local hasSelector = false
+    for _, control in ipairs(self.ActiveControls or {}) do
+        if control.Kind == "settingSelect" then
+            hasSelector = true
+            break
+        end
+    end
+    local rowHeight = hasSelector
+        and self.Config.Layout.SelectorRowHeight
+        or self.Config.Layout.RowHeight
+    self.ControlGridLayout.FillDirectionMaxCells = columnCount
+    self.ControlGridLayout.CellSize = columnCount == 2
+        and UDim2.new(0.5, -4, 0, rowHeight)
+        or UDim2.new(1, 0, 0, rowHeight)
 end
 
 function UI:_SelectTab(tabName)
@@ -731,23 +1041,27 @@ function UI:_AddControl(control)
     local layout = self.Config.Layout
     local hasToggle = control.Kind == "featureToggle"
         or control.Kind == "settingToggle"
-        or control.Kind == "settingCycle"
+    local isSelector = control.Kind == "settingSelect"
     local reservedTitleSpace = hasToggle and (layout.ToggleValueWidth + layout.ToggleGap) or 0
-    local row = create("TextButton", {
+    local row = create(isSelector and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
         Size = UDim2.new(1, 0, 0, layout.RowHeight),
         BackgroundColor3 = theme.Control,
         BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = "",
-        Font = theme.Font,
-        TextSize = theme.TextSizes.Control,
-        TextColor3 = theme.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        LayoutOrder = #self.Content:GetChildren(),
-    }, self.Content)
+        LayoutOrder = #self.ControlsContainer:GetChildren(),
+    }, self.ControlsContainer)
+    if row:IsA("TextButton") then
+        row.AutoButtonColor = false
+        row.Text = ""
+        row.Font = theme.Font
+        row.TextSize = theme.TextSizes.Control
+        row.TextColor3 = theme.Text
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        self:_AttachButtonFeedback(row, self.PageConnections)
+    end
+    addCorner(row, 4)
 
-    create("UIStroke", {
+    local rowStroke = create("UIStroke", {
         Color = theme.Border,
         Thickness = layout.BorderThickness,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
@@ -780,28 +1094,103 @@ function UI:_AddControl(control)
         TextYAlignment = Enum.TextYAlignment.Top,
     }, row)
 
-    local toggleLabel
-    if control.Kind == "featureToggle" or control.Kind == "settingToggle" then
-        toggleLabel = create("TextLabel", {
+    if hasToggle then
+        local toggleLabel = create("TextLabel", {
             Name = "Value",
             AnchorPoint = Vector2.new(1, 0),
             Position = UDim2.new(1, -layout.RowInset, 0, layout.ToggleValueTop),
             Size = UDim2.fromOffset(layout.ToggleValueWidth, layout.ToggleValueHeight),
-            BackgroundTransparency = 1,
+            BackgroundColor3 = theme.TabBar,
             Font = theme.StrongFont,
-            Text = control.Kind == "settingCycle"
-                and tostring((self.Config.FarmSettings or {})[control.Setting] or "Unset")
-                or "Off",
-            TextColor3 = theme.Accent,
-            TextSize = theme.TextSizes.Detail,
-            TextXAlignment = Enum.TextXAlignment.Right,
+            Text = "OFF",
+            TextColor3 = theme.MutedText,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Center,
         }, row)
+        addCorner(toggleLabel, 3)
+        create("UIStroke", {
+            Color = theme.Border,
+            Thickness = layout.BorderThickness,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        }, toggleLabel)
         table.insert(self.ToggleLabels, { Control = control, Label = toggleLabel })
     end
 
-    self:_Connect(self.PageConnections, row.Activated, function()
-        self:_ActivateControl(control)
-    end)
+    if isSelector then
+        row.Size = UDim2.new(1, 0, 0, layout.SelectorRowHeight)
+        rowStroke.Transparency = 0.15
+        local options = control.Options or {}
+        local optionsFrame = create("Frame", {
+            Name = "Options",
+            Position = UDim2.new(0, layout.RowInset, 0, 60),
+            Size = UDim2.new(1, -layout.RowInset * 2, 0, 26),
+            BackgroundTransparency = 1,
+        }, row)
+        create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6),
+        }, optionsFrame)
+        local optionEntries = {}
+        local optionCount = #options
+        if optionCount > 0 then
+            for index, value in ipairs(options) do
+                local optionButton = create("TextButton", {
+                    Name = "Option_" .. tostring(value):gsub("[^%w]", "_"),
+                    Size = UDim2.new(
+                        1 / optionCount,
+                        -(6 * (optionCount - 1) / optionCount),
+                        1,
+                        0
+                    ),
+                    BackgroundColor3 = theme.TabBar,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = false,
+                    Font = theme.StrongFont,
+                    Text = tostring(value),
+                    TextColor3 = theme.MutedText,
+                    TextSize = 10,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    LayoutOrder = index,
+                }, optionsFrame)
+                addCorner(optionButton, 3)
+                create("UIStroke", {
+                    Color = theme.Border,
+                    Thickness = layout.BorderThickness,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                }, optionButton)
+                self:_AttachButtonFeedback(optionButton, self.PageConnections, 0.96)
+                self:_Connect(self.PageConnections, optionButton.Activated, function()
+                    local ok, result, actionError = pcall(
+                        self.Dispatch,
+                        control.Action,
+                        value
+                    )
+                    if not ok then
+                        self.State:SetStatus("UI action error: " .. tostring(result), "error")
+                    elseif result == false and actionError then
+                        self.State:SetStatus(tostring(actionError), "error")
+                    end
+                end)
+                table.insert(optionEntries, {
+                    Value = value,
+                    Button = optionButton,
+                })
+            end
+        end
+        table.insert(self.SelectorEntries, {
+            Setting = control.Setting,
+            Options = optionEntries,
+        })
+    else
+        self:_Connect(self.PageConnections, row.Activated, function()
+            local ok, actionError = pcall(self._ActivateControl, self, control)
+            if not ok then
+                self.State:SetStatus("UI action error: " .. tostring(actionError), "error")
+            end
+        end)
+    end
 end
 
 function UI:_RenderTab(tabName)
@@ -813,9 +1202,10 @@ function UI:_RenderTab(tabName)
     self.ActiveTab = tabName
     self:_ClearPage()
     local theme = self.Config.Theme
+    local layout = self.Config.Layout
     create("TextLabel", {
         Name = "PageDescription",
-        Size = UDim2.new(1, 0, 0, self.Config.Layout.PageDescriptionHeight),
+        Size = UDim2.new(1, 0, 0, layout.PageDescriptionHeight),
         BackgroundTransparency = 1,
         Font = theme.Font,
         Text = page.Description,
@@ -824,12 +1214,89 @@ function UI:_RenderTab(tabName)
         TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Top,
-        LayoutOrder = 0,
+        LayoutOrder = 1,
     }, self.Content)
 
-    for _, control in ipairs(page.Controls) do
+    local section = create("Frame", {
+        Name = "SectionHeader",
+        Size = UDim2.new(1, -2, 0, layout.SectionHeight),
+        BackgroundColor3 = theme.Panel,
+        BorderSizePixel = 0,
+        LayoutOrder = 2,
+    }, self.Content)
+    addCorner(section, 3)
+    create("Frame", {
+        Name = "AccentBar",
+        Position = UDim2.fromOffset(7, 6),
+        Size = UDim2.new(0, 3, 1, -12),
+        BackgroundColor3 = theme.Accent,
+        BorderSizePixel = 0,
+    }, section)
+    create("TextLabel", {
+        Name = "SectionName",
+        Position = UDim2.fromOffset(17, 0),
+        Size = UDim2.new(1, -124, 1, 0),
+        BackgroundTransparency = 1,
+        Font = theme.MonoFont,
+        Text = string.upper(page.Section or tabName),
+        TextColor3 = theme.Text,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, section)
+    create("TextLabel", {
+        Name = "SectionMeta",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 0),
+        Size = UDim2.fromOffset(92, layout.SectionHeight),
+        BackgroundTransparency = 1,
+        Font = theme.MonoFont,
+        Text = page.Meta or "LOCAL",
+        TextColor3 = theme.MutedText,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, section)
+
+    self.ActiveControls = page.Controls
+    self.ControlsContainer = create("Frame", {
+        Name = "ControlGrid",
+        Size = UDim2.new(1, -2, 0, 0),
+        BackgroundTransparency = 1,
+        LayoutOrder = 3,
+    }, self.Content)
+    self.ControlGridLayout = create("UIGridLayout", {
+        CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
+        CellPadding = UDim2.fromOffset(8, 6),
+        FillDirection = Enum.FillDirection.Horizontal,
+        FillDirectionMaxCells = 1,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, self.ControlsContainer)
+    self:_Connect(
+        self.PageConnections,
+        self.ControlGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"),
+        function()
+            self:_SyncControlGridHeight()
+        end
+    )
+    self:_Connect(
+        self.PageConnections,
+        self.ControlsContainer:GetPropertyChangedSignal("AbsoluteSize"),
+        function()
+            self:_UpdateControlGridLayout()
+        end
+    )
+    for index, control in ipairs(page.Controls) do
         self:_AddControl(control)
+        local row = self.ControlsContainer:FindFirstChild(
+            "Action_" .. control.Action:gsub("[^%w]", "_")
+        )
+        if row then
+            row.LayoutOrder = index
+        end
     end
+    self:_UpdateControlGridLayout()
+    self:_SyncControlGridHeight()
     self.Scroll.CanvasPosition = Vector2.zero
     self:_Refresh(self.State:GetSnapshot())
     return true
@@ -846,20 +1313,21 @@ function UI:Mount()
     self.Gui = create("ScreenGui", {
         Name = "CustomHubShell",
         ResetOnSpawn = false,
-        IgnoreGuiInset = false,
+        IgnoreGuiInset = true,
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        DisplayOrder = 10,
+        DisplayOrder = 100,
     }, self.PlayerGui)
 
     self.Root = create("Frame", {
         Name = "Window",
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromScale(layout.MobileWidth, layout.MobileHeight),
+        Size = UDim2.fromOffset(350, 360),
         BackgroundColor3 = theme.Background,
         BorderSizePixel = 0,
     }, self.Gui)
-    create("UISizeConstraint", {
+    addCorner(self.Root, 4)
+    self.SizeConstraint = create("UISizeConstraint", {
         MinSize = layout.MinSize,
         MaxSize = layout.MaxSize,
     }, self.Root)
@@ -869,39 +1337,78 @@ function UI:Mount()
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, self.Root)
 
+    self.Header = create("Frame", {
+        Name = "Titlebar",
+        Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
+        BackgroundColor3 = theme.Header,
+        BorderSizePixel = 0,
+        Active = true,
+    }, self.Root)
+    addCorner(self.Header, 4)
+    create("Frame", {
+        Name = "LogoMark",
+        Position = UDim2.fromOffset(10, 13),
+        Size = UDim2.fromOffset(14, 14),
+        BackgroundColor3 = theme.Accent,
+        BorderSizePixel = 0,
+    }, self.Header)
+    create("Frame", {
+        Name = "LogoCenter",
+        Position = UDim2.fromOffset(5, 5),
+        Size = UDim2.fromOffset(4, 4),
+        BackgroundColor3 = theme.Text,
+        BorderSizePixel = 0,
+    }, self.Header.LogoMark)
     local title = create("TextLabel", {
         Name = "Title",
-        Position = UDim2.fromOffset(layout.Padding, layout.HeaderTop),
-        Size = UDim2.new(
-            1,
-            -math.max(
-                layout.TitleRightInset,
-                layout.Padding * 2 + layout.CloseWidth + HEADER_BUTTON_GAP + MINIMIZE_BUTTON_WIDTH
-            ),
-            0,
-            layout.HeaderHeight
-        ),
+        Position = UDim2.fromOffset(32, 0),
+        Size = UDim2.new(1, -112, 0, HEADER_HEIGHT),
         BackgroundTransparency = 1,
-        Font = theme.StrongFont,
-        Text = self.Config.Name,
+        Font = theme.MonoFont,
+        Text = string.upper(self.Config.Name),
         TextColor3 = theme.Text,
-        TextSize = theme.TextSizes.Title,
+        TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-    }, self.Root)
+    }, self.Header)
+    local versionBadge = create("TextLabel", {
+        Name = "VersionBadge",
+        Position = UDim2.fromOffset(122, 11),
+        Size = UDim2.fromOffset(44, 18),
+        BackgroundColor3 = theme.Selected,
+        BorderSizePixel = 0,
+        Font = theme.MonoFont,
+        Text = "DEV",
+        TextColor3 = theme.Accent,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Center,
+    }, self.Header)
+    addCorner(versionBadge, 2)
+    create("UIStroke", {
+        Color = theme.Border,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, versionBadge)
 
     local closeButton = create("TextButton", {
         Name = "Close",
         AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -layout.Padding, 0, layout.HeaderTop),
+        Position = UDim2.new(1, -8, 0, 7),
         Size = UDim2.fromOffset(layout.CloseWidth, layout.CloseHeight),
         BackgroundColor3 = theme.Control,
         BorderSizePixel = 0,
-        AutoButtonColor = true,
-        Font = theme.Font,
-        Text = "Close",
+        AutoButtonColor = false,
+        Font = theme.StrongFont,
+        Text = "×",
         TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Detail,
-    }, self.Root)
+        TextSize = 17,
+    }, self.Header)
+    addCorner(closeButton, 3)
+    create("UIStroke", {
+        Color = theme.Border,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, closeButton)
+    self:_AttachButtonFeedback(closeButton, self.PersistentConnections)
     self:_Connect(self.PersistentConnections, closeButton.Activated, function()
         if self.OnClose then
             self.OnClose()
@@ -913,46 +1420,95 @@ function UI:Mount()
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(
             1,
-            -(layout.Padding + layout.CloseWidth + HEADER_BUTTON_GAP),
+            -(8 + layout.CloseWidth + HEADER_BUTTON_GAP),
             0,
-            layout.HeaderTop
+            7
         ),
         Size = UDim2.fromOffset(MINIMIZE_BUTTON_WIDTH, layout.CloseHeight),
         BackgroundColor3 = theme.Control,
         BorderSizePixel = 0,
-        AutoButtonColor = true,
-        Font = theme.Font,
-        Text = "Min",
-        TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Detail,
-    }, self.Root)
-    self:_Connect(self.PersistentConnections, self.MinimizeButton.Activated, function()
-        self:_SetMinimized(true)
-    end)
-
-    self.RestoreButton = create("TextButton", {
-        Name = "Restore",
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(1, -38, 0.68, 0),
-        Size = UDim2.fromOffset(RESTORE_BUTTON_SIZE.X, RESTORE_BUTTON_SIZE.Y),
-        BackgroundColor3 = theme.Control,
-        BorderSizePixel = 0,
-        AutoButtonColor = true,
+        AutoButtonColor = false,
         Font = theme.StrongFont,
-        Text = "Restore",
-        TextColor3 = theme.Text,
-        TextSize = theme.TextSizes.Detail,
-        Visible = false,
-        ZIndex = 20,
-    }, self.Gui)
-    create("UICorner", {
-        CornerRadius = UDim.new(0, RESTORE_BUTTON_SIZE.Y / 2),
-    }, self.RestoreButton)
+        Text = "−",
+        TextColor3 = theme.MutedText,
+        TextSize = 17,
+    }, self.Header)
+    addCorner(self.MinimizeButton, 3)
     create("UIStroke", {
         Color = theme.Border,
         Thickness = layout.BorderThickness,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, self.MinimizeButton)
+    self:_AttachButtonFeedback(self.MinimizeButton, self.PersistentConnections)
+    self:_Connect(self.PersistentConnections, self.MinimizeButton.Activated, function()
+        self:_SetMinimized(true)
+    end)
+
+    local camera = workspace.CurrentCamera
+    local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+    self.RestoreButton = create("TextButton", {
+        Name = "Restore",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromOffset(viewport.X - 42, viewport.Y / 2),
+        Size = UDim2.fromOffset(RESTORE_BUTTON_SIZE.X, RESTORE_BUTTON_SIZE.Y),
+        BackgroundColor3 = theme.Header,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
+        Visible = false,
+        ZIndex = 20,
+    }, self.Gui)
+    addCorner(self.RestoreButton, 32)
+    create("UIStroke", {
+        Color = theme.AccentBorder,
+        Thickness = 2,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, self.RestoreButton)
+    self.RestoreHalo = create("Frame", {
+        Name = "PulseHalo",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(70, 70),
+        BackgroundColor3 = theme.Accent,
+        BackgroundTransparency = 0.84,
+        BorderSizePixel = 0,
+        ZIndex = 20,
+    }, self.RestoreButton)
+    addCorner(self.RestoreHalo, 40)
+    create("TextLabel", {
+        Name = "Glyph",
+        Position = UDim2.fromOffset(18, 5),
+        Size = UDim2.fromOffset(20, 22),
+        BackgroundTransparency = 1,
+        Font = theme.StrongFont,
+        Text = "⌂",
+        TextColor3 = theme.Accent,
+        TextSize = 19,
+        ZIndex = 22,
+    }, self.RestoreButton)
+    create("TextLabel", {
+        Name = "Brand",
+        Position = UDim2.fromOffset(0, 29),
+        Size = UDim2.new(1, 0, 0, 12),
+        BackgroundTransparency = 1,
+        Font = theme.MonoFont,
+        Text = "HUB",
+        TextColor3 = theme.Text,
+        TextSize = 8,
+        ZIndex = 22,
+    }, self.RestoreButton)
+    self.RestorePing = create("Frame", {
+        Name = "StatusPing",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 8),
+        Size = UDim2.fromOffset(7, 7),
+        BackgroundColor3 = theme.Success,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 23,
+    }, self.RestoreButton)
+    addCorner(self.RestorePing, 8)
+    self:_AttachButtonFeedback(self.RestoreButton, self.PersistentConnections, 0.9)
     self:_Connect(self.PersistentConnections, self.RestoreButton.Activated, function()
         if self.RestoreDragMoved then
             self.RestoreDragMoved = false
@@ -975,33 +1531,56 @@ function UI:Mount()
             Origin = self.RestoreButton.Position,
         }
     end)
+    self:_Connect(self.PersistentConnections, self.Header.InputBegan, function(input)
+        if self.MinimizeButton
+            and input.Position.X >= self.MinimizeButton.AbsolutePosition.X then
+            return
+        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            self.WindowDrag = {
+                Input = input.UserInputType == Enum.UserInputType.Touch and input or nil,
+                Start = input.Position,
+                Origin = self.Root.Position,
+            }
+        end
+    end)
     self:_Connect(self.PersistentConnections, UserInputService.InputChanged, function(input)
         local drag = self.RestoreDrag
-        if not drag or not self.RestoreButton or not self.RestoreButton.Parent then
-            return
-        end
-        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input ~= drag.Input then
-            return
+        if drag and self.RestoreButton and self.RestoreButton.Parent
+            and (input.UserInputType == Enum.UserInputType.MouseMovement or input == drag.Input) then
+            local delta = input.Position - drag.Start
+            if delta.Magnitude >= RESTORE_DRAG_THRESHOLD then
+                self.RestoreDragMoved = true
+            end
+            if self.RestoreDragMoved then
+                local viewportSize = self.Compatibility:GetViewportSize()
+                if typeof(viewportSize) ~= "Vector2" then
+                    viewportSize = Vector2.new(390, 844)
+                end
+                self.RestoreButton.Position = clampDragPosition(
+                    drag.Origin,
+                    delta,
+                    viewportSize,
+                    self.RestoreButton.AbsoluteSize
+                )
+            end
         end
 
-        local delta = input.Position - drag.Start
-        if delta.Magnitude >= RESTORE_DRAG_THRESHOLD then
-            self.RestoreDragMoved = true
+        local windowDrag = self.WindowDrag
+        if windowDrag and self.Root
+            and (input.UserInputType == Enum.UserInputType.MouseMovement or input == windowDrag.Input) then
+            local viewportSize = self.Compatibility:GetViewportSize()
+            if typeof(viewportSize) ~= "Vector2" then
+                viewportSize = Vector2.new(390, 844)
+            end
+            self.Root.Position = clampDragPosition(
+                windowDrag.Origin,
+                input.Position - windowDrag.Start,
+                viewportSize,
+                self.Root.AbsoluteSize
+            )
         end
-        if not self.RestoreDragMoved then
-            return
-        end
-
-        local viewport = self.Compatibility:GetViewportSize()
-        if typeof(viewport) ~= "Vector2" then
-            viewport = Vector2.new(390, 844)
-        end
-        self.RestoreButton.Position = clampDragPosition(
-            drag.Origin,
-            delta,
-            viewport,
-            self.RestoreButton.AbsoluteSize
-        )
     end)
     self:_Connect(self.PersistentConnections, UserInputService.InputEnded, function(input)
         local drag = self.RestoreDrag
@@ -1011,6 +1590,23 @@ function UI:Mount()
         ) then
             self.RestoreDrag = nil
         end
+        if self.WindowDrag and (
+            input.UserInputType == Enum.UserInputType.MouseButton1
+                or input == self.WindowDrag.Input
+        ) then
+            self.WindowDrag = nil
+        end
+        if self.PressedButtonScale and (
+            input.UserInputType == Enum.UserInputType.MouseButton1
+                or input == self.PressedButtonInput
+        ) then
+            local scale = self.PressedButtonScale
+            self.PressedButtonScale = nil
+            self.PressedButtonInput = nil
+            if scale.Parent then
+                self:_PlayTween(scale, 0.12, { Scale = 1 })
+            end
+        end
     end)
 
     local tabWidth = 1 / #self.Config.Tabs
@@ -1019,7 +1615,7 @@ function UI:Mount()
             Name = "Tab_" .. tabName,
             Position = UDim2.new((index - 1) * tabWidth, 0, 0, layout.TabsTop),
             Size = UDim2.new(tabWidth, -2, 0, layout.TabHeight),
-            BackgroundColor3 = theme.Control,
+            BackgroundColor3 = theme.TabBar,
             BorderSizePixel = 0,
             AutoButtonColor = false,
             Font = theme.StrongFont,
@@ -1028,7 +1624,25 @@ function UI:Mount()
             TextSize = theme.TextSizes.Tab,
             TextTruncate = Enum.TextTruncate.AtEnd,
         }, self.Root)
+        addCorner(button, 3)
+        create("UIStroke", {
+            Color = theme.Border,
+            Thickness = layout.BorderThickness,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        }, button)
+        self:_AttachButtonFeedback(button, self.PersistentConnections)
+        local marker = create("Frame", {
+            Name = "ActiveMarker",
+            AnchorPoint = Vector2.new(0.5, 1),
+            Position = UDim2.new(0.5, 0, 1, -2),
+            Size = UDim2.fromOffset(0, 2),
+            BackgroundColor3 = theme.Accent,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Visible = false,
+        }, button)
         self.TabButtons[tabName] = button
+        self.TabMarkers[tabName] = marker
         self:_Connect(self.PersistentConnections, button.Activated, function()
             self:_SelectTab(tabName)
         end)
@@ -1036,9 +1650,10 @@ function UI:Mount()
 
     local statusFrame = create("Frame", {
         Name = "Status",
-        Position = UDim2.new(0, 0, 0, layout.StatusTop),
-        Size = UDim2.new(1, 0, 0, layout.StatusHeight),
-        BackgroundColor3 = theme.Panel,
+        AnchorPoint = Vector2.new(0, 1),
+        Position = UDim2.new(0, 0, 1, 0),
+        Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT),
+        BackgroundColor3 = theme.TabBar,
         BorderSizePixel = 0,
     }, self.Root)
     create("UIStroke", {
@@ -1048,32 +1663,53 @@ function UI:Mount()
     }, statusFrame)
     self.StatusLabel = create("TextLabel", {
         Name = "Message",
-        Position = UDim2.fromOffset(layout.StatusInset, layout.StatusTextTop),
-        Size = UDim2.new(1, -layout.StatusInset * 2, 1, -layout.StatusTextTop * 2),
+        Position = UDim2.fromOffset(24, 0),
+        Size = UDim2.new(1, -100, 1, 0),
         BackgroundTransparency = 1,
-        Font = theme.Font,
+        Font = theme.MonoFont,
         Text = "",
         TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Status,
-        TextWrapped = true,
+        TextSize = 9,
+        TextTruncate = Enum.TextTruncate.AtEnd,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
+    }, statusFrame)
+    self.StatusDot = create("Frame", {
+        Name = "StatusDot",
+        Position = UDim2.fromOffset(10, 12),
+        Size = UDim2.fromOffset(6, 6),
+        BackgroundColor3 = theme.Success,
+        BorderSizePixel = 0,
+    }, statusFrame)
+    addCorner(self.StatusDot, 4)
+    local footerTag = create("TextLabel", {
+        Name = "FooterTag",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -10, 0, 0),
+        Size = UDim2.fromOffset(60, FOOTER_HEIGHT),
+        BackgroundTransparency = 1,
+        Font = theme.MonoFont,
+        Text = "CUSTOM",
+        TextColor3 = theme.MutedText,
+        TextSize = 8,
+        TextXAlignment = Enum.TextXAlignment.Right,
     }, statusFrame)
 
     self.Scroll = create("ScrollingFrame", {
         Name = "Page",
         Position = UDim2.new(0, 0, 0, layout.ContentTop),
-        Size = UDim2.new(1, 0, 1, -layout.ContentTop - 10),
+        Size = UDim2.new(1, 0, 1, -layout.ContentTop - FOOTER_HEIGHT),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ScrollBarThickness = layout.ScrollBarThickness,
-        ScrollBarImageColor3 = theme.Border,
+        ScrollBarImageColor3 = theme.Accent,
         CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollingDirection = Enum.ScrollingDirection.Y,
         AutomaticCanvasSize = Enum.AutomaticSize.None,
     }, self.Root)
     self.Content = create("Frame", {
         Name = "Content",
+        Position = UDim2.fromOffset(9, 7),
         Size = UDim2.new(1, -layout.ScrollContentInset, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
@@ -1088,14 +1724,25 @@ function UI:Mount()
         if self.Scroll and self.ContentLayout then
             self.Scroll.CanvasSize = UDim2.new(0, 0, 0, self.ContentLayout.AbsoluteContentSize.Y + 4)
         end
+        self:_ApplySize(self.State:GetSnapshot())
     end)
     table.insert(self.PersistentConnections, self._contentSizeConnection)
+
+    self:_WatchViewport(camera)
+    self:_Connect(
+        self.PersistentConnections,
+        workspace:GetPropertyChangedSignal("CurrentCamera"),
+        function()
+            self:_WatchViewport(workspace.CurrentCamera)
+        end
+    )
 
     self.StateConnection = self.State:Subscribe(function(snapshot)
         self:_Refresh(snapshot)
     end)
     self:_ApplySize(self.State:GetSnapshot())
     self:_RenderTab(self.State:GetSnapshot().selectedTab)
+    self:_ClampRestoreButton()
     return true
 end
 
@@ -1104,18 +1751,43 @@ function UI:Destroy()
         self.StateConnection:Disconnect()
         self.StateConnection = nil
     end
+    if self.ViewportConnection and self.ViewportConnection.Connected then
+        self.ViewportConnection:Disconnect()
+    end
+    self.ViewportConnection = nil
     disconnectAll(self.PageConnections)
     disconnectAll(self.PersistentConnections)
+    self:_CancelAllTweens()
     if self.Gui then
         self.Gui:Destroy()
         self.Gui = nil
         self.Root = nil
     end
+    self.Header = nil
     self.MinimizeButton = nil
     self.RestoreButton = nil
+    self.RestoreHalo = nil
+    self.RestorePing = nil
+    self.SizeConstraint = nil
     self.IsMinimized = false
     self.RestoreDrag = nil
     self.RestoreDragMoved = false
+    self.WindowDrag = nil
+    self.StatusLabel = nil
+    self.StatusDot = nil
+    self.TabButtons = {}
+    self.TabMarkers = {}
+    self.ToggleLabels = {}
+    self.SelectorEntries = {}
+    self.PressedButtonScale = nil
+    self.PressedButtonInput = nil
+    self.Scroll = nil
+    self.Content = nil
+    self.ContentLayout = nil
+    self.ControlsContainer = nil
+    self.ControlGridLayout = nil
+    self.ActiveControls = nil
+    self.ActiveTab = nil
 end
 
 return UI
@@ -1163,6 +1835,7 @@ QuestService.__index = QuestService
 
 local MAX_TRACKED_QUEST_TEXT_LENGTH = 160
 local MAX_TRACKED_QUEST_PROGRESS_LENGTH = 32
+local MAX_MAIN_QUEST_TITLE_LENGTH = 160
 
 local excludedQuestNames = {
     BartiloQuest = true,
@@ -1214,8 +1887,55 @@ local function parseTrackedQuestProgress(text)
         or current == math.huge
         or total == math.huge
         or total <= 0
-        or current > total
+        or current >= total
     then
+        return nil
+    end
+    return current, total
+end
+
+local function titleContainsTarget(title, targetName)
+    if type(title) ~= "string" or type(targetName) ~= "string" then
+        return false
+    end
+
+    local titleWords = {}
+    for word in title:lower():gmatch("[%w]+") do
+        table.insert(titleWords, word)
+    end
+    local targetWords = {}
+    for word in targetName:lower():gmatch("[%w]+") do
+        table.insert(targetWords, word)
+    end
+    if #targetWords == 0 or #targetWords > #titleWords then
+        return false
+    end
+
+    for startIndex = 1, #titleWords - #targetWords + 1 do
+        local matches = true
+        for offset, expected in ipairs(targetWords) do
+            local actual = titleWords[startIndex + offset - 1]
+            local finalWord = offset == #targetWords
+            if actual ~= expected and not (finalWord and actual == expected .. "s") then
+                matches = false
+                break
+            end
+        end
+        if matches then
+            return true
+        end
+    end
+    return false
+end
+
+local function parseMainQuestTitleProgress(title)
+    if type(title) ~= "string" then
+        return nil
+    end
+    local currentText, totalText = title:match("%((%d+)%s*/%s*(%d+)%)%s*$")
+    local current = tonumber(currentText)
+    local total = tonumber(totalText)
+    if not current or not total or total <= 0 or current >= total then
         return nil
     end
     return current, total
@@ -1253,6 +1973,56 @@ local function findEligibleQuestTarget(self, guideData, targetName, progressTota
         end
     end
     return nil
+end
+
+local function findEligibleTargetFromTitle(self, guideData, title, progressTotal)
+    local level = self:GetPlayerLevel()
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if not level or type(npcList) ~= "table" or type(self.Quests) ~= "table" then
+        return nil, "quest catalog or eligible NPC list is unavailable"
+    end
+
+    local bestTarget, bestLength, ambiguous = nil, 0, false
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table"
+            and not excludedQuestNames[npcEntry.InternalQuestName]
+            and type(npcEntry.Levels) == "table"
+        then
+            local questGroup = self.Quests[npcEntry.InternalQuestName]
+            if type(questGroup) == "table" then
+                for questId, requiredLevel in pairs(npcEntry.Levels) do
+                    local numericLevel = tonumber(requiredLevel)
+                    local quest = questGroup[questId]
+                    if numericLevel and numericLevel >= 0 and numericLevel <= level
+                        and type(quest) == "table" and type(quest.Task) == "table"
+                    then
+                        for mobName, count in pairs(quest.Task) do
+                            local numericCount = tonumber(count)
+                            if type(mobName) == "string" and numericCount and numericCount > 1
+                                and numericCount == progressTotal
+                                and titleContainsTarget(title, mobName)
+                            then
+                                local nameLength = #mobName
+                                if nameLength > bestLength then
+                                    bestTarget, bestLength, ambiguous = mobName, nameLength, false
+                                elseif nameLength == bestLength and bestTarget ~= mobName then
+                                    ambiguous = true
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if ambiguous then
+        return nil, "visible quest title matches multiple catalog targets"
+    end
+    if not bestTarget then
+        return nil, "visible quest title does not map to a level-eligible catalog target"
+    end
+    return bestTarget
 end
 
 local function readTrackedQuestTarget(self, guideData)
@@ -1301,6 +2071,72 @@ local function readTrackedQuestTarget(self, guideData)
     return targetName
 end
 
+local function readFirstSeaQuestHud(self, guideData)
+    local ok, state, targetName, reason = pcall(function()
+        local compatibility = self.Compatibility
+        if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
+            return "unknown", nil, "PlayerGui reader is unavailable"
+        end
+
+        local playerGui = compatibility:GetPlayerGui()
+        local main = playerGui and playerGui:FindFirstChild("Main")
+        if not main then
+            return "unknown", nil, "PlayerGui.Main is unavailable"
+        end
+        if main:IsA("ScreenGui") and not main.Enabled then
+            return "unknown", nil, "PlayerGui.Main ScreenGui is disabled"
+        end
+
+        local questFrame = main:FindFirstChild("Quest")
+        if not questFrame or not questFrame:IsA("GuiObject") then
+            return "unknown", nil, "PlayerGui.Main.Quest is unavailable"
+        end
+        if not questFrame.Visible then
+            return "none", nil, "PlayerGui.Main.Quest.Visible is false"
+        end
+
+        local container = questFrame:FindFirstChild("Container")
+        local questTitle = container and container:FindFirstChild("QuestTitle")
+        local titleLabel = questTitle and questTitle:FindFirstChild("Title")
+        local titleIsText = titleLabel and (
+            titleLabel:IsA("TextLabel")
+                or titleLabel:IsA("TextButton")
+                or titleLabel:IsA("TextBox")
+        )
+        if not titleIsText or not titleLabel.Visible
+            or not container or (container:IsA("GuiObject") and not container.Visible)
+            or not questTitle or (questTitle:IsA("GuiObject") and not questTitle.Visible)
+        then
+            return "active-unknown", nil, "visible quest panel has no visible readable title label"
+        end
+
+        local title = usableTrackedQuestText(titleLabel.Text, MAX_MAIN_QUEST_TITLE_LENGTH)
+        if not title then
+            return "active-unknown", nil, "visible quest panel title is empty or malformed"
+        end
+        local _, progressTotal = parseMainQuestTitleProgress(title)
+        if not progressTotal then
+            return "active-unknown", nil, "visible quest title has no valid incomplete current/total progress"
+        end
+        local mappedTarget, mappingError = findEligibleTargetFromTitle(
+            self,
+            guideData,
+            title,
+            progressTotal
+        )
+        if not mappedTarget then
+            return "active-unknown", nil, mappingError
+        end
+        return "active", mappedTarget,
+            "visible Main.Quest title/progress maps to the level-eligible quest catalog"
+    end)
+
+    if not ok then
+        return "unknown", nil, "First Sea quest HUD read failed safely"
+    end
+    return state, targetName, reason
+end
+
 function QuestService.new(compatibility)
     local quests, guide, loadError = compatibility:GetQuestModules()
     if not quests then
@@ -1326,25 +2162,35 @@ function QuestService:GetActiveQuestState()
     if type(questData) == "table" and type(questData.Task) == "table" then
         local targetName = next(questData.Task)
         if type(targetName) == "string" and targetName ~= "" then
-            return "active", targetName
+            return "active", targetName, "GuideModule.Data.QuestData.Task"
         end
     end
 
     local trackedTarget = readTrackedQuestTarget(self, guideData)
     if trackedTarget then
-        return "active", trackedTarget
+        return "active", trackedTarget, "TrackedQuestFrame title/target/progress mapped to quest catalog"
+    end
+
+    local firstSea = false
+    if self.Compatibility and type(self.Compatibility.IsFirstSea) == "function" then
+        local seaReadOk, isFirstSea = pcall(self.Compatibility.IsFirstSea, self.Compatibility)
+        firstSea = seaReadOk and isFirstSea == true
+    end
+    if firstSea then
+        local hudState, hudTarget, hudReason = readFirstSeaQuestHud(self, guideData)
+        return hudState, hudTarget, hudReason
     end
 
     if type(guideData) ~= "table" then
-        return "unknown", nil
+        return "unknown", nil, "GuideModule.Data is unavailable"
     end
     if questData == nil then
-        return "none", nil
+        return "none", nil, "GuideModule.Data.QuestData is absent"
     end
     if type(questData) ~= "table" or type(questData.Task) ~= "table" then
-        return "unknown", nil
+        return "unknown", nil, "GuideModule.Data.QuestData.Task is not a table"
     end
-    return "active-unknown", nil
+    return "active-unknown", nil, "GuideModule exposes a quest record without a readable task"
 end
 
 function QuestService:SelectLevelQuest()
@@ -1505,7 +2351,7 @@ function EnemyService:FindNearest(targetName, origin)
     return nearest, nearestDistance
 end
 
-function EnemyService:FindSpawn(targetName)
+function EnemyService:FindSpawn(targetName, origin)
     local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
     local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
     if not enemySpawns or type(targetName) ~= "string" then
@@ -1514,16 +2360,25 @@ function EnemyService:FindSpawn(targetName)
 
     local normalizedTarget = normalizeEnemyName(targetName)
     local hasMatchingSpawn = false
+    local nearest, nearestDistance = nil, math.huge
     for _, spawnPart in ipairs(enemySpawns:GetChildren()) do
         if spawnPart:IsA("BasePart") then
             local normalizedSpawn = normalizeEnemyName(spawnPart.Name)
             if spawnPart.Name == targetName or normalizedSpawn == normalizedTarget then
                 hasMatchingSpawn = true
                 if not self.IgnoredSpawns[spawnPart] then
-                    return spawnPart, false
+                    local distance = typeof(origin) == "Vector3"
+                        and (spawnPart.Position - origin).Magnitude
+                        or 0
+                    if distance < nearestDistance then
+                        nearest, nearestDistance = spawnPart, distance
+                    end
                 end
             end
         end
+    end
+    if nearest then
+        return nearest, false
     end
     return nil, hasMatchingSpawn
 end
@@ -1871,6 +2726,30 @@ function MovementService:MoveTo(destination, options)
         return true, "already moving"
     end
 
+    if active
+        and active.Character == character
+        and active.KeepSession
+        and options.KeepSession == true
+        and not active.Route
+        and not route
+        and active.IsCurrent()
+    then
+        active.Goal = goal
+        active.Threshold = threshold
+        active.Speed = tonumber(options.Speed) or active.Speed
+        active.IsCurrent = isCurrent
+        active.Holding = false
+        active.BestDistance = (goal.Position - root.Position).Magnitude
+        active.LastProgressAt = os.clock()
+        if active.BestDistance <= threshold then
+            root.CFrame = destination
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            active.Holding = true
+        end
+        return true, active.Holding and "retargeted and holding" or "retargeted"
+    end
+
     self:_StopMovement()
     if (goal.Position - root.Position).Magnitude <= threshold then
         if route then
@@ -1931,13 +2810,15 @@ function MovementService:MoveTo(destination, options)
         CollisionOriginals = collisionOriginals,
         FloatForce = ownsFloatForce and floatForce or nil,
         HasTeleportTag = self.OwnsTeleportTag,
+        KeepSession = options.KeepSession == true and route == nil,
+        Holding = false,
         BestDistance = (goal.Position - root.Position).Magnitude,
         LastProgressAt = os.clock(),
     }
     self.Active = active
 
     active.Connection = self.Compatibility.RunService.Heartbeat:Connect(function(deltaTime)
-        if self.Active ~= active or self.Generation ~= generation or not isCurrent() then
+        if self.Active ~= active or self.Generation ~= generation or not active.IsCurrent() then
             self:_Finish(active, true)
             return
         end
@@ -1954,18 +2835,27 @@ function MovementService:MoveTo(destination, options)
             return
         end
 
-        local offset = goal.Position - root.Position
+        local goalNow = active.Goal
+        local thresholdNow = active.Threshold
+        local offset = goalNow.Position - root.Position
         local distance = offset.Magnitude
-        if distance <= threshold then
-            root.CFrame = goal
+        if distance <= thresholdNow then
+            root.CFrame = goalNow
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
+            if active.KeepSession then
+                active.Holding = true
+                active.BestDistance = distance
+                active.LastProgressAt = os.clock()
+                return
+            end
             self:_Finish(active, true)
-            if route then
-                self:_RequestRoute(route, isCurrent, self.RouteGeneration)
+            if active.Route then
+                self:_RequestRoute(active.Route, active.IsCurrent, self.RouteGeneration)
             end
             return
         end
+        active.Holding = false
         if distance < active.BestDistance - 1 then
             active.BestDistance = distance
             active.LastProgressAt = os.clock()
@@ -2274,6 +3164,11 @@ local CombatService = __bundleLoad("CustomHub.Features.Farm.CombatService")
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
+local NPC_SCAN_INTERVAL = 0.35
+local SPAWN_SCAN_INTERVAL = 0.5
+local SPAWN_LOAD_GRACE = 1
+local SPAWN_CYCLE_RETRY_INTERVAL = 2
+local MAX_EMPTY_SPAWN_CYCLES = 2
 
 local MainFarm = {
     Running = false,
@@ -2300,18 +3195,28 @@ local function questKey(candidate)
     return tostring(candidate.QuestName) .. ":" .. tostring(candidate.Id)
 end
 
+local function boundedReason(value)
+    local text = tostring(value or "no validated active-quest signal observed")
+        :gsub("[%c]", " ")
+    if #text > 120 then
+        text = text:sub(1, 117) .. "..."
+    end
+    return text
+end
+
 local function questDataSummary(label, snapshot)
     if type(snapshot) ~= "table" then
         return label .. ": unavailable"
     end
     return string.format(
-        "%s: reader=%s Guide.Data=%s QuestData.present=%s type=%s Task.type=%s",
+        "%s: reader=%s Guide.Data=%s QuestData.present=%s type=%s Task.type=%s evidence=%s",
         label,
         tostring(snapshot.ReaderState),
         tostring(snapshot.GuideDataType),
         tostring(snapshot.QuestDataPresent),
         tostring(snapshot.QuestDataType),
-        tostring(snapshot.TaskType)
+        tostring(snapshot.TaskType),
+        boundedReason(snapshot.ReaderEvidence)
     )
 end
 
@@ -2376,7 +3281,7 @@ function MainFarm:_IsCurrent(session)
     return self.Running and self.Session == session
 end
 
-function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
+function MainFarm:_LogQuestDataSnapshot(phase, questState, force, readerEvidence)
     pcall(function()
         local report = self.QuestDiagnosticReport
         if type(report) ~= "table" then
@@ -2397,6 +3302,7 @@ function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
             tostring(questDataType),
             tostring(taskType),
             tostring(questState),
+            boundedReason(readerEvidence),
         }, "|")
         local now = os.clock()
         if not force
@@ -2414,6 +3320,7 @@ function MainFarm:_LogQuestDataSnapshot(phase, questState, force)
             QuestDataPresent = tostring(questDataPresent),
             QuestDataType = tostring(questDataType),
             TaskType = tostring(taskType),
+            ReaderEvidence = boundedReason(readerEvidence),
         }
         report.LatestQuestData = snapshot
         if phase == "post_request" then
@@ -2490,31 +3397,60 @@ function MainFarm:_EndQuestDiagnosticWait(reason, now)
     self.QuestDiagnosticReport = nil
 end
 
-function MainFarm:_MoveTo(destination, session, threshold)
+function MainFarm:_MoveTo(destination, session, threshold, keepSession)
     if not self.MovementService then
         return false
     end
     return self.MovementService:MoveTo(destination, {
         Speed = 190,
         Threshold = threshold,
+        KeepSession = keepSession == true,
         IsCurrent = function()
             return self:_IsCurrent(session)
         end,
     })
 end
 
-function MainFarm:_ClearTarget()
+function MainFarm:_ClearTarget(preserveMovement)
     local hadTarget = self.Target ~= nil or self.TargetName ~= nil
     if hadTarget then
         if self.EnemyService then
             self.EnemyService:RestoreTargetCollision()
         end
-        if self.MovementService then
+        if self.MovementService and not preserveMovement then
             self.MovementService:Cancel()
         end
     end
     self.Target = nil
     self.TargetName = nil
+end
+
+function MainFarm:_ResetSpawnSearch(targetName)
+    if self.EnemyService then
+        self.EnemyService:ClearIgnoredSpawns()
+    end
+    self.SpawnSearchTarget = targetName
+    self.SpawnCandidate = nil
+    self.SpawnLoading = nil
+    self.SpawnRetryAt = nil
+    self.SpawnEmptyCycles = 0
+    self.SpawnSearchExhausted = false
+    self.NextSpawnSearchAt = 0
+    self.NextEnemySearchAt = 0
+end
+
+function MainFarm:_TimeoutQuestConfirmation(key, now)
+    if key ~= self.QuestDiagnosticWaitKey and key ~= self.LastQuestAttemptKey then
+        return
+    end
+    local reason = boundedReason(self.LastQuestStateReason)
+    self.TimedOutQuestKey = key
+    self.QuestTimeoutReason = reason
+    self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+    self:_SetStatus(
+        "Quest confirmation timed out after 8 seconds: " .. reason,
+        "error"
+    )
 end
 
 function MainFarm:_RequestQuest(candidate, session)
@@ -2523,13 +3459,26 @@ function MainFarm:_RequestQuest(candidate, session)
     if self.QuestDiagnosticWaitKey and self.QuestDiagnosticWaitKey ~= key then
         self:_EndQuestDiagnosticWait("candidate_changed_before_confirmation", now)
     end
+    if self.TimedOutQuestKey == key then
+        self:_SetStatus(
+            "Quest confirmation timed out: " .. boundedReason(self.QuestTimeoutReason)
+                .. "; toggle Main Farm to retry",
+            "error"
+        )
+        return
+    end
     if self.LastQuestAttemptKey == key then
         local elapsed = now - (self.LastQuestAttemptAt or 0)
         if elapsed < 8 then
-            self:_SetStatus("Waiting for active quest confirmation", "warning")
+            self:_SetStatus(
+                "Waiting for active quest confirmation; "
+                    .. boundedReason(self.LastQuestStateReason),
+                "warning"
+            )
             return
         end
-        self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+        self:_TimeoutQuestConfirmation(key, now)
+        return
     end
 
     self.LastQuestAttemptKey = key
@@ -2544,7 +3493,13 @@ function MainFarm:_RequestQuest(candidate, session)
         ResultType = "n/a",
         ResultSummary = "not returned",
     }
-    local requested, result = self.QuestService:RequestStart(candidate)
+    self.PendingQuestTargetName = candidate.Mob
+    self:_SetStatus(
+        "Requesting quest: " .. tostring(candidate.QuestName) .. " (ID "
+            .. tostring(candidate.Id) .. ")",
+        "info"
+    )
+    local requested = self.QuestService:RequestStart(candidate)
     local requestDiagnostic = self.QuestService.LastStartDiagnostic
     if type(requestDiagnostic) == "table" then
         self.QuestDiagnosticReport.RequestStage = tostring(requestDiagnostic.Stage)
@@ -2552,26 +3507,52 @@ function MainFarm:_RequestQuest(candidate, session)
         self.QuestDiagnosticReport.ResultType = tostring(requestDiagnostic.ResultType)
         self.QuestDiagnosticReport.ResultSummary = tostring(requestDiagnostic.ResultSummary)
     end
-    local stateReadOk, stateAfterRequest = pcall(function()
+    local stateReadOk, stateAfterRequest, activeTargetAfterRequest, readerEvidence = pcall(function()
         return self.QuestService:GetActiveQuestState()
     end)
     if not stateReadOk then
         stateAfterRequest = "diagnostic_read_error"
+        activeTargetAfterRequest = nil
+        readerEvidence = "active quest state reader raised an error"
     end
-    self:_LogQuestDataSnapshot("post_request", stateAfterRequest, true)
+    self.LastQuestStateReason = readerEvidence
+    self:_LogQuestDataSnapshot("post_request", stateAfterRequest, true, readerEvidence)
     if stateAfterRequest == "active" then
-        self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
+        if activeTargetAfterRequest == candidate.Mob then
+            self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
+            self.TimedOutQuestKey = nil
+            self.LastQuestAttemptKey = nil
+            self.PendingQuestTargetName = nil
+            self.PendingQuestKey = nil
+            self.PendingQuestReachedAt = nil
+            self:_SetStatus(
+                "Quest confirmed by " .. boundedReason(readerEvidence),
+                "success"
+            )
+        else
+            self:_EndQuestDiagnosticWait("active_state_target_mismatch", os.clock())
+            self.PendingQuestTargetName = nil
+            self.PendingQuestKey = nil
+            self.PendingQuestReachedAt = nil
+            self:_SetStatus(
+                "A different active quest target was observed; following its validated target",
+                "warning"
+            )
+        end
     end
     if not self:_IsCurrent(session) then
         return
     end
-    if requested then
+    if stateAfterRequest ~= "active" then
+        local message = requested
+            and "StartQuest call returned; waiting for state evidence (response is not acceptance)"
+            or "StartQuest call raised; quest acceptance remains unconfirmed"
+        self:_SetStatus(message, "warning")
+    elseif activeTargetAfterRequest ~= candidate.Mob then
         self:_SetStatus(
-            "Quest request sent; waiting for GuideModule.Data.QuestData.Task confirmation",
+            "A different active quest target was observed; following its validated target",
             "warning"
         )
-    else
-        self:_SetStatus("Quest request failed: " .. tostring(result), "error")
     end
 end
 
@@ -2601,36 +3582,75 @@ function MainFarm:_Step(session)
         self.Character = character
         self.Target = nil
         self.TargetName = nil
+        self:_ResetSpawnSearch(nil)
         self:_SetStatus("Character ready; reacquiring farm state", "info")
     end
 
-    local questState, activeTarget = self.QuestService:GetActiveQuestState()
+    local questState, activeTarget, readerEvidence = self.QuestService:GetActiveQuestState()
+    self.LastQuestStateReason = readerEvidence
     if self.QuestDiagnosticWaitKey then
-        self:_LogQuestDataSnapshot("confirmation_poll", questState, false)
+        self:_LogQuestDataSnapshot("confirmation_poll", questState, false, readerEvidence)
         local now = os.clock()
         if questState == "active" then
-            self:_LogQuestDataSnapshot("confirmation_poll", questState, true)
-            self:_EndQuestDiagnosticWait("active_state_observed", now)
+            self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
+            if activeTarget == self.PendingQuestTargetName then
+                self:_EndQuestDiagnosticWait("active_state_observed", now)
+                self.TimedOutQuestKey = nil
+                self.LastQuestAttemptKey = nil
+                self.PendingQuestTargetName = nil
+                self.PendingQuestKey = nil
+                self.PendingQuestReachedAt = nil
+                self:_SetStatus(
+                    "Quest confirmed by " .. boundedReason(readerEvidence),
+                    "success"
+                )
+            else
+                self:_EndQuestDiagnosticWait("active_state_target_mismatch", now)
+                self.PendingQuestTargetName = nil
+                self.PendingQuestKey = nil
+                self.PendingQuestReachedAt = nil
+                self:_SetStatus(
+                    "A different active quest target was observed; following its validated target",
+                    "warning"
+                )
+            end
         elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= 8 then
-            self:_LogQuestDataSnapshot("confirmation_poll", questState, true)
-            self:_EndQuestDiagnosticWait("cooldown_elapsed_without_active_state", now)
+            self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
+            self:_TimeoutQuestConfirmation(self.QuestDiagnosticWaitKey, now)
         end
     end
-    if questState == "unknown" then
-        self:_ClearTarget()
-        self.MovementService:Cancel()
+    if questState == "active"
+        and self.PendingQuestTargetName
+        and activeTarget == self.PendingQuestTargetName
+    then
+        self.TimedOutQuestKey = nil
+        self.QuestTimeoutReason = nil
+        self.LastQuestAttemptKey = nil
+        self.PendingQuestTargetName = nil
+        self.PendingQuestKey = nil
+        self.PendingQuestReachedAt = nil
         self:_SetStatus(
-            "Waiting: GuideModule.Data quest state is unavailable; quest is not assumed active",
+            "Quest confirmed by " .. boundedReason(readerEvidence),
+            "success"
+        )
+    end
+    if questState == "unknown" then
+        self:_ClearTarget(true)
+        self:_SetStatus(
+            "Waiting: no reliable active quest state; movement session held safely",
             "warning"
         )
         return
     elseif questState == "active-unknown" then
-        self:_ClearTarget()
-        self.MovementService:Cancel()
-        self:_SetStatus("Waiting: an active quest exists but its target is not exposed", "warning")
+        self:_ClearTarget(true)
+        self:_SetStatus(
+            "Waiting: quest UI is active but its catalog target is unresolved; "
+                .. boundedReason(readerEvidence),
+            "warning"
+        )
         return
     elseif questState == "none" then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         local candidate, selectionError = self.QuestService:SelectLevelQuest()
         if not candidate then
             self.MovementService:Cancel()
@@ -2646,9 +3666,6 @@ function MainFarm:_Step(session)
         end
         local candidateKey = questKey(candidate)
         if self.PendingQuestKey ~= candidateKey then
-            if self.PendingQuestKey and self.MovementService then
-                self.MovementService:Cancel()
-            end
             self.PendingQuestKey = candidateKey
             self.PendingQuestReachedAt = nil
         end
@@ -2657,7 +3674,7 @@ function MainFarm:_Step(session)
             or CFrame.new(giverPosition)
         if (root.Position - giverCFrame.Position).Magnitude > 8 then
             self.PendingQuestReachedAt = nil
-            self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8)
+            self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8, true)
             self:_SetStatus("Approaching quest giver: " .. tostring(candidate.Name), "info")
             return
         end
@@ -2673,43 +3690,149 @@ function MainFarm:_Step(session)
     end
 
     if self.TargetName ~= activeTarget then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
+        self:_ResetSpawnSearch(activeTarget)
         self.TargetName = activeTarget
     end
 
-    local target = self.EnemyService:FindNearest(activeTarget, root.Position)
+    local now = os.clock()
+    local target
+    if self.Target and self.TargetName == activeTarget and self.EnemyService:IsAlive(self.Target) then
+        target = self.Target
+    elseif now >= (self.NextEnemySearchAt or 0) then
+        target = self.EnemyService:FindNearest(activeTarget, root.Position)
+        self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    end
     if not target then
         if self.Target then
-            self:_ClearTarget()
+            self:_ClearTarget(true)
+            self.TargetName = activeTarget
         end
-        local spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget)
+        if self.SpawnSearchExhausted then
+            self:_SetStatus(
+                "No living " .. activeTarget
+                    .. " was found after two spawn cycles; continuing throttled scans of loaded NPCs",
+                "warning"
+            )
+            return
+        end
+        if self.SpawnRetryAt and now < self.SpawnRetryAt then
+            self:_SetStatus(
+                "No living " .. activeTarget .. " after checking known spawns; retrying shortly",
+                "warning"
+            )
+            return
+        elseif self.SpawnRetryAt then
+            self.SpawnRetryAt = nil
+            self.NextSpawnSearchAt = 0
+        end
+
+        local spawnPart = self.SpawnCandidate
+        local allSpawnsVisited = false
+        if now >= (self.NextSpawnSearchAt or 0) then
+            spawnPart, allSpawnsVisited = self.EnemyService:FindSpawn(activeTarget, root.Position)
+            self.SpawnCandidate = spawnPart
+            self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
+        end
         if spawnPart then
-            self:_MoveTo(spawnPart.CFrame * CFrame.new(0, 60, 0), session, 100)
-            if (spawnPart.Position - root.Position).Magnitude <= 100 then
-                self.EnemyService:MarkSpawnIgnored(spawnPart)
+            if not spawnPart.Parent then
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self.NextSpawnSearchAt = 0
+                self:_SetStatus("A matching enemy spawn marker was removed; rescanning", "warning")
+                return
             end
-            self:_SetStatus("Waiting near supported spawn: " .. activeTarget, "info")
+            local spawnDestination = spawnPart.CFrame * CFrame.new(0, 60, 0)
+            self:_MoveTo(spawnDestination, session, 100, true)
+            if (spawnPart.Position - root.Position).Magnitude <= 100 then
+                if not self.SpawnLoading
+                    or self.SpawnLoading.TargetName ~= activeTarget
+                    or self.SpawnLoading.Part ~= spawnPart
+                then
+                    self.SpawnLoading = {
+                        TargetName = activeTarget,
+                        Part = spawnPart,
+                        ArrivedAt = now,
+                    }
+                elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
+                    self.EnemyService:MarkSpawnIgnored(spawnPart)
+                    self.SpawnLoading = nil
+                    self.SpawnCandidate = nil
+                    self.NextSpawnSearchAt = 0
+                    self.NextEnemySearchAt = 0
+                    self:_SetStatus(
+                        "No living " .. activeTarget .. " loaded at this spawn; checking the next location",
+                        "warning"
+                    )
+                    return
+                end
+                local elapsed = self.SpawnLoading and now - self.SpawnLoading.ArrivedAt or 0
+                self:_SetStatus(
+                    "Waiting for " .. activeTarget .. " to load at spawn ("
+                        .. tostring(math.max(0, math.ceil(SPAWN_LOAD_GRACE - elapsed)))
+                        .. "s)",
+                    "info"
+                )
+            else
+                if self.SpawnLoading and self.SpawnLoading.Part ~= spawnPart then
+                    self.SpawnLoading = nil
+                end
+                self:_SetStatus("Travelling to supported spawn for " .. activeTarget, "info")
+            end
         else
             if allSpawnsVisited then
                 self.EnemyService:ClearIgnoredSpawns()
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self.SpawnEmptyCycles = (self.SpawnEmptyCycles or 0) + 1
+                if self.SpawnEmptyCycles >= MAX_EMPTY_SPAWN_CYCLES then
+                    self.SpawnSearchExhausted = true
+                    self.SpawnRetryAt = nil
+                    self.NextSpawnSearchAt = math.huge
+                    self:_SetStatus(
+                        "No living " .. activeTarget
+                            .. " after two spawn cycles; continuing throttled scans of loaded NPCs",
+                        "warning"
+                    )
+                else
+                    self.SpawnRetryAt = now + SPAWN_CYCLE_RETRY_INTERVAL
+                    self.NextSpawnSearchAt = self.SpawnRetryAt
+                    self:_SetStatus(
+                        "No living " .. activeTarget
+                            .. " at known spawns; retrying once after a short pause",
+                        "warning"
+                    )
+                end
+            else
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self:_SetStatus(
+                    "No eligible " .. activeTarget
+                        .. " is loaded and no matching Workspace._WorldOrigin.EnemySpawns marker is available",
+                    "warning"
+                )
             end
-            self.MovementService:Cancel()
-            self:_SetStatus(
-                "Waiting for living " .. activeTarget .. " or a Workspace._WorldOrigin.EnemySpawns marker",
-                "warning"
-            )
         end
         return
     end
 
+    if self.SpawnSearchTarget ~= activeTarget or self.SpawnSearchExhausted then
+        self:_ResetSpawnSearch(activeTarget)
+    end
+    self.SpawnEmptyCycles = 0
+    self.SpawnSearchExhausted = false
+    self.SpawnCandidate = nil
+    self.SpawnLoading = nil
+    self.SpawnRetryAt = nil
+    self.NextSpawnSearchAt = 0
     if self.Target ~= target then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self.Target = target
         self.TargetName = activeTarget
         self:_SetStatus("Target acquired: " .. activeTarget, "success")
     end
     if not self.EnemyService:IsAlive(target) then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self:_SetStatus("Target died or became invalid; reacquiring", "info")
         return
     end
@@ -2745,13 +3868,13 @@ function MainFarm:_Step(session)
             local targetOffset = weaponCategory == "Blox Fruit"
                 and CFrame.new(-7, 20, 0)
                 or CFrame.new(7, 20, 0)
-            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end
         end
     else
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self:_SetStatus("Target died or became invalid; reacquiring", "info")
     end
 end
@@ -2763,6 +3886,11 @@ function MainFarm:_Run(session)
             if self.MovementService then
                 self.MovementService:Cancel()
             end
+            if self.EnemyService then
+                self.EnemyService:RestoreTargetCollision()
+            end
+            self.Target = nil
+            self.TargetName = nil
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
         task.wait()
@@ -2784,12 +3912,22 @@ function MainFarm:Initialize(context)
     self.CombatDependencyError = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.TimedOutQuestKey = nil
+    self.QuestTimeoutReason = nil
+    self.PendingQuestTargetName = nil
+    self.LastQuestStateReason = nil
     self.QuestDiagnosticWaitKey = nil
     self.QuestDiagnosticWaitStartedAt = nil
     self.QuestDiagnosticReport = nil
     self.LastQuestDiagnosticSignature = nil
     self.LastQuestDiagnosticAt = 0
     self.LastStatus = nil
+    self.SpawnSearchTarget = nil
+    self.SpawnCandidate = nil
+    self.SpawnLoading = nil
+    self.SpawnRetryAt = nil
+    self.NextSpawnSearchAt = 0
+    self.NextEnemySearchAt = 0
 
     local player = context.Compatibility.Player
     if player then
@@ -2806,6 +3944,7 @@ function MainFarm:Initialize(context)
             self.Target = nil
             self.TargetName = nil
             self.Character = nil
+            self:_ResetSpawnSearch(nil)
             self:_SetStatus("Character changed; farm session will reacquire after respawn", "warning")
         end)
         self.CharacterRemovingConnection = player.CharacterRemoving:Connect(function()
@@ -2816,6 +3955,7 @@ function MainFarm:Initialize(context)
                 self.CombatService:Cancel()
             end
             self:_ClearTarget()
+            self:_ResetSpawnSearch(nil)
         end)
     end
     return true
@@ -2840,9 +3980,17 @@ function MainFarm:Start()
     self.Running = true
     self.CombatDependencyAttempted = false
     self.CombatDependencyError = nil
+    self.LastQuestAttemptKey = nil
+    self.LastQuestAttemptAt = 0
+    self.TimedOutQuestKey = nil
+    self.QuestTimeoutReason = nil
+    self.PendingQuestTargetName = nil
+    self.PendingQuestKey = nil
+    self.PendingQuestReachedAt = nil
+    self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
-    self:_SetStatus("Main Farm enabled; reading authoritative quest state", "success")
+    self:_SetStatus("Main Farm enabled; reading available quest state", "success")
     task.spawn(self._Run, self, session)
     return true
 end
@@ -2866,6 +4014,13 @@ function MainFarm:Stop()
     self.TargetName = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
+    self.PendingQuestTargetName = nil
+    self.LastQuestAttemptKey = nil
+    self.LastQuestAttemptAt = 0
+    self.TimedOutQuestKey = nil
+    self.QuestTimeoutReason = nil
+    self.LastQuestStateReason = nil
+    self:_ResetSpawnSearch(nil)
     self.QuestDiagnosticWaitKey = nil
     self.QuestDiagnosticWaitStartedAt = nil
     if self.Context and self.Context.State then

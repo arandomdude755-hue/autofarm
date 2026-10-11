@@ -300,6 +300,30 @@ function MovementService:MoveTo(destination, options)
         return true, "already moving"
     end
 
+    if active
+        and active.Character == character
+        and active.KeepSession
+        and options.KeepSession == true
+        and not active.Route
+        and not route
+        and active.IsCurrent()
+    then
+        active.Goal = goal
+        active.Threshold = threshold
+        active.Speed = tonumber(options.Speed) or active.Speed
+        active.IsCurrent = isCurrent
+        active.Holding = false
+        active.BestDistance = (goal.Position - root.Position).Magnitude
+        active.LastProgressAt = os.clock()
+        if active.BestDistance <= threshold then
+            root.CFrame = destination
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            active.Holding = true
+        end
+        return true, active.Holding and "retargeted and holding" or "retargeted"
+    end
+
     self:_StopMovement()
     if (goal.Position - root.Position).Magnitude <= threshold then
         if route then
@@ -360,13 +384,15 @@ function MovementService:MoveTo(destination, options)
         CollisionOriginals = collisionOriginals,
         FloatForce = ownsFloatForce and floatForce or nil,
         HasTeleportTag = self.OwnsTeleportTag,
+        KeepSession = options.KeepSession == true and route == nil,
+        Holding = false,
         BestDistance = (goal.Position - root.Position).Magnitude,
         LastProgressAt = os.clock(),
     }
     self.Active = active
 
     active.Connection = self.Compatibility.RunService.Heartbeat:Connect(function(deltaTime)
-        if self.Active ~= active or self.Generation ~= generation or not isCurrent() then
+        if self.Active ~= active or self.Generation ~= generation or not active.IsCurrent() then
             self:_Finish(active, true)
             return
         end
@@ -383,18 +409,27 @@ function MovementService:MoveTo(destination, options)
             return
         end
 
-        local offset = goal.Position - root.Position
+        local goalNow = active.Goal
+        local thresholdNow = active.Threshold
+        local offset = goalNow.Position - root.Position
         local distance = offset.Magnitude
-        if distance <= threshold then
-            root.CFrame = goal
+        if distance <= thresholdNow then
+            root.CFrame = goalNow
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
+            if active.KeepSession then
+                active.Holding = true
+                active.BestDistance = distance
+                active.LastProgressAt = os.clock()
+                return
+            end
             self:_Finish(active, true)
-            if route then
-                self:_RequestRoute(route, isCurrent, self.RouteGeneration)
+            if active.Route then
+                self:_RequestRoute(active.Route, active.IsCurrent, self.RouteGeneration)
             end
             return
         end
+        active.Holding = false
         if distance < active.BestDistance - 1 then
             active.BestDistance = distance
             active.LastProgressAt = os.clock()

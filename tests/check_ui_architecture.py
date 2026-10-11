@@ -8,6 +8,8 @@ SCRIPT_PATH = "tests/Standalone_CustomHub_UI_Test.client.lua"
 SCRIPT = (ROOT / SCRIPT_PATH).read_text(encoding="utf-8")
 UI_MODULE_PATH = "src/ReplicatedStorage/CustomHub/UI.lua"
 UI_MODULE = (ROOT / UI_MODULE_PATH).read_text(encoding="utf-8")
+CONFIG_PATH = "src/ReplicatedStorage/CustomHub/Config.lua"
+CONFIG = (ROOT / CONFIG_PATH).read_text(encoding="utf-8")
 DOCS = (ROOT / "docs/BNN_SOURCE_INVENTORY.md").read_text(encoding="utf-8")
 
 
@@ -24,6 +26,26 @@ require("ReplicatedStorage" not in project["tree"], "Standalone project should n
 
 for tab in ("Main", "Farm", "Player", "Teleport", "Settings"):
     require(f"{tab} = {{" in SCRIPT, f"Standalone page is missing: {tab}")
+    require(f'"{tab}"' in CONFIG, f"production UI is missing the {tab} tab")
+
+for token in (
+    "Background = Color3.fromRGB(18, 21, 28)",
+    "Header = Color3.fromRGB(23, 27, 36)",
+    "TabBar = Color3.fromRGB(20, 24, 32)",
+    "Control = Color3.fromRGB(27, 32, 42)",
+    "Accent = Color3.fromRGB(79, 139, 224)",
+):
+    require(token in CONFIG, f"production theme diverged from standalone reference: {token}")
+
+for token in (
+    'Name = "SectionHeader"',
+    'Name = "AccentBar"',
+    'Name = "ActiveMarker"',
+    'Name = "PulseHalo"',
+    'function UI:_AttachButtonFeedback',
+    "self.Root.Position = clampDragPosition(",
+):
+    require(token in UI_MODULE, f"production UI is missing a referenced design/interaction component: {token}")
 
 require(not re.search(r"\brequire\s*\(", SCRIPT), "Standalone script must not import modules")
 require("Players.LocalPlayer" in SCRIPT and 'WaitForChild("PlayerGui"' in SCRIPT,
@@ -36,9 +58,9 @@ require("connection:Disconnect()" in SCRIPT, "Explicit connection cleanup is mis
 
 for token in (
     'Name = "Minimize"',
-    'Text = "Min"',
+    'Text = "−"',
     'Name = "Restore"',
-    'Text = "Restore"',
+    'Text = "⌂"',
     "function UI:_SetMinimized(minimized)",
     "self.Root.Visible = not minimized",
     "self.RestoreButton.Visible = minimized",
@@ -102,6 +124,7 @@ for path in [
     ROOT / "tests/check_ui_architecture.py",
     ROOT / "docs/BNN_SOURCE_INVENTORY.md",
     ROOT / UI_MODULE_PATH,
+    ROOT / CONFIG_PATH,
 ]:
     text = path.read_text(encoding="utf-8")
     require(all(line == line.rstrip() for line in text.splitlines()),
