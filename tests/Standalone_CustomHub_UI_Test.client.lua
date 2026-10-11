@@ -155,7 +155,11 @@ local root
 local scroll
 local content
 local contentLayout
+local controlsContainer
+local controlGridLayout
+local currentControlCount = 0
 local titlebar
+local sizeConstraint
 local statusLabel
 local tabButtons = {}
 local toggleEntries = {}
@@ -172,6 +176,9 @@ local function create(className, properties, parent)
     local object = Instance.new(className)
     for property, value in pairs(properties) do
         object[property] = value
+    end
+    if className == "TextLabel" or className == "TextButton" or className == "TextBox" then
+        object.AutoLocalize = false
     end
     object.Parent = parent
     return object
@@ -231,6 +238,36 @@ local function setStatus(message, kind)
     end
 end
 
+local function getColumnCount(availableWidth, controlCount, landscape)
+    if landscape and availableWidth >= 620 and controlCount > 1 then
+        return 2
+    end
+    return 1
+end
+
+local function syncControlGridHeight()
+    if controlsContainer and controlGridLayout then
+        controlsContainer.Size = UDim2.new(1, -2, 0, controlGridLayout.AbsoluteContentSize.Y)
+    end
+end
+
+local function updateControlGridLayout()
+    if not controlsContainer or not controlGridLayout then
+        return
+    end
+
+    local camera = workspace.CurrentCamera
+    local landscape = camera ~= nil and camera.ViewportSize.X > camera.ViewportSize.Y
+    local columnCount = getColumnCount(controlsContainer.AbsoluteSize.X, currentControlCount, landscape)
+    local cellSize = columnCount == 2 and UDim2.new(0.5, -4, 0, 68) or UDim2.new(1, 0, 0, 68)
+    if controlGridLayout.FillDirectionMaxCells ~= columnCount then
+        controlGridLayout.FillDirectionMaxCells = columnCount
+    end
+    if controlGridLayout.CellSize ~= cellSize then
+        controlGridLayout.CellSize = cellSize
+    end
+end
+
 local function updateSize()
     if not root then
         return
@@ -240,11 +277,18 @@ local function updateSize()
     local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
     local landscape = viewport.X > viewport.Y
     local widthScale = state.compact and (touchEnabled and 0.92 or 0.72) or 0.96
-    local heightScale = state.compact and (landscape and 0.84 or 0.78) or 0.9
     local maxWidth = landscape and 760 or 500
-    local maxHeight = landscape and 360 or 740
-    local width = math.min(viewport.X * widthScale, maxWidth, math.max(280, viewport.X - 16))
-    local height = math.min(viewport.Y * heightScale, maxHeight, math.max(320, viewport.Y - 32))
+    local maxHeight = math.min(landscape and 420 or 740, math.max(1, viewport.Y - 32))
+    local minHeight = math.min(landscape and 300 or 320, maxHeight)
+    local availableWidth = math.max(1, viewport.X - 16)
+    local width = math.min(viewport.X * widthScale, maxWidth, availableWidth)
+    local pageHeight = contentLayout and contentLayout.AbsoluteContentSize.Y or 0
+    local desiredHeight = 76 + 30 + pageHeight + 14
+    local height = math.clamp(desiredHeight, minHeight, maxHeight)
+    if sizeConstraint then
+        sizeConstraint.MinSize = Vector2.new(math.min(280, width), minHeight)
+        sizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
+    end
     root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
 end
 
@@ -322,6 +366,9 @@ end
 local function clearPage()
     disconnectAll(pageConnections)
     toggleEntries = {}
+    controlsContainer = nil
+    controlGridLayout = nil
+    currentControlCount = 0
     if not content then
         return
     end
@@ -398,18 +445,35 @@ renderTab = function(tabName)
         TextTruncate = Enum.TextTruncate.AtEnd,
     }, section)
 
+    currentControlCount = #page.Controls
+    controlsContainer = create("Frame", {
+        Name = "ControlGrid",
+        Size = UDim2.new(1, -2, 0, 0),
+        BackgroundTransparency = 1,
+        LayoutOrder = 3,
+    }, content)
+    controlGridLayout = create("UIGridLayout", {
+        CellSize = UDim2.new(1, 0, 0, 68),
+        CellPadding = UDim2.fromOffset(8, 6),
+        FillDirection = Enum.FillDirection.Horizontal,
+        FillDirectionMaxCells = 1,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, controlsContainer)
+    connect(pageConnections, controlGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"), syncControlGridHeight)
+    connect(pageConnections, controlsContainer:GetPropertyChangedSignal("AbsoluteSize"), updateControlGridLayout)
+
     for index, control in ipairs(page.Controls) do
         local hasValue = control.Kind == "previewToggle" or control.Kind == "settingToggle"
         local reserved = 78
         local row = create("TextButton", {
             Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
-            Size = UDim2.new(1, -2, 0, 68),
+            Size = UDim2.new(1, 0, 0, 68),
             BackgroundColor3 = Theme.Control,
             BorderSizePixel = 0,
             AutoButtonColor = false,
             Text = "",
-            LayoutOrder = index + 2,
-        }, content)
+            LayoutOrder = index,
+        }, controlsContainer)
         addCorner(row, 3)
         addStroke(row)
 
@@ -483,6 +547,8 @@ renderTab = function(tabName)
         end)
     end
 
+    updateControlGridLayout()
+    syncControlGridHeight()
     if scroll then
         scroll.CanvasPosition = Vector2.zero
     end
@@ -513,7 +579,11 @@ local function cleanup(fromSelfTest)
     scroll = nil
     content = nil
     contentLayout = nil
+    controlsContainer = nil
+    controlGridLayout = nil
+    currentControlCount = 0
     titlebar = nil
+    sizeConstraint = nil
     statusLabel = nil
     tabButtons = {}
     toggleEntries = {}
@@ -539,6 +609,7 @@ local function mount()
         Name = GUI_NAME,
         ResetOnSpawn = false,
         IgnoreGuiInset = true,
+        AutoLocalize = false,
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         DisplayOrder = 100,
     }, playerGui)
@@ -553,8 +624,8 @@ local function mount()
     }, screenGui)
     addCorner(root, 4)
     addStroke(root)
-    create("UISizeConstraint", {
-        MinSize = Vector2.new(280, 320),
+    sizeConstraint = create("UISizeConstraint", {
+        MinSize = Vector2.new(280, 280),
         MaxSize = Vector2.new(760, 740),
     }, root)
 
@@ -768,6 +839,7 @@ local function mount()
         if scroll then
             scroll.CanvasSize = UDim2.new(0, 0, 0, contentLayout.AbsoluteContentSize.Y)
         end
+        updateSize()
     end)
     local camera = workspace.CurrentCamera
     if camera then
@@ -784,6 +856,7 @@ local function mount()
     updateSize()
     setStatus("UI shell ready; gameplay features are disconnected.", "success")
     renderTab(state.selectedTab)
+    updateSize()
 end
 
 local function recordTest(name, callback)
@@ -844,11 +917,25 @@ task.spawn(function()
         return true
     end)
 
+    test("custom UI labels opt out of automatic translation", function()
+        return screenGui.AutoLocalize == false
+            and tabButtons.Teleport.AutoLocalize == false
+            and tabButtons.Teleport.Text == "Teleport"
+    end)
+
+    test("responsive grid threshold avoids narrow two-column cards", function()
+        return getColumnCount(619, 2, true) == 1
+            and getColumnCount(620, 2, true) == 2
+            and getColumnCount(800, 1, true) == 1
+            and getColumnCount(800, 2, false) == 1
+    end)
+
     test("native window, section, and scrolling surfaces exist", function()
         selectTab("Main")
         local section = content:FindFirstChild("SectionHeader")
         return titlebar ~= nil and titlebar:IsA("Frame")
             and scroll ~= nil and scroll:IsA("ScrollingFrame")
+            and controlsContainer ~= nil and controlGridLayout ~= nil
             and section ~= nil and section:FindFirstChild("AccentBar") ~= nil
             and screenGui:FindFirstChild("Window"):FindFirstChild("Status") ~= nil
     end)
@@ -888,8 +975,18 @@ task.spawn(function()
         local compactWidth = root.Size.X.Offset
         local compactHeight = root.Size.Y.Offset
         local compact = state.compact
+        local camera = workspace.CurrentCamera
+        local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
+        local landscape = viewport.X > viewport.Y
+        local minHeight = landscape and 300 or 320
+        local maxHeight = math.min(landscape and 420 or 740, math.max(1, viewport.Y - 32))
         selectTab("Main")
-        return expanded and compact and expandedWidth >= compactWidth and expandedHeight > compactHeight
+        return expanded and compact
+            and expandedWidth >= compactWidth
+            and expandedHeight >= minHeight
+            and expandedHeight <= maxHeight
+            and compactHeight >= minHeight
+            and compactHeight <= maxHeight
     end)
 
     test("placeholder actions only update status", function()
@@ -938,9 +1035,13 @@ task.spawn(function()
         if not title then
             return false
         end
+        local camera = workspace.CurrentCamera
+        local landscape = camera ~= nil and camera.ViewportSize.X > camera.ViewportSize.Y
+        local columnsFitWidth = controlGridLayout.FillDirectionMaxCells
+            == getColumnCount(controlsContainer.AbsoluteSize.X, #Pages.Settings.Controls, landscape)
         local noOverlap = title.AbsolutePosition.X + title.AbsoluteSize.X <= value.AbsolutePosition.X
         selectTab("Main")
-        return noOverlap
+        return noOverlap and columnsFitWidth
     end)
 
     local settingsControls = Pages.Settings.Controls
