@@ -1,0 +1,15 @@
+{
+  "name": "CustomHubMobileUiTest",
+  "tree": {
+    "$className": "DataModel",
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "CustomHubMobileUiTest.client.lua": {
+          "$path": "tests/Standalone_CustomHub_UI_Test.client.lua"
+        }
+      }
+    }
+  }
+}
