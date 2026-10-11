@@ -186,7 +186,19 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
             text = text:sub(1, MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH - #endMarker - 18)
                 .. "\n...[truncated]" .. endMarker
         end
-        print(text)
+
+        local copied = false
+        local clipboardCallOk = pcall(function()
+            if type(setclipboard) == "function" then
+                setclipboard(text)
+                copied = true
+            end
+        end)
+        if clipboardCallOk and copied then
+            print("[QuestDiagnostic] Clipboard copy succeeded.")
+        else
+            print(text)
+        end
     end)
 end
 
