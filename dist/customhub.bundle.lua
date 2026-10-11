@@ -953,6 +953,16 @@ __bundleFactories["CustomHub.Features.Farm.QuestService"] = function()
 local QuestService = {}
 QuestService.__index = QuestService
 
+local MAX_TRACKED_QUEST_TEXT_LENGTH = 160
+local MAX_TRACKED_QUEST_PROGRESS_LENGTH = 32
+
+local excludedQuestNames = {
+    BartiloQuest = true,
+    Trainees = true,
+    MarineQuest = true,
+    CitizenQuest = true,
+}
+
 local function diagnosticScalarRepresentation(value)
     local valueType = typeof(value)
     if type(value) == "string" then
@@ -968,12 +978,120 @@ local function diagnosticScalarRepresentation(value)
     return "<" .. tostring(valueType) .. ">"
 end
 
-local excludedQuestNames = {
-    BartiloQuest = true,
-    Trainees = true,
-    MarineQuest = true,
-    CitizenQuest = true,
-}
+local function usableTrackedQuestText(text, maxLength)
+    if type(text) ~= "string" or #text == 0 or #text > maxLength then
+        return nil
+    end
+
+    local trimmed = text:match("^%s*(.-)%s*$")
+    if trimmed == "" then
+        return nil
+    end
+    return trimmed
+end
+
+local function parseTrackedQuestProgress(text)
+    if type(text) ~= "string" or #text > MAX_TRACKED_QUEST_PROGRESS_LENGTH then
+        return nil
+    end
+
+    local currentText, totalText = text:match("^%s*(%d+)%s*/%s*(%d+)%s*$")
+    if not currentText or not totalText then
+        return nil
+    end
+
+    local current = tonumber(currentText)
+    local total = tonumber(totalText)
+    if not current or not total
+        or current == math.huge
+        or total == math.huge
+        or total <= 0
+        or current > total
+    then
+        return nil
+    end
+    return current, total
+end
+
+local function findEligibleQuestTarget(self, guideData, targetName, progressTotal)
+    local level = self:GetPlayerLevel()
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if not level or type(npcList) ~= "table" or type(self.Quests) ~= "table" then
+        return nil
+    end
+
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table" and not excludedQuestNames[npcEntry.InternalQuestName]
+            and type(npcEntry.Levels) == "table"
+        then
+            local questGroup = self.Quests[npcEntry.InternalQuestName]
+            if type(questGroup) == "table" then
+                for questId, requiredLevel in pairs(npcEntry.Levels) do
+                    local numericLevel = tonumber(requiredLevel)
+                    local quest = questGroup[questId]
+                    if numericLevel and numericLevel >= 0 and numericLevel <= level
+                        and type(quest) == "table" and type(quest.Task) == "table"
+                    then
+                        local mobName, count = next(quest.Task)
+                        local numericCount = tonumber(count)
+                        if mobName == targetName and numericCount == progressTotal
+                            and numericCount > 1
+                        then
+                            return mobName
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function readTrackedQuestTarget(self, guideData)
+    local ok, targetName = pcall(function()
+        local compatibility = self.Compatibility
+        if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
+            return nil
+        end
+
+        local playerGui = compatibility:GetPlayerGui()
+        local trackedQuestFrame = playerGui and playerGui:FindFirstChild("TrackedQuestFrame")
+        if not trackedQuestFrame or not trackedQuestFrame:IsA("ScreenGui")
+            or not trackedQuestFrame.Enabled
+        then
+            return nil
+        end
+
+        local frame = trackedQuestFrame:FindFirstChild("Frame")
+        local header = frame and frame:FindFirstChild("header")
+        local titleLabel = header and header:FindFirstChild("textLabel")
+        local description = frame and frame:FindFirstChild("description")
+        local progressLabel = frame and frame:FindFirstChild("progress")
+        local title = titleLabel and usableTrackedQuestText(
+            titleLabel.Text,
+            MAX_TRACKED_QUEST_TEXT_LENGTH
+        )
+        local target = description and usableTrackedQuestText(
+            description.Text,
+            MAX_TRACKED_QUEST_TEXT_LENGTH
+        )
+        local progressText = progressLabel and progressLabel.Text
+        if not title or not target then
+            return nil
+        end
+        local progressCurrent, progressTotal = parseTrackedQuestProgress(progressText)
+        if progressCurrent == nil or progressTotal == nil then
+            return nil
+        end
+
+        return findEligibleQuestTarget(self, guideData, target, progressTotal)
+    end)
+
+    if not ok then
+        return nil
+    end
+    return targetName
+end
 
 function QuestService.new(compatibility)
     local quests, guide, loadError = compatibility:GetQuestModules()
@@ -996,23 +1114,29 @@ end
 
 function QuestService:GetActiveQuestState()
     local guideData = self.Guide and self.Guide.Data
+    local questData = type(guideData) == "table" and guideData.QuestData or nil
+    if type(questData) == "table" and type(questData.Task) == "table" then
+        local targetName = next(questData.Task)
+        if type(targetName) == "string" and targetName ~= "" then
+            return "active", targetName
+        end
+    end
+
+    local trackedTarget = readTrackedQuestTarget(self, guideData)
+    if trackedTarget then
+        return "active", trackedTarget
+    end
+
     if type(guideData) ~= "table" then
         return "unknown", nil
     end
-
-    local questData = guideData.QuestData
     if questData == nil then
         return "none", nil
     end
     if type(questData) ~= "table" or type(questData.Task) ~= "table" then
         return "unknown", nil
     end
-
-    local targetName = next(questData.Task)
-    if type(targetName) ~= "string" then
-        return "active-unknown", nil
-    end
-    return "active", targetName
+    return "active-unknown", nil
 end
 
 function QuestService:SelectLevelQuest()
