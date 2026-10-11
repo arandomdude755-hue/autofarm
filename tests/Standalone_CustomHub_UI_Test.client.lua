@@ -169,8 +169,9 @@ local minimizeButton
 local bubbleContainer
 local bubbleButton
 local bubbleScale
+local bubbleHalo
 local bubbleRing
-local bubbleRingStroke
+local bubblePing
 local bubbleDot
 local bubbleHint
 local statusLabel
@@ -249,14 +250,21 @@ local function cancelTween(instance)
     tween:Cancel()
 end
 
-local function playTween(instance, duration, goals, onComplete, delayTime)
+local function playTween(instance, duration, goals, onComplete, delayTime, repeatCount, reverses)
     if not instance then
         return
     end
     cancelTween(instance)
     local tween = TweenService:Create(
         instance,
-        TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, delayTime or 0),
+        TweenInfo.new(
+            duration,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out,
+            repeatCount or 0,
+            reverses == true,
+            delayTime or 0
+        ),
         goals
     )
     activeTweens[instance] = tween
@@ -292,7 +300,7 @@ local function cancelAllTweens()
     table.clear(tweenCompletedConnections)
 end
 
-local function attachButtonFeedback(button, connectionBucket)
+local function attachButtonFeedback(button, connectionBucket, pressedScale)
     local scale = create("UIScale", { Scale = 1 }, button)
     connect(connectionBucket, button.MouseEnter, function()
         if not touchEnabled then
@@ -314,7 +322,7 @@ local function attachButtonFeedback(button, connectionBucket)
         end
         pressedButtonScale = scale
         pressedButtonInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
-        playTween(scale, 0.07, { Scale = 0.96 })
+        playTween(scale, 0.07, { Scale = pressedScale or 0.96 })
     end)
     connect(connectionBucket, button.Activated, function()
         if pressedButtonScale == scale then
@@ -401,39 +409,55 @@ local function setBubbleHintVisible(visible, immediate)
     end
 end
 
-local function animateBubbleParts(visible, immediate)
-    local target = visible and 0 or 1
-    local function apply(instance, property, value, duration)
-        if immediate then
-            instance[property] = value
-        else
-            playTween(instance, duration, { [property] = value })
-        end
+local function startBubbleAmbientAnimations()
+    if not bubbleHalo or not bubblePing then
+        return
     end
-    if bubbleButton then
-        apply(bubbleButton, "BackgroundTransparency", target, 0.16)
+
+    cancelTween(bubbleHalo)
+    cancelTween(bubblePing)
+    bubbleHalo.Size = UDim2.fromOffset(70, 70)
+    bubbleHalo.BackgroundTransparency = 0.84
+    bubblePing.Size = UDim2.fromOffset(7, 7)
+    bubblePing.BackgroundTransparency = 0.25
+
+    -- A soft, slow halo pulse and an expanding status ping match the supplied HTML.
+    playTween(bubbleHalo, 1.05, {
+        Size = UDim2.fromOffset(78, 78),
+        BackgroundTransparency = 0.97,
+    }, nil, 0, -1, true)
+    playTween(bubblePing, 0.9, {
+        Size = UDim2.fromOffset(20, 20),
+        BackgroundTransparency = 1,
+    }, nil, 0, -1, false)
+end
+
+local function stopBubbleAmbientAnimations()
+    if bubbleHalo then
+        cancelTween(bubbleHalo)
+        bubbleHalo.Size = UDim2.fromOffset(70, 70)
+        bubbleHalo.BackgroundTransparency = 0.84
     end
-    if bubbleRing then
-        apply(bubbleRing, "BackgroundTransparency", visible and 0.94 or 1, 0.2)
+    if bubblePing then
+        cancelTween(bubblePing)
+        bubblePing.Size = UDim2.fromOffset(7, 7)
+        bubblePing.BackgroundTransparency = 1
     end
-    if bubbleRingStroke then
-        apply(bubbleRingStroke, "Transparency", visible and 0.55 or 1, 0.2)
-    end
-    if bubbleDot then
-        apply(bubbleDot, "BackgroundTransparency", target, 0.14)
-    end
-    if bubbleButton then
-        for _, descendant in ipairs(bubbleButton:GetDescendants()) do
-            if descendant:IsA("TextLabel") then
-                apply(descendant, "TextTransparency", target, 0.14)
-            elseif descendant:IsA("UIStroke") then
-                apply(descendant, "Transparency", target, 0.14)
-            elseif descendant:IsA("Frame") and (descendant.Name == "UiStatusDot" or string.sub(descendant.Name, 1, 5) == "Grip_") then
-                local frameTarget = visible and (descendant.Name == "UiStatusDot" and 0 or 0.25) or 1
-                apply(descendant, "BackgroundTransparency", frameTarget, 0.14)
-            end
-        end
-    end
+end
+
+local function getClampedDragPosition(origin, delta, viewport, size)
+    local halfX = math.min(size.X / 2, viewport.X / 2)
+    local halfY = math.min(size.Y / 2, viewport.Y / 2)
+    local startCenterX = viewport.X * origin.X.Scale + origin.X.Offset
+    local startCenterY = viewport.Y * origin.Y.Scale + origin.Y.Offset
+    local centerX = math.clamp(startCenterX + delta.X, halfX, math.max(halfX, viewport.X - halfX))
+    local centerY = math.clamp(startCenterY + delta.Y, halfY, math.max(halfY, viewport.Y - halfY))
+    return UDim2.new(
+        origin.X.Scale,
+        centerX - viewport.X * origin.X.Scale,
+        origin.Y.Scale,
+        centerY - viewport.Y * origin.Y.Scale
+    )
 end
 
 local function minimizeWindow(fromSelfTest)
@@ -447,16 +471,12 @@ local function minimizeWindow(fromSelfTest)
         transitionGeneration += 1
         cancelTween(windowScale)
         cancelTween(bubbleScale)
+        stopBubbleAmbientAnimations()
         root.Visible = false
         windowScale.Scale = 1
         root.BackgroundTransparency = 0
         bubbleContainer.Visible = true
         bubbleScale.Scale = 1
-        bubbleButton.BackgroundTransparency = 0
-        bubbleRing.BackgroundTransparency = 0.94
-        bubbleRingStroke.Transparency = 0.55
-        bubbleDot.BackgroundTransparency = 0
-        animateBubbleParts(true, true)
         setBubbleHintVisible(false, true)
         return true
     end
@@ -468,7 +488,11 @@ local function minimizeWindow(fromSelfTest)
         root.BackgroundTransparency = 0.18
     end
     root.Visible = true
+    local bubbleWasVisible = bubbleContainer.Visible
     bubbleContainer.Visible = true
+    if not bubbleWasVisible then
+        bubbleScale.Scale = 0.9
+    end
 
     if player:GetAttribute(BUBBLE_HINT_SEEN_ATTRIBUTE) ~= true then
         player:SetAttribute(BUBBLE_HINT_SEEN_ATTRIBUTE, true)
@@ -483,8 +507,8 @@ local function minimizeWindow(fromSelfTest)
         setBubbleHintVisible(false, true)
     end
 
-    animateBubbleParts(true)
-    playTween(bubbleScale, 0.21, { Scale = 1 })
+    playTween(bubbleScale, 0.15, { Scale = 1 })
+    startBubbleAmbientAnimations()
     playTween(windowScale, 0.17, { Scale = 0.93 }, function()
         if generation == transitionGeneration and isMinimized and root then
             root.Visible = false
@@ -507,16 +531,12 @@ local function restoreWindow(fromSelfTest)
         transitionGeneration += 1
         cancelTween(windowScale)
         cancelTween(bubbleScale)
+        stopBubbleAmbientAnimations()
         root.Visible = true
         root.BackgroundTransparency = 0
         windowScale.Scale = 1
         bubbleContainer.Visible = false
-        bubbleScale.Scale = 0.78
-        bubbleButton.BackgroundTransparency = 1
-        bubbleRing.BackgroundTransparency = 1
-        bubbleRingStroke.Transparency = 1
-        bubbleDot.BackgroundTransparency = 1
-        animateBubbleParts(false, true)
+        bubbleScale.Scale = 1
         setBubbleHintVisible(false, true)
         return true
     end
@@ -526,20 +546,16 @@ local function restoreWindow(fromSelfTest)
     root.Visible = true
     bubbleContainer.Visible = true
     setBubbleHintVisible(false)
+    stopBubbleAmbientAnimations()
 
     playTween(windowScale, 0.2, { Scale = 1 })
     playTween(root, 0.2, { BackgroundTransparency = 0 })
-    playTween(bubbleScale, 0.17, { Scale = 0.78 }, function()
+    playTween(bubbleScale, 0.14, { Scale = 0.9 }, function()
         if generation == transitionGeneration and not isMinimized and bubbleContainer then
             bubbleContainer.Visible = false
-            bubbleScale.Scale = 0.78
-            bubbleButton.BackgroundTransparency = 1
-            bubbleRing.BackgroundTransparency = 1
-            bubbleRingStroke.Transparency = 1
-            bubbleDot.BackgroundTransparency = 1
+            bubbleScale.Scale = 1
         end
     end)
-    animateBubbleParts(false)
     return true
 end
 
@@ -931,8 +947,9 @@ local function cleanup(fromSelfTest)
     bubbleContainer = nil
     bubbleButton = nil
     bubbleScale = nil
+    bubbleHalo = nil
     bubbleRing = nil
-    bubbleRingStroke = nil
+    bubblePing = nil
     bubbleDot = nil
     bubbleHint = nil
     statusLabel = nil
@@ -1086,21 +1103,42 @@ local function mount()
         Visible = false,
         ZIndex = 20,
     }, screenGui)
+    bubbleHalo = create("Frame", {
+        Name = "PulseHalo",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(70, 70),
+        BackgroundColor3 = Theme.Accent,
+        BackgroundTransparency = 0.84,
+        BorderSizePixel = 0,
+        ZIndex = 19,
+    }, bubbleContainer)
+    addCorner(bubbleHalo, 40)
+
     bubbleRing = create("Frame", {
         Name = "Ring",
-        Size = UDim2.fromScale(1, 1),
-        BackgroundColor3 = Theme.Accent,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(64, 64),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ZIndex = 20,
     }, bubbleContainer)
-    addCorner(bubbleRing, 32)
-    bubbleRingStroke = create("UIStroke", {
-        Color = Theme.Accent,
-        Thickness = 1,
-        Transparency = 1,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-    }, bubbleRing)
+    for index = 1, 12 do
+        local angle = (index - 1) * 30
+        local radians = math.rad(angle)
+        create("Frame", {
+            Name = "Dash_" .. tostring(index),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, math.cos(radians) * 30, 0.5, math.sin(radians) * 30),
+            Size = UDim2.fromOffset(3, 1),
+            Rotation = angle + 90,
+            BackgroundColor3 = Theme.AccentBorder,
+            BackgroundTransparency = 0.28,
+            BorderSizePixel = 0,
+            ZIndex = 20,
+        }, bubbleRing)
+    end
 
     bubbleButton = create("TextButton", {
         Name = "Restore",
@@ -1108,21 +1146,32 @@ local function mount()
         Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(56, 56),
         BackgroundColor3 = Theme.Header,
-        BackgroundTransparency = 1,
+        BackgroundTransparency = 0,
         BorderSizePixel = 0,
         AutoButtonColor = false,
         Text = "",
         ZIndex = 21,
     }, bubbleContainer)
     addCorner(bubbleButton, 28)
-    bubbleScale = create("UIScale", { Scale = 0.78 }, bubbleButton)
+    bubbleScale = create("UIScale", { Scale = 1 }, bubbleButton)
     create("UIStroke", {
         Color = Theme.Border,
         Thickness = 2,
-        Transparency = 1,
+        Transparency = 0,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, bubbleButton)
-    attachButtonFeedback(bubbleButton, persistentConnections)
+    attachButtonFeedback(bubbleButton, persistentConnections, 0.9)
+    local bubbleButtonStroke = bubbleButton:FindFirstChildOfClass("UIStroke")
+    connect(persistentConnections, bubbleButton.MouseEnter, function()
+        if not touchEnabled and bubbleButtonStroke then
+            playTween(bubbleButtonStroke, 0.12, { Color = Theme.AccentBorder })
+        end
+    end)
+    connect(persistentConnections, bubbleButton.MouseLeave, function()
+        if bubbleButtonStroke then
+            playTween(bubbleButtonStroke, 0.12, { Color = Theme.Border })
+        end
+    end)
     create("TextLabel", {
         Name = "Glyph",
         Position = UDim2.fromOffset(18, 5),
@@ -1147,17 +1196,33 @@ local function mount()
         TextSize = 8,
         ZIndex = 22,
     }, bubbleButton)
+    bubblePing = create("Frame", {
+        Name = "UiStatusPing",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 8),
+        Size = UDim2.fromOffset(7, 7),
+        BackgroundColor3 = Theme.Success,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 22,
+    }, bubbleButton)
+    addCorner(bubblePing, 10)
     bubbleDot = create("Frame", {
         Name = "UiStatusDot",
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, -8, 0, 8),
         Size = UDim2.fromOffset(7, 7),
-        BackgroundColor3 = Theme.Accent,
-        BackgroundTransparency = 1,
+        BackgroundColor3 = Theme.Success,
+        BackgroundTransparency = 0,
         BorderSizePixel = 0,
-        ZIndex = 22,
+        ZIndex = 23,
     }, bubbleButton)
     addCorner(bubbleDot, 4)
+    create("UIStroke", {
+        Color = Theme.Header,
+        Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, bubbleDot)
     for index, width in ipairs({ 4, 8, 4 }) do
         create("Frame", {
             Name = "Grip_" .. tostring(index),
@@ -1238,7 +1303,7 @@ local function mount()
             dragging = true
             dragInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
             dragStart = input.Position
-            dragOrigin = root.AbsolutePosition
+            dragOrigin = root.Position
         end
     end)
     connect(persistentConnections, UserInputService.InputChanged, function(input)
@@ -1272,9 +1337,7 @@ local function mount()
         local viewport = camera and camera.ViewportSize or Vector2.new(390, 844)
         local delta = input.Position - dragStart
         local size = root.AbsoluteSize
-        local x = math.clamp(dragOrigin.X + delta.X, 0, math.max(0, viewport.X - size.X))
-        local y = math.clamp(dragOrigin.Y + delta.Y, 0, math.max(0, viewport.Y - size.Y))
-        root.Position = UDim2.fromOffset(x + size.X / 2, y + size.Y / 2)
+        root.Position = getClampedDragPosition(dragOrigin, delta, viewport, size)
     end)
     connect(persistentConnections, UserInputService.InputEnded, function(input)
         if pressedButtonScale
@@ -1503,6 +1566,28 @@ task.spawn(function()
             and getColumnCount(800, 2, false) == 1
     end)
 
+    test("window drag keeps its starting position before pointer movement", function()
+        local initial = UDim2.fromScale(0.5, 0.5)
+        local unchanged = getClampedDragPosition(
+            initial,
+            Vector2.new(0, 0),
+            Vector2.new(844, 390),
+            Vector2.new(700, 360)
+        )
+        local moved = getClampedDragPosition(
+            initial,
+            Vector2.new(18, 12),
+            Vector2.new(844, 390),
+            Vector2.new(700, 360)
+        )
+        return unchanged.X.Scale == initial.X.Scale
+            and unchanged.X.Offset == initial.X.Offset
+            and unchanged.Y.Scale == initial.Y.Scale
+            and unchanged.Y.Offset == initial.Y.Offset
+            and moved.X.Offset == 18
+            and moved.Y.Offset == 12
+    end)
+
     test("native window, section, and scrolling surfaces exist", function()
         selectTab("Main")
         local section = content:FindFirstChild("SectionHeader")
@@ -1516,9 +1601,21 @@ task.spawn(function()
     test("window, buttons, and bubble have tweenable animation scales", function()
         return windowScale ~= nil
             and bubbleScale ~= nil
+            and bubbleHalo ~= nil
+            and bubblePing ~= nil
+            and bubbleRing:FindFirstChild("Dash_12") ~= nil
             and tabButtons.Main:FindFirstChildOfClass("UIScale") ~= nil
             and bubbleButton:FindFirstChildOfClass("UIScale") ~= nil
             and not bubbleHint.Visible
+    end)
+
+    test("bubble pulse and status ping stop cleanly", function()
+        startBubbleAmbientAnimations()
+        local started = activeTweens[bubbleHalo] ~= nil and activeTweens[bubblePing] ~= nil
+        stopBubbleAmbientAnimations()
+        return started
+            and activeTweens[bubbleHalo] == nil
+            and activeTweens[bubblePing] == nil
     end)
 
     test("tab selection and active indicators", function()
