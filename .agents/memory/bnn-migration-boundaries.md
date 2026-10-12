@@ -5,8 +5,8 @@ description: Project decisions for migrating Banana Cat Hub farming features and
 
 Migrate BNN features in functional slices, and add settings alongside the feature that uses them. Use this project’s configuration path rather than copying BNN executor filesystem persistence. Do not expose BNN controls until their behavior is implemented.
 
-For the Tiki Outpost event phase, limit migration to detecting the four Eye parts and approaching available Tree objects. Do not automate broad skill use, Skull Guitar remotes, purchases, or server hopping.
+For the Tiki Outpost event phase, configured skill use is allowed only during the puzzle. Skull Guitar may be loaded and used against puzzle objects only if already owned; never buy items or server-hop for this feature. Resume the selected Farm Weapon after the puzzle phase.
 
-**Why:** the BNN source relies on executor-specific persistence APIs that are not portable, and the user approved only Tiki event detection/approach—not its multi-weapon skill automation or item/server actions.
+**Why:** the user approved skill automation and owned Skull Guitar for the Tiki puzzle only, but did not approve purchases or server hopping. BNN also relies on executor-specific persistence APIs that are not portable.
 
-**How to apply:** for future BNN farming migrations, keep the tested Level Farm path intact, implement each mode with its related settings, and keep unimplemented modes out of the UI. Ask before adding Tiki skill or item automation.
+**How to apply:** for future BNN farming migrations, keep the tested Level Farm path intact, implement each mode with its related settings, and keep unimplemented modes out of the UI. Keep Tiki automation event-scoped and resume normal farming equipment afterward.

@@ -1,5 +1,5 @@
 - [Quest-giver runtime failure](quest-giver-runtime-failure.md) — dismiss visible quest dialogue by leaving range, then revalidate quest state before retrying.
 - [Git branch roles](git-branch-roles.md) — keep `main` as the main hub version and `dev` as the test version.
-- [BNN migration boundaries](bnn-migration-boundaries.md) — migrate in tested slices; Tiki event handling is detection and approach only unless the user approves more.
+- [BNN migration boundaries](bnn-migration-boundaries.md) — migrate in tested slices; Tiki puzzle may use configured skills and owned Skull Guitar only during the event.
 - [Farm frame pacing](farm-frame-pacing.md) — Keep collision suppression event-driven; full character descendant scans on Heartbeat cause client frame drops.
 - [Farm settings terminology](farm-settings-terminology.md) — “Auto turn on aura” means Buso/Haki activation, separate from Aura Farm.
