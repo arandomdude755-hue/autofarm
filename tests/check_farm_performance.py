@@ -6,6 +6,7 @@ HUB = ROOT / "src/ReplicatedStorage/CustomHub"
 MAIN = (HUB / "Features/MainFarm.lua").read_text(encoding="utf-8")
 ENEMY = (HUB / "Features/Farm/EnemyService.lua").read_text(encoding="utf-8")
 COMBAT = (HUB / "Features/Farm/CombatService.lua").read_text(encoding="utf-8")
+MOVEMENT = (HUB / "Features/Farm/MovementService.lua").read_text(encoding="utf-8")
 
 
 def require(condition, message):
@@ -110,7 +111,22 @@ require(
     "event-based indexes must disconnect when Main Farm stops",
 )
 
+farm_collision = function_body(
+    MOVEMENT,
+    "function MovementService:_RestoreFarmCollision()",
+    "\nfunction MovementService:_Finish(",
+)
+require(
+    "Heartbeat:Connect" not in farm_collision
+    and "character:GetDescendants()" in farm_collision
+    and "character.DescendantAdded:Connect" in farm_collision
+    and 'GetPropertyChangedSignal("CanCollide")' in farm_collision
+    and "player.CharacterAdded:Connect" in farm_collision,
+    "farm collision work must scan once per character and use part/respawn events instead of per-frame rescans",
+)
+
 print("PASS: bounded farm cadence and throttled discovery intervals")
 print("PASS: event-maintained enemy/spawn indexes and one-time collision preparation")
 print("PASS: hidden-instance fallback is lazy, indexed, and rate-limited")
 print("PASS: combat hit scans are skipped during attack cooldowns")
+print("PASS: player collision suppression uses character/part events instead of a Heartbeat full scan")

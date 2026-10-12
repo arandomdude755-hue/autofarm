@@ -162,12 +162,13 @@ collision = function_body(
     "\nfunction MovementService:_Finish",
 )
 require("self.FarmCollisionActive" in collision
-        and "self.FarmCollisionConnection.Connected" in collision,
-        "Repeated collision enable must reuse the existing maintenance connection")
-require(collision.count("Heartbeat:Connect") == 1
-        and "connection:Disconnect()" in collision
+        and "self:_ApplyFarmCollision()" in collision,
+        "Repeated collision enable must reuse the existing character/part event setup")
+require("Heartbeat:Connect" not in collision
+        and "CharacterAdded:Connect" in collision
+        and "CharacterRemoving:Connect" in collision
         and "self:_RestoreFarmCollision()" in collision,
-        "Farm collision maintenance must use one connection and restore it on stop")
+        "Farm collision maintenance must be event-driven and restore state on stop/respawn")
 
 require("farmSettings.WeaponCategory" in MAIN_FARM
         and "farmSettings.AttackNoAnimation" in MAIN_FARM

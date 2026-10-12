@@ -93,16 +93,30 @@ for token in (
 for token in ("RunService.Heartbeat", "AssemblyLinearVelocity", "IsThirdSea", "TravelToSubmergedIsland"):
     require(token in movement, f"Movement dependency/path missing: {token}")
 for token in (
-    "FarmCollisionConnection",
+    "FarmCollisionCharacterAddedConnection",
+    "FarmCollisionCharacterRemovingConnection",
+    "FarmCollisionDescendantAddedConnection",
     "FarmCollisionCharacter",
     "FarmCollisionOriginals",
     "function MovementService:SetFarmCollisionSuppression(enabled)",
     "function MovementService:_RestoreFarmCollision()",
     "function MovementService:_ApplyFarmCollision()",
-    'descendant:IsA("BasePart")',
-    "Heartbeat:Connect",
+    "function MovementService:_ApplyFarmCollisionPart(part)",
+    'part:IsA("BasePart")',
+    "DescendantAdded:Connect",
+    'GetPropertyChangedSignal("CanCollide")',
 ):
-    require(token in movement, f"continuous character collision lifecycle is missing: {token}")
+    require(token in movement, f"event-driven character collision lifecycle is missing: {token}")
+collision_lifecycle = movement[
+    movement.index("function MovementService:_RestoreFarmCollision()"):
+    movement.index("\nfunction MovementService:_Finish(")
+]
+require(
+    "Heartbeat:Connect" not in collision_lifecycle
+    and "CharacterAdded:Connect" in collision_lifecycle
+    and "CharacterRemoving:Connect" in collision_lifecycle,
+    "farm collision suppression must not rescan the full character on every Heartbeat and must handle respawns",
+)
 for token in ('"RE/RegisterAttack"', 'RemoteEvent("RegisterHit", true)', "CanAttack", "GetRigOfHitPart"):
     require(token in combat or token in (CUSTOM_HUB / "Compatibility.lua").read_text(encoding="utf-8"),
             f"BNN melee dependency missing: {token}")
