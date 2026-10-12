@@ -62,6 +62,26 @@ local farmModeProfiles = {
         TikiEventPhase = true,
     },
 }
+local tikiSkillCategories = {
+    { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
+    { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
+    { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
+    { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
+}
+local tikiSkillDefaults = {}
+local tikiSkillControls = {}
+for _, category in ipairs(tikiSkillCategories) do
+    for _, keyName in ipairs(category.Keys) do
+        local settingName = "TikiSkill_" .. category.Token .. "_" .. keyName
+        tikiSkillDefaults[settingName] = true
+        table.insert(tikiSkillControls, {
+            Kind = "settingToggle",
+            Label = "Tiki skill: " .. category.Name .. " " .. keyName,
+            Action = "farm.tikiSkill." .. category.Token .. "." .. keyName,
+            Setting = settingName,
+        })
+    end
+end
 
 local Config = {
     Name = "Custom Hub",
@@ -304,10 +324,23 @@ local Config = {
                     Action = "farm.settings.autoBuso",
                     Setting = "AutoBuso",
                 },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Tiki puzzle skills",
+                },
             },
         },
     },
 }
+
+for settingName, defaultValue in pairs(tikiSkillDefaults) do
+    if Config.FarmSettings[settingName] == nil then
+        Config.FarmSettings[settingName] = defaultValue
+    end
+end
+for _, control in ipairs(tikiSkillControls) do
+    table.insert(Config.Pages.Settings.Controls, control)
+end
 
 return Config
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Config.lua
@@ -523,6 +556,67 @@ function Compatibility:GetCommF()
         return nil, "ReplicatedStorage.Remotes.CommF_ is unavailable"
     end
     return commF
+end
+
+function Compatibility:HasOwnedInventoryItem(itemName)
+    local now = os.clock()
+    self.OwnedInventoryCache = self.OwnedInventoryCache or {}
+    if now - (self.OwnedInventoryCacheAt or 0) < 1
+        and self.OwnedInventoryCache[itemName] ~= nil
+    then
+        return self.OwnedInventoryCache[itemName]
+    end
+
+    local itemServiceModule = self.ReplicatedStorage:FindFirstChild("ItemReplicationService")
+    local itemConfigModule = self.ReplicatedStorage:FindFirstChild("ItemConfig")
+    if not itemServiceModule or not itemConfigModule then
+        return false, "Inventory lookup modules are unavailable"
+    end
+
+    local serviceOk, itemService = pcall(require, itemServiceModule)
+    local configOk, itemConfig = pcall(require, itemConfigModule)
+    if not serviceOk or type(itemService) ~= "table"
+        or not configOk or type(itemConfig) ~= "table"
+    then
+        return false, "Inventory lookup modules could not be loaded"
+    end
+
+    local keys = itemService.KEYS
+    local quantityKey = type(keys) == "table" and keys.QUANTITY
+    if quantityKey == nil or type(itemService.GetItems) ~= "function"
+        or type(itemConfig.match) ~= "function"
+    then
+        return false, "Inventory lookup APIs are unavailable"
+    end
+
+    local scanOk, found = pcall(function()
+        for item in itemService:GetItems(quantityKey) do
+            if item and item.Value and item.Value > 0 then
+                local matchOk, itemDefinition = pcall(function()
+                    return itemConfig.match(item.ItemId):unwrap()
+                end)
+                if matchOk and itemDefinition and itemDefinition.Display then
+                    local display = itemDefinition.Display
+                    local storageKey = itemDefinition.Index
+                        and itemDefinition.Index.StorageKey
+                    local resolvedName = display.Category == "Blox Fruit"
+                            and (storageKey or display.Name)
+                        or (display.Name or storageKey)
+                    if resolvedName == itemName then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end)
+    if not scanOk then
+        return false, "Inventory scan failed: " .. tostring(found)
+    end
+
+    self.OwnedInventoryCache[itemName] = found == true
+    self.OwnedInventoryCacheAt = now
+    return found == true
 end
 
 function Compatibility:GetCombatDependencies()
@@ -5165,23 +5259,251 @@ function CombatService:FindWeapon(category)
     return nil
 end
 
-function CombatService:EquipWeapon(category)
-    local tool = self:FindWeapon(category)
-    if not tool then
-        return false, "No owned " .. tostring(category) .. " tool was found"
+function CombatService:FindToolByName(toolName)
+    local player = self.Compatibility.Player
+    local character = player and player.Character
+    local backpack = player and player:FindFirstChild("Backpack")
+    local containers = {}
+    if character then
+        table.insert(containers, character)
     end
+    if backpack then
+        table.insert(containers, backpack)
+    end
+    for _, container in ipairs(containers) do
+        local tool = container:FindFirstChild(toolName)
+        if tool and tool:IsA("Tool") then
+            return tool
+        end
+    end
+    return nil
+end
 
+function CombatService:EquipTool(tool)
+    if not tool or not tool:IsA("Tool") then
+        return false, "Selected tool is unavailable"
+    end
     local character, humanoid = self.Compatibility:GetCharacterParts()
     if not character or not humanoid or humanoid.Sit then
         return false, "Character cannot equip a tool"
     end
     if tool.Parent ~= character then
+        local player = self.Compatibility.Player
+        local backpack = player and player:FindFirstChild("Backpack")
+        if tool.Parent ~= backpack then
+            return false, "Selected tool is not in the character or Backpack"
+        end
         humanoid:EquipTool(tool)
     end
     if tool.Parent ~= character then
         return false, "Selected tool did not equip"
     end
     return true, tool
+end
+
+function CombatService:EquipWeapon(category)
+    local tool = self:FindWeapon(category)
+    if not tool then
+        return false, "No owned " .. tostring(category) .. " tool was found"
+    end
+    return self:EquipTool(tool)
+end
+
+function CombatService:FindReadyTikiSkill(farmSettings)
+    local skillCategories = {
+        { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
+        { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
+        { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
+        { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
+    }
+    local playerGui = self.Compatibility:GetPlayerGui()
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local skills = main and main:FindFirstChild("Skills")
+    if not skills then
+        return nil, "PlayerGui.Main.Skills is unavailable"
+    end
+
+    for _, category in ipairs(skillCategories) do
+        local tool = self:FindWeapon(category.Name)
+        if tool then
+            local toolSkills = skills:FindFirstChild(tool.Name)
+            if not toolSkills then
+                local equipped, equipResult = self:EquipTool(tool)
+                if not equipped then
+                    return nil, tostring(equipResult)
+                end
+                return nil, "Waiting for skill UI for " .. tool.Name
+            end
+            for _, keyName in ipairs(category.Keys) do
+                if farmSettings["TikiSkill_" .. category.Token .. "_" .. keyName] == true then
+                    local frame = toolSkills:FindFirstChild(keyName)
+                    local title = frame and frame:FindFirstChild("Title")
+                    local cooldown = frame and frame:FindFirstChild("Cooldown")
+                    local titleText = title and title:IsA("TextLabel") and title.Text or ""
+                    local isReady = frame
+                        and frame:IsA("Frame")
+                        and title
+                        and title:IsA("TextLabel")
+                        and title.TextColor3 == Color3.new(1, 1, 1)
+                        and cooldown
+                        and cooldown:IsA("GuiObject")
+                        and cooldown.Size.X.Scale == 0
+                        and cooldown.Size.X.Offset == 0
+                        and not string.find(titleText, "Transformation", 1, true)
+                    if isReady then
+                        return {
+                            Tool = tool,
+                            Category = category.Name,
+                            Key = keyName,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    return nil, "No selected skill is currently ready"
+end
+
+function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldContinue)
+    if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
+        return false, "Configured skill input is invalid"
+    end
+    if not target or not target.Parent or target:GetAttribute("AlreadyDestroyedClient") == true then
+        return false, "Tiki puzzle target is no longer available"
+    end
+
+    local targetPart
+    if target:IsA("BasePart") then
+        targetPart = target
+    elseif target:IsA("Model") then
+        targetPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart")
+            or target:FindFirstChildWhichIsA("BasePart", true)
+    end
+    if not targetPart or not targetPart:IsA("BasePart") then
+        return false, "Tiki puzzle target has no aimable BasePart"
+    end
+
+    local equipped, equipResult = self:EquipTool(tool)
+    if not equipped then
+        return false, tostring(equipResult)
+    end
+
+    local inputOk, inputService = pcall(function()
+        return game:GetService("VirtualInputManager")
+    end)
+    if not inputOk or not inputService then
+        return false, "VirtualInputManager is unavailable in this runtime"
+    end
+
+    local mouse = self.Dependencies.Mouse
+    if type(mouse) ~= "table" then
+        return false, "ReplicatedStorage.Mouse did not expose the BNN aim table"
+    end
+    local readAimOk, oldHit, oldTarget = pcall(function()
+        return mouse.Hit, mouse.Target
+    end)
+    if not readAimOk then
+        return false, "ReplicatedStorage.Mouse aim state is unreadable"
+    end
+
+    local setAimOk = pcall(function()
+        mouse.Hit = targetPart.CFrame
+        mouse.Target = targetPart
+    end)
+    local verifyAimOk, assignedHit, assignedTarget = pcall(function()
+        return mouse.Hit, mouse.Target
+    end)
+    if not setAimOk or not verifyAimOk
+        or typeof(assignedHit) ~= "CFrame"
+        or (assignedHit.Position - targetPart.Position).Magnitude > 0.1
+        or assignedTarget ~= targetPart
+    then
+        pcall(function()
+            mouse.Hit = oldHit
+            mouse.Target = oldTarget
+        end)
+        return false, "ReplicatedStorage.Mouse rejected the temporary Tiki aim target"
+    end
+
+    local function restoreAim()
+        pcall(function()
+            mouse.Hit = oldHit
+            mouse.Target = oldTarget
+        end)
+    end
+    local pressed, pressError = pcall(function()
+        inputService:SendKeyEvent(true, keyName, false, game)
+    end)
+    if not pressed then
+        restoreAim()
+        return false, "Skill key press failed: " .. tostring(pressError)
+    end
+    self.ActiveInputService = inputService
+    self.ActiveSkillKey = keyName
+
+    local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 1)
+    local holdUntil = os.clock() + holdDuration
+    local waitOk, waitError = pcall(function()
+        while os.clock() < holdUntil do
+            if shouldContinue and not shouldContinue() then
+                break
+            end
+            task.wait(math.min(0.05, math.max(0.01, holdUntil - os.clock())))
+        end
+    end)
+
+    local releaseOk, releaseError = pcall(function()
+        inputService:SendKeyEvent(false, keyName, false, game)
+    end)
+    self.ActiveInputService = nil
+    self.ActiveSkillKey = nil
+    restoreAim()
+
+    if not releaseOk then
+        return false, "Skill key release failed: " .. tostring(releaseError)
+    end
+    if not waitOk then
+        return false, "Skill hold failed: " .. tostring(waitError)
+    end
+    return true, "Configured " .. keyName .. " skill key sent"
+end
+
+function CombatService:TapSkullGuitar(targetPosition)
+    if typeof(targetPosition) ~= "Vector3" then
+        return false, "Skull Guitar target position is invalid"
+    end
+    local tool = self:FindToolByName("Skull Guitar")
+    if not tool then
+        return false, "Owned Skull Guitar is not loaded into the character or Backpack"
+    end
+    local equipped, equipResult = self:EquipTool(tool)
+    if not equipped then
+        return false, tostring(equipResult)
+    end
+
+    local combatUtil = self.Dependencies.CombatUtil
+    if not combatUtil or type(combatUtil.IsGunReloading) ~= "function" then
+        return false, "CombatUtil reload check is unavailable"
+    end
+    local reloadOk, isReloading = pcall(combatUtil.IsGunReloading, combatUtil, tool)
+    if not reloadOk then
+        return false, "Skull Guitar reload check failed: " .. tostring(isReloading)
+    end
+    if isReloading then
+        return false, "Skull Guitar is reloading"
+    end
+
+    local remote = tool:FindFirstChild("RemoteEvent")
+    if not remote or not remote:IsA("RemoteEvent") then
+        return false, "Loaded Skull Guitar has no supported RemoteEvent"
+    end
+    local fireOk, fireError = pcall(function()
+        remote:FireServer("TAP", targetPosition)
+    end)
+    if not fireOk then
+        return false, "Skull Guitar puzzle request failed: " .. tostring(fireError)
+    end
+    return true, "Owned Skull Guitar puzzle request issued"
 end
 
 function CombatService:_FindBladeHitParts(character, root, range)
@@ -5372,6 +5694,13 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
 end
 
 function CombatService:Cancel()
+    if self.ActiveInputService and self.ActiveSkillKey then
+        pcall(function()
+            self.ActiveInputService:SendKeyEvent(false, self.ActiveSkillKey, false, game)
+        end)
+    end
+    self.ActiveInputService = nil
+    self.ActiveSkillKey = nil
     return true
 end
 
@@ -5401,6 +5730,9 @@ local FARM_STEP_INTERVAL = 0.1
 local NPC_SCAN_INTERVAL = 0.15
 local SPAWN_SCAN_INTERVAL = 1
 local TIKI_EVENT_SCAN_INTERVAL = 1
+local TIKI_ACTION_INTERVAL = 0.4
+local TIKI_SKILL_HOLD_SECONDS = 0.5
+local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
@@ -6391,11 +6723,156 @@ function MainFarm:_RefreshTikiEventState(origin)
     return true, nearestTarget
 end
 
+function MainFarm:_RestoreTikiFarmWeapon()
+    if not self.TikiPuzzleRestorePending then
+        return true
+    end
+
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings or {}
+    local category = farmSettings.WeaponCategory or "Melee"
+    local combatReady, combatError = self:_EnsureCombatService()
+    if not combatReady then
+        self:_SetStatus(
+            "Tiki phase ended; waiting to restore Farm Weapon: " .. tostring(combatError),
+            "warning"
+        )
+        return false
+    end
+    local equipped, equipResult = self.CombatService:EquipWeapon(category)
+    if not equipped then
+        self:_SetStatus(
+            "Tiki phase ended; waiting for Farm Weapon (" .. tostring(category) .. "): "
+                .. tostring(equipResult),
+            "warning"
+        )
+        return false
+    end
+
+    self.TikiPuzzleActive = false
+    self.TikiPuzzleRestorePending = false
+    self.NextTikiActionAt = 0
+    self:_SetStatus("Tiki puzzle phase ended; restored Farm Weapon: " .. tostring(category), "success")
+    return true
+end
+
+function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
+    local now = os.clock()
+    if now < (self.NextTikiActionAt or 0) then
+        return true
+    end
+    self.NextTikiActionAt = now + TIKI_ACTION_INTERVAL
+
+    local combatReady, combatError = self:_EnsureCombatService()
+    if not combatReady then
+        self:_SetStatus("Tiki automation unavailable: " .. tostring(combatError), "warning")
+        return true
+    end
+
+    local compatibility = self.Context.Compatibility
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    local guitar = self.CombatService:FindToolByName("Skull Guitar")
+    local ownsGuitar = guitar ~= nil
+    local ownershipError = nil
+    if not ownsGuitar then
+        ownsGuitar, ownershipError = compatibility:HasOwnedInventoryItem("Skull Guitar")
+    end
+
+    if ownsGuitar and not guitar then
+        if now >= (self.NextTikiLoadItemAt or 0) then
+            self.NextTikiLoadItemAt = now + TIKI_LOAD_ITEM_RETRY_INTERVAL
+            local commF, remoteError = compatibility:GetCommF()
+            if not commF then
+                self:_SetStatus(
+                    "Owned Skull Guitar is in inventory but cannot be loaded: " .. tostring(remoteError),
+                    "warning"
+                )
+            else
+                local requestOk, requestResult = pcall(function()
+                    return commF:InvokeServer("LoadItem", "Skull Guitar")
+                end)
+                if requestOk then
+                    self:_SetStatus("Loading owned Skull Guitar for the Tiki puzzle", "info")
+                else
+                    self:_SetStatus(
+                        "Owned Skull Guitar load request failed: " .. tostring(requestResult),
+                        "warning"
+                    )
+                end
+            end
+        end
+        return true
+    end
+
+    if ownsGuitar and guitar then
+        local tapped, tapResult = self.CombatService:TapSkullGuitar(targetPosition)
+        if tapped then
+            self:_SetStatus(
+                "Sent owned Skull Guitar puzzle request; waiting for event update",
+                "success"
+            )
+            return true
+        elseif tapResult == "Skull Guitar is reloading" then
+            self:_SetStatus("Tiki puzzle: Skull Guitar is reloading", "info")
+            return true
+        end
+        ownershipError = "Skull Guitar unavailable for puzzle action: " .. tostring(tapResult)
+    end
+
+    local skill, skillError = self.CombatService:FindReadyTikiSkill(farmSettings)
+    if not skill then
+        local reason = tostring(skillError)
+        if ownershipError then
+            reason = tostring(ownershipError) .. "; " .. reason
+        elseif ownershipError ~= nil then
+            reason = "Skull Guitar ownership could not be verified; " .. reason
+        end
+        self:_SetStatus("Tiki puzzle waiting for a configured action: " .. reason, "info")
+        return true
+    end
+
+    local activated, activationResult = self.CombatService:UseTikiSkill(
+        skill.Tool,
+        skill.Key,
+        eventTarget,
+        TIKI_SKILL_HOLD_SECONDS,
+        function()
+            return self:_IsCurrent(session)
+                and self.TikiPuzzleActive == true
+                and eventTarget.Parent ~= nil
+                and eventTarget:GetAttribute("AlreadyDestroyedClient") ~= true
+        end
+    )
+    if activated then
+        self:_SetStatus(
+            "Tiki puzzle: sent configured " .. skill.Category .. " " .. skill.Key
+                .. " skill key; waiting for event update",
+            "success"
+        )
+    else
+        self:_SetStatus("Tiki skill was not sent: " .. tostring(activationResult), "warning")
+    end
+    return true
+end
+
 function MainFarm:_StepTikiEventPhase(root, session)
     local eventActive, eventTarget = self:_RefreshTikiEventState(root.Position)
     if not eventActive then
+        if self.TikiPuzzleActive then
+            self.TikiPuzzleActive = false
+            self.TikiPuzzleRestorePending = true
+        end
+        if self.TikiPuzzleRestorePending then
+            self:_HoldPosition(session)
+            if self:_RestoreTikiFarmWeapon() then
+                return false
+            end
+            return true
+        end
         return false
     end
+    self.TikiPuzzleActive = true
+    self.TikiPuzzleRestorePending = false
 
     if self.Target then
         self:_ClearTarget()
@@ -6434,13 +6911,10 @@ function MainFarm:_StepTikiEventPhase(root, session)
 
     if (pivot.Position - root.Position).Magnitude > 10 then
         self:_MoveTo(pivot * CFrame.new(0, 0, 10), session, 2.5, true)
-        self:_SetStatus("Approaching Tiki event object; automated skill use is disabled", "info")
+        self:_SetStatus("Approaching Tiki puzzle object", "info")
     else
         self:_HoldPosition(session)
-        self:_SetStatus(
-            "Tiki event object reached; activate it manually with your chosen combat method",
-            "warning"
-        )
+        self:_UseTikiPuzzleAction(eventTarget, pivot.Position, session)
     end
     return true
 end
@@ -6469,6 +6943,14 @@ function MainFarm:_StepBossEventMode(
         inRequiredSea = ok and result == true
     end
     if not inRequiredSea then
+        if self.TikiPuzzleActive then
+            self.TikiPuzzleActive = false
+            self.TikiPuzzleRestorePending = true
+        end
+        if self.TikiPuzzleRestorePending then
+            self:_HoldPosition(session)
+            self:_RestoreTikiFarmWeapon()
+        end
         self:_ClearTarget()
         self:_SetStatus(
             farmMode .. " requires " .. tostring(profile.Sea)
@@ -6481,10 +6963,26 @@ function MainFarm:_StepBossEventMode(
     local level = self.QuestService:GetPlayerLevel()
     local minimumLevel = tonumber(profile.MinimumLevel)
     if not level or not minimumLevel then
+        if self.TikiPuzzleActive then
+            self.TikiPuzzleActive = false
+            self.TikiPuzzleRestorePending = true
+        end
+        if self.TikiPuzzleRestorePending then
+            self:_HoldPosition(session)
+            self:_RestoreTikiFarmWeapon()
+        end
         self:_ClearTarget()
         self:_SetStatus("Mode level eligibility is unavailable", "error")
         return
     elseif level < minimumLevel then
+        if self.TikiPuzzleActive then
+            self.TikiPuzzleActive = false
+            self.TikiPuzzleRestorePending = true
+        end
+        if self.TikiPuzzleRestorePending then
+            self:_HoldPosition(session)
+            self:_RestoreTikiFarmWeapon()
+        end
         self:_ClearTarget()
         self:_SetStatus(
             farmMode .. " requires level " .. tostring(minimumLevel)
@@ -6492,6 +6990,12 @@ function MainFarm:_StepBossEventMode(
             "warning"
         )
         return
+    end
+
+    if profile.TikiEventPhase == true and self.TikiPuzzleActive then
+        if self:_StepTikiEventPhase(root, session) then
+            return
+        end
     end
 
     local targetNames, targetError =
@@ -6697,18 +7201,32 @@ function MainFarm:_Step(session)
         self.Character = character
         self.Target = nil
         self.TargetName = nil
+        self.TikiPuzzleActive = false
+        self.TikiPuzzleRestorePending = false
         self:_ResetSpawnSearch(nil)
         self:_SetStatus("Character ready; reacquiring farm state", "info")
     end
 
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local farmMode = farmSettings.FarmMode or "Level Farm"
+    local modeProfiles = farmSettings.FarmModeProfiles
+    local farmModeProfile = type(modeProfiles) == "table" and modeProfiles[farmMode] or nil
+    if self.TikiPuzzleActive
+        and (type(farmModeProfile) ~= "table" or farmModeProfile.TikiEventPhase ~= true)
+    then
+        self.TikiPuzzleActive = false
+        self.TikiPuzzleRestorePending = true
+    end
+    if self.TikiPuzzleRestorePending then
+        self:_HoldPosition(session)
+        if not self:_RestoreTikiFarmWeapon() then
+            return
+        end
+    end
     if farmMode == "Aura Farm" then
         self:_StepAura(session, root)
         return
     end
-    local modeProfiles = farmSettings.FarmModeProfiles
-    local farmModeProfile = type(modeProfiles) == "table" and modeProfiles[farmMode] or nil
     if farmMode ~= "Level Farm" and type(farmModeProfile) ~= "table" then
         self:_ClearTarget()
         self:_SetStatus("Unsupported farm mode: " .. tostring(farmMode), "error")
@@ -7238,6 +7756,10 @@ function MainFarm:Initialize(context)
     self.NextTikiEventScanAt = 0
     self.TikiEventActive = false
     self.TikiEventTarget = nil
+    self.TikiPuzzleActive = false
+    self.TikiPuzzleRestorePending = false
+    self.NextTikiActionAt = 0
+    self.NextTikiLoadItemAt = 0
 
     local player = context.Compatibility.Player
     if player then
@@ -7258,6 +7780,10 @@ function MainFarm:Initialize(context)
             self.NextTikiEventScanAt = 0
             self.TikiEventActive = false
             self.TikiEventTarget = nil
+            self.TikiPuzzleActive = false
+            self.TikiPuzzleRestorePending = false
+            self.NextTikiActionAt = 0
+            self.NextTikiLoadItemAt = 0
             self:_ResetSpawnSearch(nil)
             self:_SetStatus("Character changed; farm session will reacquire after respawn", "warning")
         end)
@@ -7330,6 +7856,13 @@ function MainFarm:Stop()
     if self.CombatService then
         self.CombatService:Cancel()
     end
+    if self.TikiPuzzleActive then
+        self.TikiPuzzleActive = false
+        self.TikiPuzzleRestorePending = true
+    end
+    if self.TikiPuzzleRestorePending then
+        self:_RestoreTikiFarmWeapon()
+    end
     if self.EnemyService then
         self.EnemyService:RestoreTargetCollision()
         self.EnemyService:ClearIgnoredSpawns()
@@ -7341,6 +7874,8 @@ function MainFarm:Stop()
     self.NextTikiEventScanAt = 0
     self.TikiEventActive = false
     self.TikiEventTarget = nil
+    self.NextTikiActionAt = 0
+    self.NextTikiLoadItemAt = 0
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
     self.PendingQuestTargetName = nil
@@ -7400,6 +7935,32 @@ function MainFarm:Handle(actionId, payload)
         farmSettings.IgnoreCakePrince = payload
         self:_SetStatus(
             "Cake Prince boss " .. (payload and "ignored" or "enabled as a target"),
+            "success"
+        )
+        return true
+    end
+    local tikiSkillToken, tikiSkillKey = actionId:match(
+        "^farm%.tikiSkill%.([%w]+)%.([ZXCVF])$"
+    )
+    if tikiSkillToken then
+        local allowedKeys = {
+            Melee = { Z = true, X = true, C = true },
+            Sword = { Z = true, X = true },
+            Gun = { Z = true, X = true },
+            BloxFruit = { Z = true, X = true, C = true, V = true, F = true },
+        }
+        local categoryKeys = allowedKeys[tikiSkillToken]
+        if not farmSettings or type(payload) ~= "boolean"
+            or not categoryKeys or categoryKeys[tikiSkillKey] ~= true
+        then
+            self:_SetStatus("Tiki skill setting is unavailable or invalid", "error")
+            return false
+        end
+        local settingName = "TikiSkill_" .. tikiSkillToken .. "_" .. tikiSkillKey
+        farmSettings[settingName] = payload
+        self:_SetStatus(
+            "Tiki " .. tikiSkillToken .. " " .. tikiSkillKey .. " skill "
+                .. (payload and "enabled" or "disabled"),
             "success"
         )
         return true

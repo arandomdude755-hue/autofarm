@@ -54,23 +54,251 @@ function CombatService:FindWeapon(category)
     return nil
 end
 
-function CombatService:EquipWeapon(category)
-    local tool = self:FindWeapon(category)
-    if not tool then
-        return false, "No owned " .. tostring(category) .. " tool was found"
+function CombatService:FindToolByName(toolName)
+    local player = self.Compatibility.Player
+    local character = player and player.Character
+    local backpack = player and player:FindFirstChild("Backpack")
+    local containers = {}
+    if character then
+        table.insert(containers, character)
     end
+    if backpack then
+        table.insert(containers, backpack)
+    end
+    for _, container in ipairs(containers) do
+        local tool = container:FindFirstChild(toolName)
+        if tool and tool:IsA("Tool") then
+            return tool
+        end
+    end
+    return nil
+end
 
+function CombatService:EquipTool(tool)
+    if not tool or not tool:IsA("Tool") then
+        return false, "Selected tool is unavailable"
+    end
     local character, humanoid = self.Compatibility:GetCharacterParts()
     if not character or not humanoid or humanoid.Sit then
         return false, "Character cannot equip a tool"
     end
     if tool.Parent ~= character then
+        local player = self.Compatibility.Player
+        local backpack = player and player:FindFirstChild("Backpack")
+        if tool.Parent ~= backpack then
+            return false, "Selected tool is not in the character or Backpack"
+        end
         humanoid:EquipTool(tool)
     end
     if tool.Parent ~= character then
         return false, "Selected tool did not equip"
     end
     return true, tool
+end
+
+function CombatService:EquipWeapon(category)
+    local tool = self:FindWeapon(category)
+    if not tool then
+        return false, "No owned " .. tostring(category) .. " tool was found"
+    end
+    return self:EquipTool(tool)
+end
+
+function CombatService:FindReadyTikiSkill(farmSettings)
+    local skillCategories = {
+        { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
+        { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
+        { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
+        { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
+    }
+    local playerGui = self.Compatibility:GetPlayerGui()
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local skills = main and main:FindFirstChild("Skills")
+    if not skills then
+        return nil, "PlayerGui.Main.Skills is unavailable"
+    end
+
+    for _, category in ipairs(skillCategories) do
+        local tool = self:FindWeapon(category.Name)
+        if tool then
+            local toolSkills = skills:FindFirstChild(tool.Name)
+            if not toolSkills then
+                local equipped, equipResult = self:EquipTool(tool)
+                if not equipped then
+                    return nil, tostring(equipResult)
+                end
+                return nil, "Waiting for skill UI for " .. tool.Name
+            end
+            for _, keyName in ipairs(category.Keys) do
+                if farmSettings["TikiSkill_" .. category.Token .. "_" .. keyName] == true then
+                    local frame = toolSkills:FindFirstChild(keyName)
+                    local title = frame and frame:FindFirstChild("Title")
+                    local cooldown = frame and frame:FindFirstChild("Cooldown")
+                    local titleText = title and title:IsA("TextLabel") and title.Text or ""
+                    local isReady = frame
+                        and frame:IsA("Frame")
+                        and title
+                        and title:IsA("TextLabel")
+                        and title.TextColor3 == Color3.new(1, 1, 1)
+                        and cooldown
+                        and cooldown:IsA("GuiObject")
+                        and cooldown.Size.X.Scale == 0
+                        and cooldown.Size.X.Offset == 0
+                        and not string.find(titleText, "Transformation", 1, true)
+                    if isReady then
+                        return {
+                            Tool = tool,
+                            Category = category.Name,
+                            Key = keyName,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    return nil, "No selected skill is currently ready"
+end
+
+function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldContinue)
+    if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
+        return false, "Configured skill input is invalid"
+    end
+    if not target or not target.Parent or target:GetAttribute("AlreadyDestroyedClient") == true then
+        return false, "Tiki puzzle target is no longer available"
+    end
+
+    local targetPart
+    if target:IsA("BasePart") then
+        targetPart = target
+    elseif target:IsA("Model") then
+        targetPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart")
+            or target:FindFirstChildWhichIsA("BasePart", true)
+    end
+    if not targetPart or not targetPart:IsA("BasePart") then
+        return false, "Tiki puzzle target has no aimable BasePart"
+    end
+
+    local equipped, equipResult = self:EquipTool(tool)
+    if not equipped then
+        return false, tostring(equipResult)
+    end
+
+    local inputOk, inputService = pcall(function()
+        return game:GetService("VirtualInputManager")
+    end)
+    if not inputOk or not inputService then
+        return false, "VirtualInputManager is unavailable in this runtime"
+    end
+
+    local mouse = self.Dependencies.Mouse
+    if type(mouse) ~= "table" then
+        return false, "ReplicatedStorage.Mouse did not expose the BNN aim table"
+    end
+    local readAimOk, oldHit, oldTarget = pcall(function()
+        return mouse.Hit, mouse.Target
+    end)
+    if not readAimOk then
+        return false, "ReplicatedStorage.Mouse aim state is unreadable"
+    end
+
+    local setAimOk = pcall(function()
+        mouse.Hit = targetPart.CFrame
+        mouse.Target = targetPart
+    end)
+    local verifyAimOk, assignedHit, assignedTarget = pcall(function()
+        return mouse.Hit, mouse.Target
+    end)
+    if not setAimOk or not verifyAimOk
+        or typeof(assignedHit) ~= "CFrame"
+        or (assignedHit.Position - targetPart.Position).Magnitude > 0.1
+        or assignedTarget ~= targetPart
+    then
+        pcall(function()
+            mouse.Hit = oldHit
+            mouse.Target = oldTarget
+        end)
+        return false, "ReplicatedStorage.Mouse rejected the temporary Tiki aim target"
+    end
+
+    local function restoreAim()
+        pcall(function()
+            mouse.Hit = oldHit
+            mouse.Target = oldTarget
+        end)
+    end
+    local pressed, pressError = pcall(function()
+        inputService:SendKeyEvent(true, keyName, false, game)
+    end)
+    if not pressed then
+        restoreAim()
+        return false, "Skill key press failed: " .. tostring(pressError)
+    end
+    self.ActiveInputService = inputService
+    self.ActiveSkillKey = keyName
+
+    local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 1)
+    local holdUntil = os.clock() + holdDuration
+    local waitOk, waitError = pcall(function()
+        while os.clock() < holdUntil do
+            if shouldContinue and not shouldContinue() then
+                break
+            end
+            task.wait(math.min(0.05, math.max(0.01, holdUntil - os.clock())))
+        end
+    end)
+
+    local releaseOk, releaseError = pcall(function()
+        inputService:SendKeyEvent(false, keyName, false, game)
+    end)
+    self.ActiveInputService = nil
+    self.ActiveSkillKey = nil
+    restoreAim()
+
+    if not releaseOk then
+        return false, "Skill key release failed: " .. tostring(releaseError)
+    end
+    if not waitOk then
+        return false, "Skill hold failed: " .. tostring(waitError)
+    end
+    return true, "Configured " .. keyName .. " skill key sent"
+end
+
+function CombatService:TapSkullGuitar(targetPosition)
+    if typeof(targetPosition) ~= "Vector3" then
+        return false, "Skull Guitar target position is invalid"
+    end
+    local tool = self:FindToolByName("Skull Guitar")
+    if not tool then
+        return false, "Owned Skull Guitar is not loaded into the character or Backpack"
+    end
+    local equipped, equipResult = self:EquipTool(tool)
+    if not equipped then
+        return false, tostring(equipResult)
+    end
+
+    local combatUtil = self.Dependencies.CombatUtil
+    if not combatUtil or type(combatUtil.IsGunReloading) ~= "function" then
+        return false, "CombatUtil reload check is unavailable"
+    end
+    local reloadOk, isReloading = pcall(combatUtil.IsGunReloading, combatUtil, tool)
+    if not reloadOk then
+        return false, "Skull Guitar reload check failed: " .. tostring(isReloading)
+    end
+    if isReloading then
+        return false, "Skull Guitar is reloading"
+    end
+
+    local remote = tool:FindFirstChild("RemoteEvent")
+    if not remote or not remote:IsA("RemoteEvent") then
+        return false, "Loaded Skull Guitar has no supported RemoteEvent"
+    end
+    local fireOk, fireError = pcall(function()
+        remote:FireServer("TAP", targetPosition)
+    end)
+    if not fireOk then
+        return false, "Skull Guitar puzzle request failed: " .. tostring(fireError)
+    end
+    return true, "Owned Skull Guitar puzzle request issued"
 end
 
 function CombatService:_FindBladeHitParts(character, root, range)
@@ -261,6 +489,13 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
 end
 
 function CombatService:Cancel()
+    if self.ActiveInputService and self.ActiveSkillKey then
+        pcall(function()
+            self.ActiveInputService:SendKeyEvent(false, self.ActiveSkillKey, false, game)
+        end)
+    end
+    self.ActiveInputService = nil
+    self.ActiveSkillKey = nil
     return true
 end
 

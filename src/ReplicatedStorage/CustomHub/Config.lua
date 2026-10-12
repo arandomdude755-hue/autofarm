@@ -33,6 +33,26 @@ local farmModeProfiles = {
         TikiEventPhase = true,
     },
 }
+local tikiSkillCategories = {
+    { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
+    { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
+    { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
+    { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
+}
+local tikiSkillDefaults = {}
+local tikiSkillControls = {}
+for _, category in ipairs(tikiSkillCategories) do
+    for _, keyName in ipairs(category.Keys) do
+        local settingName = "TikiSkill_" .. category.Token .. "_" .. keyName
+        tikiSkillDefaults[settingName] = true
+        table.insert(tikiSkillControls, {
+            Kind = "settingToggle",
+            Label = "Tiki skill: " .. category.Name .. " " .. keyName,
+            Action = "farm.tikiSkill." .. category.Token .. "." .. keyName,
+            Setting = settingName,
+        })
+    end
+end
 
 local Config = {
     Name = "Custom Hub",
@@ -275,9 +295,22 @@ local Config = {
                     Action = "farm.settings.autoBuso",
                     Setting = "AutoBuso",
                 },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Tiki puzzle skills",
+                },
             },
         },
     },
 }
+
+for settingName, defaultValue in pairs(tikiSkillDefaults) do
+    if Config.FarmSettings[settingName] == nil then
+        Config.FarmSettings[settingName] = defaultValue
+    end
+end
+for _, control in ipairs(tikiSkillControls) do
+    table.insert(Config.Pages.Settings.Controls, control)
+end
 
 return Config

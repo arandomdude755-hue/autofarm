@@ -8,6 +8,7 @@ QUEST_SERVICE = (HUB / "Features/Farm/QuestService.lua").read_text(encoding="utf
 ENEMY = (HUB / "Features/Farm/EnemyService.lua").read_text(encoding="utf-8")
 MAIN_FARM = (HUB / "Features/MainFarm.lua").read_text(encoding="utf-8")
 COMPATIBILITY = (HUB / "Compatibility.lua").read_text(encoding="utf-8")
+COMBAT = (HUB / "Features/Farm/CombatService.lua").read_text(encoding="utf-8")
 UI = (HUB / "UI.lua").read_text(encoding="utf-8")
 
 
@@ -63,8 +64,11 @@ require(
     and "Hop Find Katakuri" not in CONFIG
     and "SpecialHop" not in MAIN_FARM
     and "__ServerBrowser" not in MAIN_FARM
-    and "AutoAllSkill" not in MAIN_FARM,
-    "Unverified server hopping and broad skill automation must remain unavailable",
+    and "Tiki puzzle skills" in CONFIG
+    and 'Token = "Melee"' in CONFIG
+    and 'tikiSkillDefaults[settingName] = true' in CONFIG
+    and '"TikiSkill_" .. category.Token' in CONFIG,
+    "Tiki puzzle automation must expose configured skill choices without enabling server hopping",
 )
 
 targets = function_body(
@@ -132,8 +136,10 @@ require(
     "Mode targets must use existing spawn availability and retry handling",
 )
 require(
-    mode_step.index("if target and targetIsBoss then")
-    < mode_step.index("self:_StepTikiEventPhase(root, session)")
+    mode_step.index("if profile.TikiEventPhase == true and self.TikiPuzzleActive")
+    < mode_step.index("local targetNames, targetError")
+    and mode_step.index("if target and targetIsBoss then")
+    < mode_step.rindex("self:_StepTikiEventPhase(root, session)")
     < mode_step.index("if target then"),
     "The Tiki event phase must prioritize its objects after a live boss but before regular quest mobs",
 )
@@ -162,12 +168,53 @@ event_step = function_body(
 require(
     "self:_MoveTo(" in event_step
     and "self:_HoldPosition(session)" in event_step
-    and "activate it manually" in event_step
-    and "AutoAllSkill" not in event_step
-    and "SpamGunSkullGuitar" not in event_step
-    and "InvokeServer" not in event_step
-    and "VirtualInputManager" not in event_step,
-    "Safe Tiki targeting must move to the event object without invoking skills or remotes",
+    and "self:_UseTikiPuzzleAction(" in event_step
+    and "self:_RestoreTikiFarmWeapon()" in event_step
+    and "activate it manually" not in event_step,
+    "Tiki object tracking must run puzzle actions in-range and restore Farm Weapon after the phase",
+)
+event_action = function_body(
+    MAIN_FARM,
+    "function MainFarm:_UseTikiPuzzleAction",
+    "\nfunction MainFarm:_StepTikiEventPhase",
+)
+require(
+    "HasOwnedInventoryItem(\"Skull Guitar\")" in event_action
+    and 'InvokeServer("LoadItem", "Skull Guitar")' in event_action
+    and "TapSkullGuitar(targetPosition)" in event_action
+    and "FindReadyTikiSkill(farmSettings)" in event_action
+    and "UseTikiSkill(" in event_action
+    and '"Buy"' not in event_action
+    and "ServerHop" not in event_action
+    and "self.TikiPuzzleActive = true" in event_step,
+    "Tiki automation must use owned Skull Guitar or selected skills only while the puzzle is active",
+)
+skull_tap = function_body(
+    COMBAT,
+    "function CombatService:TapSkullGuitar",
+    "\nfunction CombatService:_FindBladeHitParts",
+)
+require(
+    'FindToolByName("Skull Guitar")' in skull_tap
+    and 'remote:FireServer("TAP", targetPosition)' in skull_tap
+    and "IsGunReloading" in skull_tap
+    and "function CombatService:UseTikiSkill" in COMBAT
+    and "SendKeyEvent(true, keyName" in COMBAT
+    and "SendKeyEvent(false, keyName" in COMBAT
+    and "mouse.Hit = targetPart.CFrame" in COMBAT
+    and "mouse.Target = targetPart" in COMBAT,
+    "Puzzle attacks must target the event object, respect Skull Guitar reload, and release skill keys",
+)
+restore_weapon = function_body(
+    MAIN_FARM,
+    "function MainFarm:_RestoreTikiFarmWeapon",
+    "\nfunction MainFarm:_UseTikiPuzzleAction",
+)
+require(
+    "farmSettings.WeaponCategory" in restore_weapon
+    and "self.CombatService:EquipWeapon(category)" in restore_weapon
+    and "TikiPuzzleRestorePending" in MAIN_FARM,
+    "Leaving the event must restore the current Farm Weapon category before normal farming resumes",
 )
 mode_spawn = function_body(
     MAIN_FARM,
@@ -202,5 +249,5 @@ require(
 print("PASS: Bone, Cake Prince, and Tiki modes are configured with sea and level gates")
 print("PASS: quest target names and quest giver data come from live quest catalogs")
 print("PASS: special modes use validated quest acceptance and existing spawn availability")
-print("PASS: Tiki event objects are detected and approached without automated skill or remote actions")
+print("PASS: Tiki event actions are ownership-gated and scoped to the puzzle phase")
 print("PASS: unverified server hopping remains unavailable")

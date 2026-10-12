@@ -89,6 +89,8 @@ expected_external_require_arguments = {
     "mouseModule",
     "combatUtilModule",
     "netModule",
+    "itemServiceModule",
+    "itemConfigModule",
 }
 require(
     external_require_arguments == expected_external_require_arguments,

@@ -99,6 +99,67 @@ function Compatibility:GetCommF()
     return commF
 end
 
+function Compatibility:HasOwnedInventoryItem(itemName)
+    local now = os.clock()
+    self.OwnedInventoryCache = self.OwnedInventoryCache or {}
+    if now - (self.OwnedInventoryCacheAt or 0) < 1
+        and self.OwnedInventoryCache[itemName] ~= nil
+    then
+        return self.OwnedInventoryCache[itemName]
+    end
+
+    local itemServiceModule = self.ReplicatedStorage:FindFirstChild("ItemReplicationService")
+    local itemConfigModule = self.ReplicatedStorage:FindFirstChild("ItemConfig")
+    if not itemServiceModule or not itemConfigModule then
+        return false, "Inventory lookup modules are unavailable"
+    end
+
+    local serviceOk, itemService = pcall(require, itemServiceModule)
+    local configOk, itemConfig = pcall(require, itemConfigModule)
+    if not serviceOk or type(itemService) ~= "table"
+        or not configOk or type(itemConfig) ~= "table"
+    then
+        return false, "Inventory lookup modules could not be loaded"
+    end
+
+    local keys = itemService.KEYS
+    local quantityKey = type(keys) == "table" and keys.QUANTITY
+    if quantityKey == nil or type(itemService.GetItems) ~= "function"
+        or type(itemConfig.match) ~= "function"
+    then
+        return false, "Inventory lookup APIs are unavailable"
+    end
+
+    local scanOk, found = pcall(function()
+        for item in itemService:GetItems(quantityKey) do
+            if item and item.Value and item.Value > 0 then
+                local matchOk, itemDefinition = pcall(function()
+                    return itemConfig.match(item.ItemId):unwrap()
+                end)
+                if matchOk and itemDefinition and itemDefinition.Display then
+                    local display = itemDefinition.Display
+                    local storageKey = itemDefinition.Index
+                        and itemDefinition.Index.StorageKey
+                    local resolvedName = display.Category == "Blox Fruit"
+                            and (storageKey or display.Name)
+                        or (display.Name or storageKey)
+                    if resolvedName == itemName then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end)
+    if not scanOk then
+        return false, "Inventory scan failed: " .. tostring(found)
+    end
+
+    self.OwnedInventoryCache[itemName] = found == true
+    self.OwnedInventoryCacheAt = now
+    return found == true
+end
+
 function Compatibility:GetCombatDependencies()
     local modules = self.ReplicatedStorage:FindFirstChild("Modules")
     local netModule = modules and modules:FindFirstChild("Net")
