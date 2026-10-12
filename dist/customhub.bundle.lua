@@ -565,6 +565,8 @@ local MINIMIZE_BUTTON_WIDTH = 28
 local HEADER_BUTTON_GAP = 6
 local RESTORE_BUTTON_SIZE = Vector2.new(56, 56)
 local RESTORE_DRAG_THRESHOLD = 8
+local WINDOW_VISIBLE_GRIP_WIDTH = 128
+local WINDOW_VISIBLE_GRIP_HEIGHT = 24
 local HEADER_HEIGHT = 40
 local TAB_BAR_HEIGHT = 36
 local FOOTER_HEIGHT = 30
@@ -602,6 +604,41 @@ local function clampDragPosition(origin, delta, viewport, size)
         halfY,
         math.max(halfY, viewport.Y - halfY)
     )
+    return UDim2.new(
+        origin.X.Scale,
+        centerX - viewport.X * origin.X.Scale,
+        origin.Y.Scale,
+        centerY - viewport.Y * origin.Y.Scale
+    )
+end
+
+local function clampWindowDragPosition(origin, delta, viewport, size)
+    local visibleGripWidth = math.min(
+        WINDOW_VISIBLE_GRIP_WIDTH,
+        size.X,
+        viewport.X / 2
+    )
+    local visibleHeaderHeight = math.min(
+        WINDOW_VISIBLE_GRIP_HEIGHT,
+        HEADER_HEIGHT,
+        viewport.Y / 2
+    )
+    local halfX = size.X / 2
+    local halfY = size.Y / 2
+    local startCenterX = viewport.X * origin.X.Scale + origin.X.Offset
+    local startCenterY = viewport.Y * origin.Y.Scale + origin.Y.Offset
+    local centerX = math.clamp(
+        startCenterX + delta.X,
+        visibleGripWidth - halfX,
+        viewport.X - visibleGripWidth + halfX
+    )
+    local minCenterY = visibleHeaderHeight - HEADER_HEIGHT + halfY
+    local centerY = math.clamp(
+        startCenterY + delta.Y,
+        minCenterY,
+        math.max(minCenterY, viewport.Y - visibleHeaderHeight + halfY)
+    )
+
     return UDim2.new(
         origin.X.Scale,
         centerX - viewport.X * origin.X.Scale,
@@ -816,6 +853,7 @@ function UI:_ApplySize(snapshot)
         self.SizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
     end
     self.Root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
+    self:_ClampWindow()
 end
 
 function UI:_SetMinimized(minimized)
@@ -873,6 +911,22 @@ function UI:_ClampRestoreButton()
         Vector2.zero,
         viewport,
         self.RestoreButton.AbsoluteSize
+    )
+end
+
+function UI:_ClampWindow()
+    if not self.Root then
+        return
+    end
+    local viewport = self.Compatibility:GetViewportSize()
+    if typeof(viewport) ~= "Vector2" then
+        viewport = Vector2.new(390, 844)
+    end
+    self.Root.Position = clampWindowDragPosition(
+        self.Root.Position,
+        Vector2.zero,
+        viewport,
+        self.Root.AbsoluteSize
     )
 end
 
@@ -1509,7 +1563,7 @@ function UI:Mount()
             if typeof(viewportSize) ~= "Vector2" then
                 viewportSize = Vector2.new(390, 844)
             end
-            self.Root.Position = clampDragPosition(
+            self.Root.Position = clampWindowDragPosition(
                 windowDrag.Origin,
                 input.Position - windowDrag.Start,
                 viewportSize,

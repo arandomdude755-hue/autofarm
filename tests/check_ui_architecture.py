@@ -41,9 +41,32 @@ for token in (
     'Name = "ActiveMarker"',
     'Name = "PulseHalo"',
     'function UI:_AttachButtonFeedback',
-    "self.Root.Position = clampDragPosition(",
+    "self.Root.Position = clampWindowDragPosition(",
 ):
     require(token in UI_MODULE, f"production UI is missing a referenced design/interaction component: {token}")
+
+window_drag_start = UI_MODULE.index("local function clampWindowDragPosition")
+window_drag_end = UI_MODULE.index("\nlocal function disconnectAll", window_drag_start)
+window_drag_helper = UI_MODULE[window_drag_start:window_drag_end]
+require(
+    "WINDOW_VISIBLE_GRIP_WIDTH = 128" in UI_MODULE
+    and "WINDOW_VISIBLE_GRIP_HEIGHT = 24" in UI_MODULE
+    and "visibleGripWidth - halfX" in window_drag_helper
+    and "viewport.X - visibleGripWidth + halfX" in window_drag_helper
+    and "visibleHeaderHeight - HEADER_HEIGHT + halfY" in window_drag_helper
+    and "viewport.Y - visibleHeaderHeight + halfY" in window_drag_helper,
+    "window dragging must allow partial off-screen movement while keeping a header grip visible",
+)
+size_start = UI_MODULE.index("function UI:_ApplySize")
+size_end = UI_MODULE.index("\nfunction UI:_SetMinimized", size_start)
+size_method = UI_MODULE[size_start:size_end]
+require(
+    "self.RestoreButton.Position = clampDragPosition(" in UI_MODULE
+    and "self.Root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))"
+    in size_method
+    and size_method.index("self.Root.Size =") < size_method.index("self:_ClampWindow()"),
+    "the restore button should stay fully visible and resized windows should retain a reachable header",
+)
 
 require("RowHeight = 48" in CONFIG, "production control buttons are not using the compact touch-friendly height")
 require('Name = "PageDescription"' not in UI_MODULE
