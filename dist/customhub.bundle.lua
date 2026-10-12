@@ -65,17 +65,18 @@ local Config = {
         StatusInset = 8,
         StatusTextTop = 0,
         ContentTop = 76,
-        PageDescriptionHeight = 38,
-        SectionHeight = 26,
         ScrollContentInset = 18,
         ScrollBarThickness = 3,
-        RowHeight = 68,
-        SelectorRowHeight = 94,
+        RowHeight = 48,
         RowInset = 10,
-        RowTitleTop = 7,
-        RowTitleHeight = 20,
-        RowDetailTop = 30,
-        RowDetailHeight = 24,
+        RowTitleTop = 0,
+        RowTitleHeight = 48,
+        SelectorTitleTop = 0,
+        SelectorTitleHeight = 48,
+        SelectorTitleWidth = 120,
+        SelectorTitleGap = 8,
+        SelectorOptionsTop = 8,
+        SelectorOptionsHeight = 32,
         ToggleValueTop = 10,
         ToggleValueWidth = 58,
         ToggleValueHeight = 22,
@@ -106,7 +107,6 @@ local Config = {
             Title = 12,
             Control = 13,
             Body = 12,
-            Detail = 10,
             Tab = 10,
             Status = 9,
         },
@@ -120,33 +120,24 @@ local Config = {
     },
     Pages = {
         Main = {
-            Section = "Hub Overview",
-            Meta = "LOCAL UI",
-            Description = "Hub status and safe UI checks.",
             Controls = {
                 {
                     Kind = "button",
                     Label = "Run UI self-check",
-                    Detail = "Checks the shell action path only; no gameplay action.",
                     Action = "main.selfCheck",
                 },
             },
         },
         Farm = {
-            Section = "Auto Farm",
-            Meta = "CONFIGURED",
-            Description = "Level-based quest farming with target reacquisition.",
             Controls = {
                 {
                     Kind = "featureToggle",
                     Label = "Auto Farm Level",
-                    Detail = "Selects a level quest, confirms it, then finds and engages its target.",
                     Action = "farm.main",
                 },
                 {
                     Kind = "settingSelect",
                     Label = "Weapon category",
-                    Detail = "Choose Main Farm's equipped weapon category.",
                     Action = "farm.weaponCategory.select",
                     Setting = "WeaponCategory",
                     Options = weaponCategories,
@@ -154,46 +145,33 @@ local Config = {
             },
         },
         Player = {
-            Section = "Player Tools",
-            Meta = "LOCAL",
-            Description = "Player utilities are not connected yet.",
             Controls = {
                 {
                     Kind = "button",
                     Label = "Character status",
-                    Detail = "Placeholder; does not read or change character state.",
                     Action = "player.status",
                 },
             },
         },
         Teleport = {
-            Section = "Travel",
-            Meta = "PLACEHOLDER",
-            Description = "Travel actions remain unavailable in the UI shell.",
             Controls = {
                 {
                     Kind = "button",
                     Label = "Travel status",
-                    Detail = "Placeholder; no movement or remote is invoked.",
                     Action = "teleport.status",
                 },
             },
         },
         Settings = {
-            Section = "Interface & Display",
-            Meta = "LOCAL",
-            Description = "Local presentation settings for this UI shell.",
             Controls = {
                 {
                     Kind = "settingToggle",
                     Label = "Compact layout",
-                    Detail = "Changes only the shell's on-screen size.",
                     Action = "settings.compact",
                 },
                 {
                     Kind = "button",
                     Label = "Reset UI settings",
-                    Detail = "Restores this shell's local presentation defaults.",
                     Action = "settings.reset",
                 },
             },
@@ -1016,16 +994,7 @@ function UI:_UpdateControlGridLayout()
         and #self.ActiveControls > 1
         and 2
         or 1
-    local hasSelector = false
-    for _, control in ipairs(self.ActiveControls or {}) do
-        if control.Kind == "settingSelect" then
-            hasSelector = true
-            break
-        end
-    end
-    local rowHeight = hasSelector
-        and self.Config.Layout.SelectorRowHeight
-        or self.Config.Layout.RowHeight
+    local rowHeight = self.Config.Layout.RowHeight
     self.ControlGridLayout.FillDirectionMaxCells = columnCount
     self.ControlGridLayout.CellSize = columnCount == 2
         and UDim2.new(0.5, -4, 0, rowHeight)
@@ -1082,10 +1051,15 @@ function UI:_AddControl(control)
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, row)
 
+    local titleTop = isSelector and layout.SelectorTitleTop or layout.RowTitleTop
+    local titleHeight = isSelector and layout.SelectorTitleHeight or layout.RowTitleHeight
+    local titleSize = isSelector
+        and UDim2.new(0, layout.SelectorTitleWidth, 0, titleHeight)
+        or UDim2.new(1, -layout.RowInset * 2 - reservedTitleSpace, 0, titleHeight)
     create("TextLabel", {
         Name = "Title",
-        Position = UDim2.fromOffset(layout.RowInset, layout.RowTitleTop),
-        Size = UDim2.new(1, -layout.RowInset * 2 - reservedTitleSpace, 0, layout.RowTitleHeight),
+        Position = UDim2.fromOffset(layout.RowInset, titleTop),
+        Size = titleSize,
         BackgroundTransparency = 1,
         Font = theme.StrongFont,
         Text = control.Label,
@@ -1093,20 +1067,6 @@ function UI:_AddControl(control)
         TextSize = theme.TextSizes.Control,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
-    }, row)
-
-    create("TextLabel", {
-        Name = "Detail",
-        Position = UDim2.fromOffset(layout.RowInset, layout.RowDetailTop),
-        Size = UDim2.new(1, -layout.RowInset * 2, 0, layout.RowDetailHeight),
-        BackgroundTransparency = 1,
-        Font = theme.Font,
-        Text = control.Detail,
-        TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Detail,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
     }, row)
 
     if hasToggle then
@@ -1132,13 +1092,23 @@ function UI:_AddControl(control)
     end
 
     if isSelector then
-        row.Size = UDim2.new(1, 0, 0, layout.SelectorRowHeight)
+        row.Size = UDim2.new(1, 0, 0, layout.RowHeight)
         rowStroke.Transparency = 0.15
         local options = control.Options or {}
         local optionsFrame = create("Frame", {
             Name = "Options",
-            Position = UDim2.new(0, layout.RowInset, 0, 60),
-            Size = UDim2.new(1, -layout.RowInset * 2, 0, 26),
+            Position = UDim2.new(
+                0,
+                layout.RowInset + layout.SelectorTitleWidth + layout.SelectorTitleGap,
+                0,
+                layout.SelectorOptionsTop
+            ),
+            Size = UDim2.new(
+                1,
+                -(layout.RowInset * 2 + layout.SelectorTitleWidth + layout.SelectorTitleGap),
+                0,
+                layout.SelectorOptionsHeight
+            ),
             BackgroundTransparency = 1,
         }, row)
         create("UIListLayout", {
@@ -1218,71 +1188,16 @@ function UI:_RenderTab(tabName)
     self:_ClearPage()
     local theme = self.Config.Theme
     local layout = self.Config.Layout
-    create("TextLabel", {
-        Name = "PageDescription",
-        Size = UDim2.new(1, 0, 0, layout.PageDescriptionHeight),
-        BackgroundTransparency = 1,
-        Font = theme.Font,
-        Text = page.Description,
-        TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Body,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        LayoutOrder = 1,
-    }, self.Content)
-
-    local section = create("Frame", {
-        Name = "SectionHeader",
-        Size = UDim2.new(1, -2, 0, layout.SectionHeight),
-        BackgroundColor3 = theme.Panel,
-        BorderSizePixel = 0,
-        LayoutOrder = 2,
-    }, self.Content)
-    addCorner(section, 3)
-    create("Frame", {
-        Name = "AccentBar",
-        Position = UDim2.fromOffset(7, 6),
-        Size = UDim2.new(0, 3, 1, -12),
-        BackgroundColor3 = theme.Accent,
-        BorderSizePixel = 0,
-    }, section)
-    create("TextLabel", {
-        Name = "SectionName",
-        Position = UDim2.fromOffset(17, 0),
-        Size = UDim2.new(1, -124, 1, 0),
-        BackgroundTransparency = 1,
-        Font = theme.MonoFont,
-        Text = string.upper(page.Section or tabName),
-        TextColor3 = theme.Text,
-        TextSize = 10,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, section)
-    create("TextLabel", {
-        Name = "SectionMeta",
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -8, 0, 0),
-        Size = UDim2.fromOffset(92, layout.SectionHeight),
-        BackgroundTransparency = 1,
-        Font = theme.MonoFont,
-        Text = page.Meta or "LOCAL",
-        TextColor3 = theme.MutedText,
-        TextSize = 8,
-        TextXAlignment = Enum.TextXAlignment.Right,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, section)
-
     self.ActiveControls = page.Controls
     self.ControlsContainer = create("Frame", {
         Name = "ControlGrid",
         Size = UDim2.new(1, -2, 0, 0),
         BackgroundTransparency = 1,
-        LayoutOrder = 3,
+        LayoutOrder = 1,
     }, self.Content)
     self.ControlGridLayout = create("UIGridLayout", {
         CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
-        CellPadding = UDim2.fromOffset(8, 6),
+        CellPadding = UDim2.fromOffset(6, 5),
         FillDirection = Enum.FillDirection.Horizontal,
         FillDirectionMaxCells = 1,
         SortOrder = Enum.SortOrder.LayoutOrder,

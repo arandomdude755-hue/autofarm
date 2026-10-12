@@ -64,75 +64,54 @@ local Theme = {
 local Tabs = { "Main", "Farm", "Player", "Teleport", "Settings" }
 local Pages = {
     Main = {
-        Section = "Hub Overview",
-        Meta = "LOCAL UI",
-        Description = "Hub status and safe UI checks.",
         Controls = {
             {
                 Kind = "button",
                 Label = "Run UI self-check",
-                Detail = "Checks this shell only; no gameplay action.",
                 Action = "main.selfCheck",
                 Badge = "CHECK",
             },
         },
     },
     Farm = {
-        Section = "Farm Preview",
-        Meta = "DISCONNECTED",
-        Description = "Farm controls are UI-only previews.",
         Controls = {
             {
                 Kind = "previewToggle",
                 Label = "Auto farm preview",
-                Detail = "Local preview state only. Does not scan, move, or attack.",
                 Action = "preview.farm",
             },
         },
     },
     Player = {
-        Section = "Player Tools",
-        Meta = "PLACEHOLDER",
-        Description = "Player utilities are not connected.",
         Controls = {
             {
                 Kind = "button",
                 Label = "Character status",
-                Detail = "Placeholder; no character data is read or changed.",
                 Action = "player.status",
                 Badge = "INFO",
             },
         },
     },
     Teleport = {
-        Section = "Travel",
-        Meta = "PLACEHOLDER",
-        Description = "Travel actions are not connected.",
         Controls = {
             {
                 Kind = "button",
                 Label = "Travel status",
-                Detail = "Placeholder; no movement or remote is invoked.",
                 Action = "teleport.status",
                 Badge = "INFO",
             },
         },
     },
     Settings = {
-        Section = "Interface & Display",
-        Meta = "LOCAL",
-        Description = "These settings affect only this local UI.",
         Controls = {
             {
                 Kind = "settingToggle",
                 Label = "Compact layout",
-                Detail = "Changes only the shell's on-screen size.",
                 Action = "settings.compact",
             },
             {
                 Kind = "button",
                 Label = "Reset UI settings",
-                Detail = "Restores local presentation defaults.",
                 Action = "settings.reset",
                 Badge = "RESET",
             },
@@ -602,7 +581,7 @@ local function updateControlGridLayout()
     local camera = workspace.CurrentCamera
     local landscape = camera ~= nil and camera.ViewportSize.X > camera.ViewportSize.Y
     local columnCount = getColumnCount(controlsContainer.AbsoluteSize.X, currentControlCount, landscape)
-    local cellSize = columnCount == 2 and UDim2.new(0.5, -4, 0, 68) or UDim2.new(1, 0, 0, 68)
+    local cellSize = columnCount == 2 and UDim2.new(0.5, -3, 0, 48) or UDim2.new(1, 0, 0, 48)
     if controlGridLayout.FillDirectionMaxCells ~= columnCount then
         controlGridLayout.FillDirectionMaxCells = columnCount
     end
@@ -747,71 +726,16 @@ renderTab = function(tabName)
     state.selectedTab = tabName
     clearPage()
 
-    create("TextLabel", {
-        Name = "PageDescription",
-        Size = UDim2.new(1, 0, 0, 38),
-        BackgroundTransparency = 1,
-        Font = Theme.Font,
-        Text = page.Description,
-        TextColor3 = Theme.MutedText,
-        TextSize = 12,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        LayoutOrder = 1,
-    }, content)
-
-    local section = create("Frame", {
-        Name = "SectionHeader",
-        Size = UDim2.new(1, -2, 0, 26),
-        BackgroundColor3 = Theme.Panel,
-        BorderSizePixel = 0,
-        LayoutOrder = 2,
-    }, content)
-    addCorner(section, 3)
-    create("Frame", {
-        Name = "AccentBar",
-        Position = UDim2.fromOffset(7, 6),
-        Size = UDim2.new(0, 3, 1, -12),
-        BackgroundColor3 = Theme.Accent,
-        BorderSizePixel = 0,
-    }, section)
-    create("TextLabel", {
-        Name = "SectionName",
-        Position = UDim2.fromOffset(17, 0),
-        Size = UDim2.new(1, -124, 1, 0),
-        BackgroundTransparency = 1,
-        Font = Theme.MonoFont,
-        Text = string.upper(page.Section),
-        TextColor3 = Theme.Text,
-        TextSize = 10,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, section)
-    create("TextLabel", {
-        Name = "SectionMeta",
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -8, 0, 0),
-        Size = UDim2.fromOffset(92, 26),
-        BackgroundTransparency = 1,
-        Font = Theme.MonoFont,
-        Text = page.Meta,
-        TextColor3 = Theme.MutedText,
-        TextSize = 8,
-        TextXAlignment = Enum.TextXAlignment.Right,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, section)
-
     currentControlCount = #page.Controls
     controlsContainer = create("Frame", {
         Name = "ControlGrid",
         Size = UDim2.new(1, -2, 0, 0),
         BackgroundTransparency = 1,
-        LayoutOrder = 3,
+        LayoutOrder = 1,
     }, content)
     controlGridLayout = create("UIGridLayout", {
-        CellSize = UDim2.new(1, 0, 0, 68),
-        CellPadding = UDim2.fromOffset(8, 6),
+        CellSize = UDim2.new(1, 0, 0, 48),
+        CellPadding = UDim2.fromOffset(6, 5),
         FillDirection = Enum.FillDirection.Horizontal,
         FillDirectionMaxCells = 1,
         SortOrder = Enum.SortOrder.LayoutOrder,
@@ -824,7 +748,7 @@ renderTab = function(tabName)
         local reserved = 78
         local row = create("TextButton", {
             Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
-            Size = UDim2.new(1, 0, 0, 68),
+            Size = UDim2.new(1, 0, 0, 48),
             BackgroundColor3 = Theme.Control,
             BorderSizePixel = 0,
             AutoButtonColor = false,
@@ -837,8 +761,8 @@ renderTab = function(tabName)
 
         create("TextLabel", {
             Name = "Title",
-            Position = UDim2.fromOffset(10, 8),
-            Size = UDim2.new(1, -20 - reserved, 0, 22),
+            Position = UDim2.fromOffset(10, 0),
+            Size = UDim2.new(1, -20 - reserved, 0, 48),
             BackgroundTransparency = 1,
             Font = Theme.StrongFont,
             Text = control.Label,
@@ -846,20 +770,6 @@ renderTab = function(tabName)
             TextSize = 13,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
-        }, row)
-
-        create("TextLabel", {
-            Name = "Detail",
-            Position = UDim2.fromOffset(10, 32),
-            Size = UDim2.new(1, -20, 0, 32),
-            BackgroundTransparency = 1,
-            Font = Theme.Font,
-            Text = control.Detail,
-            TextColor3 = Theme.MutedText,
-            TextSize = 10,
-            TextWrapped = true,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Top,
         }, row)
 
         if hasValue then
@@ -1607,13 +1517,14 @@ task.spawn(function()
             and bubbleMoved.Y.Offset == bubbleOrigin.Y.Offset + 12
     end)
 
-    test("native window, section, and scrolling surfaces exist", function()
+    test("native window, compact control rows, and scrolling surfaces exist", function()
         selectTab("Main")
-        local section = content:FindFirstChild("SectionHeader")
+        local row = controlsContainer and controlsContainer:FindFirstChildWhichIsA("TextButton")
         return titlebar ~= nil and titlebar:IsA("Frame")
             and scroll ~= nil and scroll:IsA("ScrollingFrame")
             and controlsContainer ~= nil and controlGridLayout ~= nil
-            and section ~= nil and section:FindFirstChild("AccentBar") ~= nil
+            and row ~= nil and row.AbsoluteSize.Y == 48
+            and row:FindFirstChild("Detail") == nil
             and screenGui:FindFirstChild("Window"):FindFirstChild("Status") ~= nil
     end)
 
@@ -1767,7 +1678,6 @@ task.spawn(function()
         table.insert(settingsControls, {
             Kind = "button",
             Label = "Temporary scroll check " .. tostring(index),
-            Detail = "Temporary UI test row; no game action.",
             Action = "main.selfCheck",
         })
     end

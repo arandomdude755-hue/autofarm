@@ -441,16 +441,7 @@ function UI:_UpdateControlGridLayout()
         and #self.ActiveControls > 1
         and 2
         or 1
-    local hasSelector = false
-    for _, control in ipairs(self.ActiveControls or {}) do
-        if control.Kind == "settingSelect" then
-            hasSelector = true
-            break
-        end
-    end
-    local rowHeight = hasSelector
-        and self.Config.Layout.SelectorRowHeight
-        or self.Config.Layout.RowHeight
+    local rowHeight = self.Config.Layout.RowHeight
     self.ControlGridLayout.FillDirectionMaxCells = columnCount
     self.ControlGridLayout.CellSize = columnCount == 2
         and UDim2.new(0.5, -4, 0, rowHeight)
@@ -507,10 +498,15 @@ function UI:_AddControl(control)
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, row)
 
+    local titleTop = isSelector and layout.SelectorTitleTop or layout.RowTitleTop
+    local titleHeight = isSelector and layout.SelectorTitleHeight or layout.RowTitleHeight
+    local titleSize = isSelector
+        and UDim2.new(0, layout.SelectorTitleWidth, 0, titleHeight)
+        or UDim2.new(1, -layout.RowInset * 2 - reservedTitleSpace, 0, titleHeight)
     create("TextLabel", {
         Name = "Title",
-        Position = UDim2.fromOffset(layout.RowInset, layout.RowTitleTop),
-        Size = UDim2.new(1, -layout.RowInset * 2 - reservedTitleSpace, 0, layout.RowTitleHeight),
+        Position = UDim2.fromOffset(layout.RowInset, titleTop),
+        Size = titleSize,
         BackgroundTransparency = 1,
         Font = theme.StrongFont,
         Text = control.Label,
@@ -518,20 +514,6 @@ function UI:_AddControl(control)
         TextSize = theme.TextSizes.Control,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
-    }, row)
-
-    create("TextLabel", {
-        Name = "Detail",
-        Position = UDim2.fromOffset(layout.RowInset, layout.RowDetailTop),
-        Size = UDim2.new(1, -layout.RowInset * 2, 0, layout.RowDetailHeight),
-        BackgroundTransparency = 1,
-        Font = theme.Font,
-        Text = control.Detail,
-        TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Detail,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
     }, row)
 
     if hasToggle then
@@ -557,13 +539,23 @@ function UI:_AddControl(control)
     end
 
     if isSelector then
-        row.Size = UDim2.new(1, 0, 0, layout.SelectorRowHeight)
+        row.Size = UDim2.new(1, 0, 0, layout.RowHeight)
         rowStroke.Transparency = 0.15
         local options = control.Options or {}
         local optionsFrame = create("Frame", {
             Name = "Options",
-            Position = UDim2.new(0, layout.RowInset, 0, 60),
-            Size = UDim2.new(1, -layout.RowInset * 2, 0, 26),
+            Position = UDim2.new(
+                0,
+                layout.RowInset + layout.SelectorTitleWidth + layout.SelectorTitleGap,
+                0,
+                layout.SelectorOptionsTop
+            ),
+            Size = UDim2.new(
+                1,
+                -(layout.RowInset * 2 + layout.SelectorTitleWidth + layout.SelectorTitleGap),
+                0,
+                layout.SelectorOptionsHeight
+            ),
             BackgroundTransparency = 1,
         }, row)
         create("UIListLayout", {
@@ -643,71 +635,16 @@ function UI:_RenderTab(tabName)
     self:_ClearPage()
     local theme = self.Config.Theme
     local layout = self.Config.Layout
-    create("TextLabel", {
-        Name = "PageDescription",
-        Size = UDim2.new(1, 0, 0, layout.PageDescriptionHeight),
-        BackgroundTransparency = 1,
-        Font = theme.Font,
-        Text = page.Description,
-        TextColor3 = theme.MutedText,
-        TextSize = theme.TextSizes.Body,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        LayoutOrder = 1,
-    }, self.Content)
-
-    local section = create("Frame", {
-        Name = "SectionHeader",
-        Size = UDim2.new(1, -2, 0, layout.SectionHeight),
-        BackgroundColor3 = theme.Panel,
-        BorderSizePixel = 0,
-        LayoutOrder = 2,
-    }, self.Content)
-    addCorner(section, 3)
-    create("Frame", {
-        Name = "AccentBar",
-        Position = UDim2.fromOffset(7, 6),
-        Size = UDim2.new(0, 3, 1, -12),
-        BackgroundColor3 = theme.Accent,
-        BorderSizePixel = 0,
-    }, section)
-    create("TextLabel", {
-        Name = "SectionName",
-        Position = UDim2.fromOffset(17, 0),
-        Size = UDim2.new(1, -124, 1, 0),
-        BackgroundTransparency = 1,
-        Font = theme.MonoFont,
-        Text = string.upper(page.Section or tabName),
-        TextColor3 = theme.Text,
-        TextSize = 10,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, section)
-    create("TextLabel", {
-        Name = "SectionMeta",
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -8, 0, 0),
-        Size = UDim2.fromOffset(92, layout.SectionHeight),
-        BackgroundTransparency = 1,
-        Font = theme.MonoFont,
-        Text = page.Meta or "LOCAL",
-        TextColor3 = theme.MutedText,
-        TextSize = 8,
-        TextXAlignment = Enum.TextXAlignment.Right,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    }, section)
-
     self.ActiveControls = page.Controls
     self.ControlsContainer = create("Frame", {
         Name = "ControlGrid",
         Size = UDim2.new(1, -2, 0, 0),
         BackgroundTransparency = 1,
-        LayoutOrder = 3,
+        LayoutOrder = 1,
     }, self.Content)
     self.ControlGridLayout = create("UIGridLayout", {
         CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
-        CellPadding = UDim2.fromOffset(8, 6),
+        CellPadding = UDim2.fromOffset(6, 5),
         FillDirection = Enum.FillDirection.Horizontal,
         FillDirectionMaxCells = 1,
         SortOrder = Enum.SortOrder.LayoutOrder,

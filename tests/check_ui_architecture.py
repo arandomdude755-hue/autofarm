@@ -38,14 +38,26 @@ for token in (
     require(token in CONFIG, f"production theme diverged from standalone reference: {token}")
 
 for token in (
-    'Name = "SectionHeader"',
-    'Name = "AccentBar"',
     'Name = "ActiveMarker"',
     'Name = "PulseHalo"',
     'function UI:_AttachButtonFeedback',
     "self.Root.Position = clampDragPosition(",
 ):
     require(token in UI_MODULE, f"production UI is missing a referenced design/interaction component: {token}")
+
+require("RowHeight = 48" in CONFIG, "production control buttons are not using the compact touch-friendly height")
+require('Name = "PageDescription"' not in UI_MODULE
+        and 'Name = "SectionHeader"' not in UI_MODULE
+        and 'Name = "Detail"' not in UI_MODULE,
+        "redundant page and control subheadings should not be rendered")
+require("SelectorOptionsTop = 8" in CONFIG
+        and "SelectorOptionsHeight = 32" in CONFIG
+        and "SelectorTitleWidth = 120" in CONFIG,
+        "compact selector options are not aligned inside the control row")
+require('Name = "SectionHeader"' not in SCRIPT
+        and 'Name = "Detail"' not in SCRIPT
+        and "Temporary UI test row" not in SCRIPT,
+        "standalone UI reference still renders redundant subheadings")
 
 require(not re.search(r"\brequire\s*\(", SCRIPT), "Standalone script must not import modules")
 require("Players.LocalPlayer" in SCRIPT and 'WaitForChild("PlayerGui"' in SCRIPT,
@@ -93,6 +105,7 @@ for marker in (
     "tab selection and active indicators",
     "farm preview changes local state only",
     "compact setting updates and restores window size",
+    "compact control rows",
     "placeholder actions only update status",
     "tab text and toggle title fit current viewport",
     "scroll view supports overflow",
