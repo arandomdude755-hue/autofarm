@@ -29,18 +29,25 @@ for tab in ("Main", "Farm", "Player", "Teleport", "Settings"):
     require(f'"{tab}"' in CONFIG, f"production UI is missing the {tab} tab")
 
 for token in (
-    "Background = Color3.fromRGB(18, 21, 28)",
-    "Header = Color3.fromRGB(23, 27, 36)",
-    "TabBar = Color3.fromRGB(20, 24, 32)",
-    "Control = Color3.fromRGB(27, 32, 42)",
-    "Accent = Color3.fromRGB(79, 139, 224)",
+    "Background = Color3.fromRGB(17, 19, 25)",
+    "Header = Color3.fromRGB(21, 25, 34)",
+    "TabBar = Color3.fromRGB(13, 16, 22)",
+    "Control = Color3.fromRGB(22, 26, 36)",
+    "Accent = Color3.fromRGB(59, 130, 246)",
 ):
     require(token in CONFIG, f"production theme diverged from standalone reference: {token}")
 
 for token in (
     'Name = "ActiveMarker"',
+    'Name = "Sidebar"',
+    'Name = "SearchInput"',
+    'Name = "Navigation"',
+    'Name = "MainPane"',
+    'Name = "PageHeader"',
     'Name = "PulseHalo"',
     'function UI:_AttachButtonFeedback',
+    'function UI:_ApplySearchFilter()',
+    'PlaceholderText = "Search section or function"',
     "self.Root.Position = clampWindowDragPosition(",
 ):
     require(token in UI_MODULE, f"production UI is missing a referenced design/interaction component: {token}")

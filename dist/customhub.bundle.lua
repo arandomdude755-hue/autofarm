@@ -58,13 +58,20 @@ local Config = {
         CloseWidth = 28,
         CloseHeight = 26,
         TitleRightInset = 84,
-        TabsTop = 40,
-        TabHeight = 36,
+        SidebarWidthRatio = 0.25,
+        SidebarMinWidth = 88,
+        SidebarMaxWidth = 192,
+        MainPaneMinWidth = 180,
+        SidebarSearchHeight = 30,
+        SidebarSearchInset = 8,
+        SidebarNavTop = 46,
+        SidebarRowHeight = 30,
+        SidebarRowGap = 3,
+        PageHeaderHeight = 32,
         StatusTop = 0,
         StatusHeight = 30,
         StatusInset = 8,
         StatusTextTop = 0,
-        ContentTop = 76,
         ScrollContentInset = 18,
         ScrollBarThickness = 3,
         RowHeight = 48,
@@ -86,17 +93,18 @@ local Config = {
         BorderThickness = 1,
     },
     Theme = {
-        Background = Color3.fromRGB(18, 21, 28),
-        Header = Color3.fromRGB(23, 27, 36),
-        TabBar = Color3.fromRGB(20, 24, 32),
-        Panel = Color3.fromRGB(22, 26, 34),
-        Control = Color3.fromRGB(27, 32, 42),
-        Selected = Color3.fromRGB(30, 36, 48),
-        Border = Color3.fromRGB(43, 49, 62),
-        AccentBorder = Color3.fromRGB(69, 117, 190),
+        Background = Color3.fromRGB(17, 19, 25),
+        Header = Color3.fromRGB(21, 25, 34),
+        TabBar = Color3.fromRGB(13, 16, 22),
+        Panel = Color3.fromRGB(18, 21, 29),
+        Sidebar = Color3.fromRGB(15, 18, 24),
+        Control = Color3.fromRGB(22, 26, 36),
+        Selected = Color3.fromRGB(23, 29, 41),
+        Border = Color3.fromRGB(37, 42, 54),
+        AccentBorder = Color3.fromRGB(59, 130, 246),
         Text = Color3.fromRGB(237, 239, 243),
         MutedText = Color3.fromRGB(157, 165, 177),
-        Accent = Color3.fromRGB(79, 139, 224),
+        Accent = Color3.fromRGB(59, 130, 246),
         Success = Color3.fromRGB(106, 190, 145),
         Warning = Color3.fromRGB(222, 184, 105),
         Error = Color3.fromRGB(224, 116, 108),
@@ -568,7 +576,6 @@ local RESTORE_DRAG_THRESHOLD = 8
 local WINDOW_VISIBLE_GRIP_WIDTH = 128
 local WINDOW_VISIBLE_GRIP_HEIGHT = 24
 local HEADER_HEIGHT = 40
-local TAB_BAR_HEIGHT = 36
 local FOOTER_HEIGHT = 30
 
 local function create(className, properties, parent)
@@ -587,6 +594,14 @@ local function addCorner(parent, radius)
     create("UICorner", {
         CornerRadius = UDim.new(0, radius or 4),
     }, parent)
+end
+
+local function displayTabName(tabName)
+    return tabName == "Farm" and "Farming" or tabName
+end
+
+local function normalizeSearchText(text)
+    return string.lower((tostring(text or ""):match("^%s*(.-)%s*$") or ""))
 end
 
 local function clampDragPosition(origin, delta, viewport, size)
@@ -668,6 +683,12 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         Gui = nil,
         Root = nil,
         Header = nil,
+        Sidebar = nil,
+        SearchBox = nil,
+        NavScroll = nil,
+        MainPane = nil,
+        PageHeader = nil,
+        PageTitle = nil,
         MinimizeButton = nil,
         RestoreButton = nil,
         RestoreHalo = nil,
@@ -697,6 +718,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         ControlGridLayout = nil,
         ActiveControls = nil,
         ActiveTab = nil,
+        SearchQuery = "",
         _contentSizeConnection = nil,
         ViewportConnection = nil,
     }, UI)
@@ -840,12 +862,13 @@ function UI:_ApplySize(snapshot)
         viewport = Vector2.new(390, 844)
     end
     local landscape = viewport.X > viewport.Y
+    local layout = self.Config.Layout
     local widthScale = snapshot.compact and (touch and 0.92 or 0.72) or 0.96
     local maxWidth = landscape and 760 or 500
     local maxHeight = math.min(landscape and 420 or 740, math.max(1, viewport.Y - 32))
     local minHeight = math.min(landscape and 300 or 320, maxHeight)
     local pageHeight = self.ContentLayout and self.ContentLayout.AbsoluteContentSize.Y or 0
-    local desiredHeight = HEADER_HEIGHT + TAB_BAR_HEIGHT + pageHeight + FOOTER_HEIGHT + 14
+    local desiredHeight = HEADER_HEIGHT + layout.PageHeaderHeight + pageHeight + FOOTER_HEIGHT + 14
     local width = math.min(viewport.X * widthScale, maxWidth, math.max(1, viewport.X - 16))
     local height = math.clamp(desiredHeight, minHeight, maxHeight)
     if self.SizeConstraint then
@@ -853,6 +876,7 @@ function UI:_ApplySize(snapshot)
         self.SizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
     end
     self.Root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
+    self:_UpdateShellLayout()
     self:_ClampWindow()
 end
 
@@ -930,6 +954,43 @@ function UI:_ClampWindow()
     )
 end
 
+function UI:_UpdateShellLayout()
+    if not self.Root or not self.Sidebar or not self.MainPane then
+        return
+    end
+
+    local layout = self.Config.Layout
+    local rootWidth = self.Root.AbsoluteSize.X
+    local maxSidebarWidth = math.max(
+        72,
+        math.min(layout.SidebarMaxWidth, rootWidth - layout.MainPaneMinWidth)
+    )
+    local minSidebarWidth = math.min(layout.SidebarMinWidth, maxSidebarWidth)
+    local sidebarWidth = math.clamp(
+        rootWidth * layout.SidebarWidthRatio,
+        minSidebarWidth,
+        maxSidebarWidth
+    )
+
+    self.Sidebar.Position = UDim2.new(0, 0, 0, HEADER_HEIGHT)
+    self.Sidebar.Size = UDim2.new(0, sidebarWidth, 1, -HEADER_HEIGHT - FOOTER_HEIGHT)
+    self.MainPane.Position = UDim2.new(0, sidebarWidth, 0, HEADER_HEIGHT)
+    self.MainPane.Size = UDim2.new(1, -sidebarWidth, 1, -HEADER_HEIGHT - FOOTER_HEIGHT)
+
+    if self.PageHeader then
+        self.PageHeader.Size = UDim2.new(1, 0, 0, layout.PageHeaderHeight)
+    end
+    if self.SearchBox then
+        self.SearchBox.PlaceholderText = sidebarWidth < 148
+            and "Search..."
+            or "Search section or function"
+    end
+    if self.Scroll then
+        self.Scroll.Position = UDim2.new(0, 0, 0, layout.PageHeaderHeight)
+        self.Scroll.Size = UDim2.new(1, 0, 1, -layout.PageHeaderHeight)
+    end
+end
+
 function UI:_Refresh(snapshot)
     if not self.Gui then
         return
@@ -955,18 +1016,19 @@ function UI:_Refresh(snapshot)
 
     for tabName, button in pairs(self.TabButtons) do
         local selected = tabName == snapshot.selectedTab
-        button.BackgroundColor3 = selected and theme.Selected or theme.TabBar
-        button.TextColor3 = tabName == snapshot.selectedTab and theme.Text or theme.MutedText
+        button.BackgroundColor3 = theme.Selected
+        button.BackgroundTransparency = selected and 0 or 1
+        button.TextColor3 = selected and theme.Accent or theme.MutedText
         local stroke = button:FindFirstChildOfClass("UIStroke")
         if stroke then
             stroke.Color = selected and theme.AccentBorder or theme.Border
-            stroke.Transparency = selected and 0.18 or 0.72
+            stroke.Transparency = selected and 0.18 or 1
         end
         local marker = self.TabMarkers[tabName]
         if marker then
-            marker.Visible = selected
-            marker.Size = UDim2.fromOffset(selected and 12 or 0, 2)
-            marker.BackgroundTransparency = selected and 0 or 1
+            marker.Visible = true
+            marker.BackgroundColor3 = selected and theme.Accent or theme.MutedText
+            marker.Size = selected and UDim2.fromOffset(3, 17) or UDim2.fromOffset(5, 5)
         end
     end
 
@@ -1058,6 +1120,79 @@ function UI:_UpdateControlGridLayout()
     self.ControlGridLayout.CellSize = columnCount == 2
         and UDim2.new(0.5, -4, 0, rowHeight)
         or UDim2.new(1, 0, 0, rowHeight)
+end
+
+function UI:_TabMatchesSearch(tabName, query)
+    if query == "" then
+        return true
+    end
+    if string.find(normalizeSearchText(displayTabName(tabName)), query, 1, true) then
+        return true
+    end
+
+    local page = self.Config.Pages[tabName]
+    for _, control in ipairs(page and page.Controls or {}) do
+        if string.find(normalizeSearchText(control.Label), query, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+function UI:_ApplyControlSearchHighlight()
+    if not self.ControlsContainer or not self.ActiveControls then
+        return
+    end
+
+    local theme = self.Config.Theme
+    local query = self.SearchQuery
+    for _, control in ipairs(self.ActiveControls) do
+        local row = self.ControlsContainer:FindFirstChild(
+            "Action_" .. control.Action:gsub("[^%w]", "_")
+        )
+        if row then
+            local matched = query ~= ""
+                and string.find(normalizeSearchText(control.Label), query, 1, true) ~= nil
+            row.BackgroundColor3 = matched and theme.Selected or theme.Control
+            local stroke = row:FindFirstChildOfClass("UIStroke")
+            if stroke then
+                stroke.Color = matched and theme.AccentBorder or theme.Border
+                stroke.Transparency = matched and 0.12 or 0.4
+            end
+        end
+    end
+end
+
+function UI:_ApplySearchFilter()
+    if not self.SearchBox or not self.NavScroll then
+        return
+    end
+
+    local layout = self.Config.Layout
+    local query = normalizeSearchText(self.SearchBox.Text)
+    self.SearchQuery = query
+    local top = 0
+    local firstMatch
+    for _, tabName in ipairs(self.Config.Tabs) do
+        local button = self.TabButtons[tabName]
+        local matches = self:_TabMatchesSearch(tabName, query)
+        if button then
+            button.Visible = matches
+            if matches then
+                button.Position = UDim2.fromOffset(0, top)
+                top = top + layout.SidebarRowHeight + layout.SidebarRowGap
+                firstMatch = firstMatch or tabName
+            end
+        end
+    end
+    self.NavScroll.CanvasSize = UDim2.new(0, 0, 0, math.max(0, top - layout.SidebarRowGap))
+
+    local selectedTab = self.State:GetSnapshot().selectedTab
+    if query ~= "" and firstMatch and not self:_TabMatchesSearch(selectedTab, query) then
+        self:_SelectTab(firstMatch)
+    else
+        self:_ApplyControlSearchHighlight()
+    end
 end
 
 function UI:_SelectTab(tabName)
@@ -1244,6 +1379,9 @@ function UI:_RenderTab(tabName)
     end
 
     self.ActiveTab = tabName
+    if self.PageTitle then
+        self.PageTitle.Text = displayTabName(tabName)
+    end
     self:_ClearPage()
     local theme = self.Config.Theme
     local layout = self.Config.Layout
@@ -1286,6 +1424,7 @@ function UI:_RenderTab(tabName)
     end
     self:_UpdateControlGridLayout()
     self:_SyncControlGridHeight()
+    self:_ApplyControlSearchHighlight()
     self.Scroll.CanvasPosition = Vector2.zero
     self:_Refresh(self.State:GetSnapshot())
     return true
@@ -1598,44 +1737,174 @@ function UI:Mount()
         end
     end)
 
-    local tabWidth = 1 / #self.Config.Tabs
-    for index, tabName in ipairs(self.Config.Tabs) do
+    self.Sidebar = create("Frame", {
+        Name = "Sidebar",
+        Position = UDim2.new(0, 0, 0, HEADER_HEIGHT),
+        Size = UDim2.new(0, layout.SidebarMinWidth, 1, -HEADER_HEIGHT - FOOTER_HEIGHT),
+        BackgroundColor3 = theme.Sidebar,
+        BorderSizePixel = 0,
+    }, self.Root)
+    create("Frame", {
+        Name = "Divider",
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, 0, 0, 0),
+        Size = UDim2.new(0, 1, 1, 0),
+        BackgroundColor3 = theme.Border,
+        BorderSizePixel = 0,
+    }, self.Sidebar)
+
+    local searchFrame = create("Frame", {
+        Name = "Search",
+        Position = UDim2.new(0, layout.SidebarSearchInset, 0, 8),
+        Size = UDim2.new(1, -layout.SidebarSearchInset * 2, 0, layout.SidebarSearchHeight),
+        BackgroundColor3 = theme.Control,
+        BorderSizePixel = 0,
+    }, self.Sidebar)
+    addCorner(searchFrame, 4)
+    create("UIStroke", {
+        Color = theme.Border,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, searchFrame)
+    create("TextLabel", {
+        Name = "SearchIcon",
+        Position = UDim2.fromOffset(8, 0),
+        Size = UDim2.fromOffset(16, layout.SidebarSearchHeight),
+        BackgroundTransparency = 1,
+        Font = theme.StrongFont,
+        Text = "⌕",
+        TextColor3 = theme.MutedText,
+        TextSize = 17,
+        TextXAlignment = Enum.TextXAlignment.Center,
+    }, searchFrame)
+    self.SearchBox = create("TextBox", {
+        Name = "SearchInput",
+        Position = UDim2.fromOffset(27, 0),
+        Size = UDim2.new(1, -32, 1, 0),
+        BackgroundTransparency = 1,
+        ClearTextOnFocus = false,
+        Font = theme.MonoFont,
+        PlaceholderText = "Search section or function",
+        PlaceholderColor3 = theme.MutedText,
+        Text = "",
+        TextColor3 = theme.Text,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, searchFrame)
+    self:_Connect(
+        self.PersistentConnections,
+        self.SearchBox:GetPropertyChangedSignal("Text"),
+        function()
+            self:_ApplySearchFilter()
+        end
+    )
+
+    self.NavScroll = create("ScrollingFrame", {
+        Name = "Navigation",
+        Position = UDim2.new(0, 6, 0, layout.SidebarNavTop),
+        Size = UDim2.new(1, -12, 1, -layout.SidebarNavTop - 6),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = layout.ScrollBarThickness,
+        ScrollBarImageColor3 = theme.Accent,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        AutomaticCanvasSize = Enum.AutomaticSize.None,
+    }, self.Sidebar)
+
+    self.MainPane = create("Frame", {
+        Name = "MainPane",
+        Position = UDim2.new(0, layout.SidebarMinWidth, 0, HEADER_HEIGHT),
+        Size = UDim2.new(1, -layout.SidebarMinWidth, 1, -HEADER_HEIGHT - FOOTER_HEIGHT),
+        BackgroundColor3 = theme.Panel,
+        BorderSizePixel = 0,
+    }, self.Root)
+    self.PageHeader = create("Frame", {
+        Name = "PageHeader",
+        Size = UDim2.new(1, 0, 0, layout.PageHeaderHeight),
+        BackgroundColor3 = theme.Header,
+        BorderSizePixel = 0,
+    }, self.MainPane)
+    create("Frame", {
+        Name = "PageAccent",
+        Position = UDim2.fromOffset(12, 9),
+        Size = UDim2.fromOffset(3, 14),
+        BackgroundColor3 = theme.Accent,
+        BorderSizePixel = 0,
+    }, self.PageHeader)
+    self.PageTitle = create("TextLabel", {
+        Name = "PageTitle",
+        Position = UDim2.fromOffset(24, 0),
+        Size = UDim2.new(1, -36, 1, 0),
+        BackgroundTransparency = 1,
+        Font = theme.StrongFont,
+        Text = "",
+        TextColor3 = theme.Text,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, self.PageHeader)
+    create("Frame", {
+        Name = "BottomBorder",
+        AnchorPoint = Vector2.new(0, 1),
+        Position = UDim2.new(0, 0, 1, 0),
+        Size = UDim2.new(1, 0, 0, 1),
+        BackgroundColor3 = theme.Border,
+        BorderSizePixel = 0,
+    }, self.PageHeader)
+
+    local navTop = 0
+    for _, tabName in ipairs(self.Config.Tabs) do
         local button = create("TextButton", {
             Name = "Tab_" .. tabName,
-            Position = UDim2.new((index - 1) * tabWidth, 0, 0, layout.TabsTop),
-            Size = UDim2.new(tabWidth, -2, 0, layout.TabHeight),
-            BackgroundColor3 = theme.TabBar,
+            Position = UDim2.fromOffset(0, navTop),
+            Size = UDim2.new(1, -2, 0, layout.SidebarRowHeight),
+            BackgroundColor3 = theme.Selected,
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
             AutoButtonColor = false,
             Font = theme.StrongFont,
-            Text = tabName,
+            Text = displayTabName(tabName),
             TextColor3 = theme.MutedText,
             TextSize = theme.TextSizes.Tab,
             TextTruncate = Enum.TextTruncate.AtEnd,
-        }, self.Root)
-        addCorner(button, 3)
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, self.NavScroll)
+        addCorner(button, 4)
+        create("UIPadding", {
+            PaddingLeft = UDim.new(0, 23),
+            PaddingRight = UDim.new(0, 8),
+        }, button)
         create("UIStroke", {
             Color = theme.Border,
             Thickness = layout.BorderThickness,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Transparency = 1,
         }, button)
         self:_AttachButtonFeedback(button, self.PersistentConnections)
         local marker = create("Frame", {
             Name = "ActiveMarker",
-            AnchorPoint = Vector2.new(0.5, 1),
-            Position = UDim2.new(0.5, 0, 1, -2),
-            Size = UDim2.fromOffset(0, 2),
-            BackgroundColor3 = theme.Accent,
-            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, 8, 0.5, 0),
+            Size = UDim2.fromOffset(5, 5),
+            BackgroundColor3 = theme.MutedText,
             BorderSizePixel = 0,
-            Visible = false,
         }, button)
+        addCorner(marker, 4)
         self.TabButtons[tabName] = button
         self.TabMarkers[tabName] = marker
         self:_Connect(self.PersistentConnections, button.Activated, function()
             self:_SelectTab(tabName)
         end)
+        navTop = navTop + layout.SidebarRowHeight + layout.SidebarRowGap
     end
+    self.NavScroll.CanvasSize = UDim2.new(
+        0,
+        0,
+        0,
+        math.max(0, navTop - layout.SidebarRowGap)
+    )
 
     local statusFrame = create("Frame", {
         Name = "Status",
@@ -1686,8 +1955,8 @@ function UI:Mount()
 
     self.Scroll = create("ScrollingFrame", {
         Name = "Page",
-        Position = UDim2.new(0, 0, 0, layout.ContentTop),
-        Size = UDim2.new(1, 0, 1, -layout.ContentTop - FOOTER_HEIGHT),
+        Position = UDim2.new(0, 0, 0, layout.PageHeaderHeight),
+        Size = UDim2.new(1, 0, 1, -layout.PageHeaderHeight),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ScrollBarThickness = layout.ScrollBarThickness,
@@ -1695,7 +1964,7 @@ function UI:Mount()
         CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollingDirection = Enum.ScrollingDirection.Y,
         AutomaticCanvasSize = Enum.AutomaticSize.None,
-    }, self.Root)
+    }, self.MainPane)
     self.Content = create("Frame", {
         Name = "Content",
         Position = UDim2.fromOffset(9, 7),
@@ -1723,6 +1992,14 @@ function UI:Mount()
         workspace:GetPropertyChangedSignal("CurrentCamera"),
         function()
             self:_WatchViewport(workspace.CurrentCamera)
+        end
+    )
+    self:_Connect(
+        self.PersistentConnections,
+        self.Root:GetPropertyChangedSignal("AbsoluteSize"),
+        function()
+            self:_UpdateShellLayout()
+            self:_UpdateControlGridLayout()
         end
     )
 
@@ -1753,6 +2030,12 @@ function UI:Destroy()
         self.Root = nil
     end
     self.Header = nil
+    self.Sidebar = nil
+    self.SearchBox = nil
+    self.NavScroll = nil
+    self.MainPane = nil
+    self.PageHeader = nil
+    self.PageTitle = nil
     self.MinimizeButton = nil
     self.RestoreButton = nil
     self.RestoreHalo = nil
@@ -1777,6 +2060,7 @@ function UI:Destroy()
     self.ControlGridLayout = nil
     self.ActiveControls = nil
     self.ActiveTab = nil
+    self.SearchQuery = ""
 end
 
 return UI
