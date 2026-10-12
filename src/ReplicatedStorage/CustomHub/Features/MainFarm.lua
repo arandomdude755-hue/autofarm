@@ -220,6 +220,7 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
         local lines = {
             "===== [QuestDiagnostic] REPORT BEGIN =====",
             "Sea: " .. diagnosticSeaName(self.Context and self.Context.Compatibility),
+            "Dialogue deferred: " .. tostring(report.DialogueDeferred == true),
             "Candidate: quest=" .. tostring(report.CandidateQuestName)
                 .. " id=" .. tostring(report.CandidateQuestId),
             "StartQuest: pcall_succeeded=" .. pcallOutcome
@@ -495,12 +496,14 @@ function MainFarm:_RequestQuest(candidate, session)
         self.QuestDiagnosticReport = {
             CandidateQuestName = diagnosticScalar(candidate.QuestName),
             CandidateQuestId = diagnosticScalar(candidate.Id),
+            DialogueDeferred = self.QuestDeferredForDialogue == true,
             RequestStage = "pcall_not_reached",
             PcallSucceeded = nil,
             ResultType = "n/a",
             ResultSummary = "not returned",
             AttemptCount = 0,
         }
+        self.QuestDeferredForDialogue = false
         self.PendingQuestTargetName = candidate.Mob
     end
 
@@ -633,6 +636,9 @@ function MainFarm:_Step(session)
 
     local questState, activeTarget, readerEvidence = self.QuestService:GetActiveQuestState()
     self.LastQuestStateReason = readerEvidence
+    if questState == "active" then
+        self.QuestDeferredForDialogue = false
+    end
     if self.QuestDiagnosticWaitKey then
         self:_LogQuestDataSnapshot("confirmation_poll", questState, false, readerEvidence)
         local now = os.clock()
@@ -664,7 +670,20 @@ function MainFarm:_Step(session)
                     "warning"
                 )
             end
-        elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= QUEST_CONFIRMATION_TIMEOUT then
+        elseif self.QuestService:IsQuestGiverDialogueOpen() then
+            self.QuestDiagnosticWaitStartedAt = nil
+            self.LastQuestAttemptKey = nil
+            self.LastQuestAttemptAt = 0
+            self.QuestStartAttemptCount = 0
+            self.QuestDeferredForDialogue = true
+            self:_SetStatus(
+                "Quest dialogue open; waiting for it to close before requesting",
+                "info"
+            )
+            return
+        elseif not self.QuestDiagnosticWaitStartedAt then
+            self.QuestDiagnosticWaitStartedAt = now
+        elseif now - self.QuestDiagnosticWaitStartedAt >= QUEST_CONFIRMATION_TIMEOUT then
             self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
             self:_TimeoutQuestConfirmation(self.QuestDiagnosticWaitKey, now)
         end
@@ -735,6 +754,21 @@ function MainFarm:_Step(session)
             self:_SetStatus("At quest giver; waiting before quest request", "info")
             return
         elseif os.clock() - self.PendingQuestReachedAt < 2 then
+            return
+        end
+        if self.QuestService:IsQuestGiverDialogueOpen() then
+            if self.TimedOutQuestKey == candidateKey then
+                self.TimedOutQuestKey = nil
+                self.QuestTimeoutReason = nil
+                self.LastQuestAttemptKey = nil
+                self.LastQuestAttemptAt = 0
+                self.QuestStartAttemptCount = 0
+            end
+            self.QuestDeferredForDialogue = true
+            self:_SetStatus(
+                "Quest dialogue open; waiting for it to close before requesting",
+                "info"
+            )
             return
         end
         self:_RequestQuest(candidate, session)
@@ -1000,6 +1034,7 @@ function MainFarm:Initialize(context)
     self.QuestStartAttemptCount = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
+    self.QuestDeferredForDialogue = false
     self.PendingQuestTargetName = nil
     self.LastQuestStateReason = nil
     self.QuestDiagnosticWaitKey = nil
@@ -1072,6 +1107,7 @@ function MainFarm:Start()
     self.LastQuestAttemptAt = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
+    self.QuestDeferredForDialogue = false
     self.PendingQuestTargetName = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
@@ -1108,6 +1144,7 @@ function MainFarm:Stop()
     self.QuestStartAttemptCount = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
+    self.QuestDeferredForDialogue = false
     self.LastQuestStateReason = nil
     self:_ResetSpawnSearch(nil)
     self.QuestDiagnosticWaitKey = nil

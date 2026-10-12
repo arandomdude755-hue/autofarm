@@ -473,6 +473,17 @@ function QuestService:GetPlayerLevel()
     return level and tonumber(level.Value)
 end
 
+function QuestService:IsQuestGiverDialogueOpen()
+    local ok, isOpen = pcall(function()
+        local compatibility = self.Compatibility
+        if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
+            return false
+        end
+        return hasVisibleQuestGiverDialogue(compatibility:GetPlayerGui())
+    end)
+    return ok and isOpen == true
+end
+
 function QuestService:GetActiveQuestState()
     local guideData = self.Guide and self.Guide.Data
     local questData = type(guideData) == "table" and guideData.QuestData or nil

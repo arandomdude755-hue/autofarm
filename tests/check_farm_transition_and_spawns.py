@@ -52,6 +52,23 @@ require("response is not acceptance" in request,
         "remote return values must not be treated as quest acceptance")
 require("activeTarget == self.PendingQuestTargetName" in step,
         "confirmation must match the active target selected for this request")
+request_gate_start = step.rindex("if self.QuestService:IsQuestGiverDialogueOpen() then")
+request_call_start = step.index("self:_RequestQuest(candidate, session)")
+require(
+    request_gate_start < request_call_start
+    and "Quest dialogue open; waiting for it to close before requesting" in step[request_gate_start:request_call_start]
+    and "return" in step[request_gate_start:request_call_start],
+    "a visible quest-giver dialogue must defer StartQuest until the dialogue closes",
+)
+pause_start = step.index("elseif self.QuestService:IsQuestGiverDialogueOpen() then")
+pause_end = step.index("elseif not self.QuestDiagnosticWaitStartedAt then", pause_start)
+pause_branch = step[pause_start:pause_end]
+require(
+    step.index('if questState == "active" then') < pause_start
+    and "self.QuestDiagnosticWaitStartedAt = nil" in pause_branch
+    and "self.QuestStartAttemptCount = 0" in pause_branch,
+    "dialogue deferral must preserve manually accepted quests and pause timeout/retry state",
+)
 
 quest_report = FARM[
     FARM.index("function MainFarm:_PrintQuestDiagnosticReport"):
@@ -59,9 +76,11 @@ quest_report = FARM[
 ]
 require(
     '"Sea: " .. diagnosticSeaName(self.Context and self.Context.Compatibility)' in quest_report
+    and '"Dialogue deferred: " .. tostring(report.DialogueDeferred == true)' in quest_report
     and "self.LastQuestDiagnosticReportText = text" in quest_report
-    and "self.LastQuestDiagnosticReportText = nil" in request,
-    "the latest complete report must include its sea and replace stale reports for a new attempt",
+    and "self.LastQuestDiagnosticReportText = nil" in request
+    and "DialogueDeferred = self.QuestDeferredForDialogue == true" in request,
+    "the latest complete report must include its sea and dialogue deferral and replace stale reports",
 )
 
 require("function MainFarm:_ClearTarget(preserveMovement)" in FARM,

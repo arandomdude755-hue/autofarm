@@ -231,7 +231,16 @@ require(
     and 'StartQuest still requires active-state confirmation' in disabled_branch
     and 'no visible Quest Giver dialogue was found' in disabled_branch
     and 'main:FindFirstChild("Dialogue")' not in disabled_branch,
-    "only a visible quest-giver dialogue should allow a bounded request, never count as acceptance",
+    "visible quest-giver dialogue must remain non-active and must not be mistaken for quest acceptance",
+)
+dialogue_gate_start = QUEST_SERVICE.index("function QuestService:IsQuestGiverDialogueOpen()")
+dialogue_gate_end = QUEST_SERVICE.index("\nfunction QuestService:GetActiveQuestState()", dialogue_gate_start)
+dialogue_gate = QUEST_SERVICE[dialogue_gate_start:dialogue_gate_end]
+require(
+    "hasVisibleQuestGiverDialogue" in dialogue_gate
+    and "pcall(function()" in dialogue_gate
+    and "return ok and isOpen == true" in dialogue_gate,
+    "quest-start gating must safely reuse the visible generic quest-giver dialogue detector",
 )
 
 compatibility = (
