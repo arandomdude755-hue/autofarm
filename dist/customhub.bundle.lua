@@ -51,12 +51,12 @@ local Config = {
         DesktopHeight = 0.78,
         ExpandedWidth = 0.96,
         ExpandedHeight = 0.88,
-        MinSize = Vector2.new(280, 300),
+        MinSize = Vector2.new(280, 270),
         MaxSize = Vector2.new(760, 740),
         HeaderTop = 7,
-        HeaderHeight = 40,
-        CloseWidth = 28,
-        CloseHeight = 26,
+        HeaderHeight = 34,
+        CloseWidth = 26,
+        CloseHeight = 22,
         TitleRightInset = 84,
         SidebarWidthRatio = 0.25,
         SidebarMinWidth = 88,
@@ -64,9 +64,9 @@ local Config = {
         MainPaneMinWidth = 180,
         SidebarSearchHeight = 30,
         SidebarSearchInset = 8,
-        SidebarNavTop = 46,
-        SidebarRowHeight = 30,
-        SidebarRowGap = 3,
+        SidebarNavTop = 52,
+        SidebarRowHeight = 27,
+        SidebarRowGap = 2,
         PageHeaderHeight = 32,
         StatusTop = 0,
         StatusHeight = 30,
@@ -74,20 +74,20 @@ local Config = {
         StatusTextTop = 0,
         ScrollContentInset = 18,
         ScrollBarThickness = 3,
-        RowHeight = 48,
+        RowHeight = 40,
         RowInset = 10,
         RowTitleTop = 0,
-        RowTitleHeight = 48,
+        RowTitleHeight = 40,
         SelectorTitleTop = 0,
-        SelectorTitleHeight = 48,
+        SelectorTitleHeight = 40,
         SelectorTitleWidth = 120,
         SelectorTitleGap = 8,
-        SelectorOptionsTop = 8,
-        SelectorOptionsHeight = 32,
-        ToggleValueTop = 10,
-        ToggleValueWidth = 58,
-        ToggleValueHeight = 22,
-        ToggleGap = 8,
+        SelectorOptionsTop = 6,
+        SelectorOptionsHeight = 28,
+        ToggleValueTop = 9,
+        ToggleValueWidth = 52,
+        ToggleValueHeight = 20,
+        ToggleGap = 7,
         Spacing = 6,
         Padding = 8,
         BorderThickness = 1,
@@ -113,9 +113,9 @@ local Config = {
         MonoFont = Enum.Font.Code,
         TextSizes = {
             Title = 12,
-            Control = 13,
+            Control = 12,
             Body = 12,
-            Tab = 10,
+            Tab = 11,
             Status = 9,
         },
     },
@@ -569,14 +569,14 @@ UI.__index = UI
 
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local MINIMIZE_BUTTON_WIDTH = 28
-local HEADER_BUTTON_GAP = 6
+local MINIMIZE_BUTTON_WIDTH = 26
+local HEADER_BUTTON_GAP = 5
 local RESTORE_BUTTON_SIZE = Vector2.new(56, 56)
 local RESTORE_DRAG_THRESHOLD = 8
 local WINDOW_VISIBLE_GRIP_WIDTH = 128
 local WINDOW_VISIBLE_GRIP_HEIGHT = 24
-local HEADER_HEIGHT = 40
-local FOOTER_HEIGHT = 30
+local HEADER_HEIGHT = 34
+local FOOTER_HEIGHT = 24
 
 local function create(className, properties, parent)
     local instance = Instance.new(className)
@@ -701,6 +701,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         StatusLabel = nil,
         StatusDot = nil,
         TabButtons = {},
+        TabLabels = {},
         TabMarkers = {},
         ToggleLabels = {},
         SelectorEntries = {},
@@ -865,8 +866,12 @@ function UI:_ApplySize(snapshot)
     local layout = self.Config.Layout
     local widthScale = snapshot.compact and (touch and 0.92 or 0.72) or 0.96
     local maxWidth = landscape and 760 or 500
-    local maxHeight = math.min(landscape and 420 or 740, math.max(1, viewport.Y - 32))
-    local minHeight = math.min(landscape and 300 or 320, maxHeight)
+    local verticalInset = landscape and 56 or 32
+    local maxHeight = math.min(
+        landscape and 420 or 740,
+        math.max(1, viewport.Y - verticalInset)
+    )
+    local minHeight = math.min(landscape and 270 or 320, maxHeight)
     local pageHeight = self.ContentLayout and self.ContentLayout.AbsoluteContentSize.Y or 0
     local desiredHeight = HEADER_HEIGHT + layout.PageHeaderHeight + pageHeight + FOOTER_HEIGHT + 14
     local width = math.min(viewport.X * widthScale, maxWidth, math.max(1, viewport.X - 16))
@@ -1018,15 +1023,19 @@ function UI:_Refresh(snapshot)
         local selected = tabName == snapshot.selectedTab
         button.BackgroundColor3 = theme.Selected
         button.BackgroundTransparency = selected and 0 or 1
-        button.TextColor3 = selected and theme.Accent or theme.MutedText
         local stroke = button:FindFirstChildOfClass("UIStroke")
         if stroke then
             stroke.Color = selected and theme.AccentBorder or theme.Border
             stroke.Transparency = selected and 0.18 or 1
         end
+        local label = self.TabLabels[tabName]
+        if label then
+            label.TextColor3 = selected and theme.Accent or theme.MutedText
+        end
         local marker = self.TabMarkers[tabName]
         if marker then
             marker.Visible = true
+            marker.Position = UDim2.new(0, 10, 0.5, 0)
             marker.BackgroundColor3 = selected and theme.Accent or theme.MutedText
             marker.Size = selected and UDim2.fromOffset(3, 17) or UDim2.fromOffset(5, 5)
         end
@@ -1475,7 +1484,7 @@ function UI:Mount()
     addCorner(self.Header, 4)
     create("Frame", {
         Name = "LogoMark",
-        Position = UDim2.fromOffset(10, 13),
+        Position = UDim2.fromOffset(10, 10),
         Size = UDim2.fromOffset(14, 14),
         BackgroundColor3 = theme.Accent,
         BorderSizePixel = 0,
@@ -1500,7 +1509,7 @@ function UI:Mount()
     }, self.Header)
     local versionBadge = create("TextLabel", {
         Name = "VersionBadge",
-        Position = UDim2.fromOffset(122, 11),
+        Position = UDim2.fromOffset(122, 8),
         Size = UDim2.fromOffset(44, 18),
         BackgroundColor3 = theme.Selected,
         BorderSizePixel = 0,
@@ -1520,7 +1529,7 @@ function UI:Mount()
     local closeButton = create("TextButton", {
         Name = "Close",
         AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -8, 0, 7),
+        Position = UDim2.new(1, -8, 0, 6),
         Size = UDim2.fromOffset(layout.CloseWidth, layout.CloseHeight),
         BackgroundColor3 = theme.Control,
         BorderSizePixel = 0,
@@ -1528,7 +1537,7 @@ function UI:Mount()
         Font = theme.StrongFont,
         Text = "×",
         TextColor3 = theme.MutedText,
-        TextSize = 17,
+        TextSize = 15,
     }, self.Header)
     addCorner(closeButton, 3)
     create("UIStroke", {
@@ -1550,7 +1559,7 @@ function UI:Mount()
             1,
             -(8 + layout.CloseWidth + HEADER_BUTTON_GAP),
             0,
-            7
+            6
         ),
         Size = UDim2.fromOffset(MINIMIZE_BUTTON_WIDTH, layout.CloseHeight),
         BackgroundColor3 = theme.Control,
@@ -1559,7 +1568,7 @@ function UI:Mount()
         Font = theme.StrongFont,
         Text = "−",
         TextColor3 = theme.MutedText,
-        TextSize = 17,
+        TextSize = 15,
     }, self.Header)
     addCorner(self.MinimizeButton, 3)
     create("UIStroke", {
@@ -1766,16 +1775,26 @@ function UI:Mount()
         Thickness = layout.BorderThickness,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, searchFrame)
-    create("TextLabel", {
+    local searchIcon = create("Frame", {
         Name = "SearchIcon",
-        Position = UDim2.fromOffset(8, 0),
-        Size = UDim2.fromOffset(16, layout.SidebarSearchHeight),
+        Position = UDim2.fromOffset(10, 10),
+        Size = UDim2.fromOffset(8, 8),
         BackgroundTransparency = 1,
-        Font = theme.StrongFont,
-        Text = "⌕",
-        TextColor3 = theme.MutedText,
-        TextSize = 17,
-        TextXAlignment = Enum.TextXAlignment.Center,
+        BorderSizePixel = 0,
+    }, searchFrame)
+    addCorner(searchIcon, 5)
+    create("UIStroke", {
+        Color = theme.MutedText,
+        Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, searchIcon)
+    create("Frame", {
+        Name = "SearchHandle",
+        Position = UDim2.fromOffset(17, 17),
+        Size = UDim2.fromOffset(5, 1),
+        Rotation = 45,
+        BackgroundColor3 = theme.MutedText,
+        BorderSizePixel = 0,
     }, searchFrame)
     self.SearchBox = create("TextBox", {
         Name = "SearchInput",
@@ -1788,7 +1807,7 @@ function UI:Mount()
         PlaceholderColor3 = theme.MutedText,
         Text = "",
         TextColor3 = theme.Text,
-        TextSize = 9,
+        TextSize = 10,
         TextXAlignment = Enum.TextXAlignment.Left,
     }, searchFrame)
     self:_Connect(
@@ -1864,18 +1883,9 @@ function UI:Mount()
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
             AutoButtonColor = false,
-            Font = theme.StrongFont,
-            Text = displayTabName(tabName),
-            TextColor3 = theme.MutedText,
-            TextSize = theme.TextSizes.Tab,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = "",
         }, self.NavScroll)
         addCorner(button, 4)
-        create("UIPadding", {
-            PaddingLeft = UDim.new(0, 23),
-            PaddingRight = UDim.new(0, 8),
-        }, button)
         create("UIStroke", {
             Color = theme.Border,
             Thickness = layout.BorderThickness,
@@ -1886,13 +1896,27 @@ function UI:Mount()
         local marker = create("Frame", {
             Name = "ActiveMarker",
             AnchorPoint = Vector2.new(0, 0.5),
-            Position = UDim2.new(0, 8, 0.5, 0),
+            Position = UDim2.new(0, 10, 0.5, 0),
             Size = UDim2.fromOffset(5, 5),
             BackgroundColor3 = theme.MutedText,
             BorderSizePixel = 0,
         }, button)
         addCorner(marker, 4)
+        local label = create("TextLabel", {
+            Name = "Label",
+            Position = UDim2.new(0, 28, 0, 0),
+            Size = UDim2.new(1, -36, 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = displayTabName(tabName),
+            TextColor3 = theme.MutedText,
+            TextSize = theme.TextSizes.Tab,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+        }, button)
         self.TabButtons[tabName] = button
+        self.TabLabels[tabName] = label
         self.TabMarkers[tabName] = marker
         self:_Connect(self.PersistentConnections, button.Activated, function()
             self:_SelectTab(tabName)
@@ -1934,7 +1958,7 @@ function UI:Mount()
     }, statusFrame)
     self.StatusDot = create("Frame", {
         Name = "StatusDot",
-        Position = UDim2.fromOffset(10, 12),
+        Position = UDim2.fromOffset(10, 9),
         Size = UDim2.fromOffset(6, 6),
         BackgroundColor3 = theme.Success,
         BorderSizePixel = 0,
@@ -2048,6 +2072,7 @@ function UI:Destroy()
     self.StatusLabel = nil
     self.StatusDot = nil
     self.TabButtons = {}
+    self.TabLabels = {}
     self.TabMarkers = {}
     self.ToggleLabels = {}
     self.SelectorEntries = {}

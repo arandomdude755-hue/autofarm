@@ -44,11 +44,15 @@ for token in (
     'Name = "Navigation"',
     'Name = "MainPane"',
     'Name = "PageHeader"',
+    'Name = "SearchHandle"',
+    'Name = "Label"',
     'Name = "PulseHalo"',
     'function UI:_AttachButtonFeedback',
     'function UI:_ApplySearchFilter()',
     'PlaceholderText = "Search section or function"',
     "self.Root.Position = clampWindowDragPosition(",
+    "landscape and 56 or 32",
+    'Position = UDim2.new(0, 28, 0, 0)',
 ):
     require(token in UI_MODULE, f"production UI is missing a referenced design/interaction component: {token}")
 
@@ -75,13 +79,13 @@ require(
     "the restore button should stay fully visible and resized windows should retain a reachable header",
 )
 
-require("RowHeight = 48" in CONFIG, "production control buttons are not using the compact touch-friendly height")
+require("RowHeight = 40" in CONFIG, "production control rows should stay compact")
 require('Name = "PageDescription"' not in UI_MODULE
         and 'Name = "SectionHeader"' not in UI_MODULE
         and 'Name = "Detail"' not in UI_MODULE,
         "redundant page and control subheadings should not be rendered")
-require("SelectorOptionsTop = 8" in CONFIG
-        and "SelectorOptionsHeight = 32" in CONFIG
+require("SelectorOptionsTop = 6" in CONFIG
+        and "SelectorOptionsHeight = 28" in CONFIG
         and "SelectorTitleWidth = 120" in CONFIG,
         "compact selector options are not aligned inside the control row")
 require('Name = "SectionHeader"' not in SCRIPT
