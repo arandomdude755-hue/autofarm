@@ -56,6 +56,7 @@ function MovementService.new(compatibility, report)
         FarmCollisionOriginals = {},
         FarmCollisionPartConnections = {},
         FarmCollisionErrorReported = false,
+        FarmCollisionMaintenanceGeneration = 0,
         HoldForce = nil,
     }, MovementService)
 end
@@ -107,6 +108,52 @@ function MovementService:_ReportFarmCollisionError(err)
     end
     self.FarmCollisionErrorReported = true
     self.Report("Character collision maintenance error: " .. tostring(err), "warning")
+end
+
+function MovementService:_MaintainFarmCollision()
+    if not self.FarmCollisionActive then
+        return
+    end
+
+    local player = self.Compatibility.Player
+    if player and player.Character ~= self.FarmCollisionCharacter then
+        self:_ApplyFarmCollision()
+        return
+    end
+
+    for part in pairs(self.FarmCollisionOriginals) do
+        if not part.Parent then
+            disconnect(self.FarmCollisionPartConnections[part])
+            self.FarmCollisionPartConnections[part] = nil
+            self.FarmCollisionOriginals[part] = nil
+        elseif part.CanCollide then
+            self:_ApplyFarmCollisionPart(part)
+        end
+    end
+end
+
+function MovementService:_StartFarmCollisionMaintenance()
+    self.FarmCollisionMaintenanceGeneration += 1
+    local generation = self.FarmCollisionMaintenanceGeneration
+    task.spawn(function()
+        while self.FarmCollisionActive
+            and self.FarmCollisionMaintenanceGeneration == generation
+        do
+            task.wait(0.2)
+            if not self.FarmCollisionActive
+                or self.FarmCollisionMaintenanceGeneration ~= generation
+            then
+                break
+            end
+
+            local ok, err = pcall(self._MaintainFarmCollision, self)
+            if ok then
+                self.FarmCollisionErrorReported = false
+            else
+                self:_ReportFarmCollisionError(err)
+            end
+        end
+    end)
 end
 
 function MovementService:_ApplyFarmCollisionPart(part)
@@ -163,6 +210,7 @@ function MovementService:SetFarmCollisionSuppression(enabled)
     enabled = enabled == true
     if not enabled then
         self.FarmCollisionActive = false
+        self.FarmCollisionMaintenanceGeneration += 1
         disconnect(self.FarmCollisionCharacterAddedConnection)
         disconnect(self.FarmCollisionCharacterRemovingConnection)
         self.FarmCollisionCharacterAddedConnection = nil
@@ -203,6 +251,7 @@ function MovementService:SetFarmCollisionSuppression(enabled)
     end)
     if not ok then
         self.FarmCollisionActive = false
+        self.FarmCollisionMaintenanceGeneration += 1
         disconnect(self.FarmCollisionCharacterAddedConnection)
         disconnect(self.FarmCollisionCharacterRemovingConnection)
         self.FarmCollisionCharacterAddedConnection = nil
@@ -212,6 +261,7 @@ function MovementService:SetFarmCollisionSuppression(enabled)
     end
 
     self.FarmCollisionErrorReported = false
+    self:_StartFarmCollisionMaintenance()
     return true
 end
 

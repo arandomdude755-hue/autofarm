@@ -123,6 +123,16 @@ collision_apply = function_body(
     "function MovementService:_ApplyFarmCollision()",
     "\nfunction MovementService:SetFarmCollisionSuppression(",
 )
+collision_maintenance = function_body(
+    MOVEMENT,
+    "function MovementService:_MaintainFarmCollision()",
+    "\nfunction MovementService:_StartFarmCollisionMaintenance()",
+)
+collision_maintenance_loop = function_body(
+    MOVEMENT,
+    "function MovementService:_StartFarmCollisionMaintenance()",
+    "\nfunction MovementService:_ApplyFarmCollisionPart(",
+)
 hold_position = function_body(
     MOVEMENT,
     "function MovementService:HoldPosition(",
@@ -139,6 +149,13 @@ require(
     and "DescendantAdded:Connect" in collision_apply
     and "Heartbeat:Connect" not in collision_setup,
     "farm noclip must use property/hierarchy events instead of a per-frame character scan",
+)
+require(
+    "for part in pairs(self.FarmCollisionOriginals)" in collision_maintenance
+    and "GetDescendants" not in collision_maintenance
+    and "task.wait(0.2)" in collision_maintenance_loop
+    and "pcall(self._MaintainFarmCollision, self)" in collision_maintenance_loop,
+    "noclip safety checks must be low-frequency and limited to already tracked character parts",
 )
 require(
     "active.Goal = root.CFrame" in hold_position
