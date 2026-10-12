@@ -93,8 +93,12 @@ require("landscape and 370 or 320" in UI_MODULE,
         "landscape panel should retain the larger reference-height footprint")
 require("SidebarNavInsetTop = 4" in CONFIG
         and "local top = layout.SidebarNavInsetTop" in UI_MODULE
-        and "local navTop = layout.SidebarNavInsetTop" in UI_MODULE,
-        "navigation rows need an inset so the selected outline is not clipped")
+        and "local navTop = layout.SidebarNavInsetTop" in UI_MODULE
+        and "SidebarNavInsetLeft = 5" in CONFIG
+        and "UDim2.fromOffset(layout.SidebarNavInsetLeft, top)" in UI_MODULE
+        and "UDim2.fromOffset(layout.SidebarNavInsetLeft, navTop)" in UI_MODULE
+        and "layout.SidebarNavInsetLeft * 2" in UI_MODULE,
+        "navigation rows need top and side insets so selected outlines are not clipped")
 settings_page = CONFIG[CONFIG.index("Settings = {"):]
 require('Label = "UI size"' in settings_page
         and 'Action = "settings.uiSize.select"' in settings_page

@@ -36,11 +36,11 @@ require(
     and 'Action = "farm.status.copy"' in farm_config,
     "Farm page must expose a button for copying the complete status report",
 )
-require('Kind = "settingSelect"' in farm_config
+require('Kind = "settingDropdown"' in farm_config
         and 'Action = "farm.weaponCategory.select"' in farm_config
         and 'Setting = "WeaponCategory"' in farm_config
         and "Options = weaponCategories" in farm_config,
-        "Farm page must expose directly selectable weapon categories")
+        "Farm page must expose weapon categories through a dropdown")
 require('local weaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG
         and "WeaponCategories = weaponCategories" in CONFIG,
         "Weapon selector must use the supported category choices")
@@ -75,6 +75,21 @@ require('actionId == "farm.weaponCategory.select"' in dispatch
 require('Name = "Option_" .. tostring(value)' in UI
         and "self.Dispatch,\n                        control.Action,\n                        value" in UI,
         "Each weapon option must dispatch its selected value immediately")
+require('Name = "DropdownValue"' in UI
+        and 'Name = "DropdownMenu"' in UI
+        and "function UI:_OpenDropdown(entry)" in UI
+        and "pcall(self.Dispatch, entry.Control.Action, value)" in UI
+        and 'Kind = "dropdown"' in UI,
+        "Weapon category dropdown must open choices and dispatch the selected category")
+dropdown_open = function_body(UI, "function UI:_OpenDropdown(entry)", "\nfunction UI:_ToggleDropdown")
+dropdown_close = function_body(UI, "function UI:_CloseDropdown()", "\nfunction UI:_OpenDropdown")
+clear_page = function_body(UI, "function UI:_ClearPage()", "\nfunction UI:_SyncControlGridHeight")
+require("DropdownDismissOverlay" in dropdown_open
+        and "overlay.Activated" in dropdown_open
+        and "optionButton.Activated" in dropdown_open
+        and "instance:Destroy()" in dropdown_close
+        and "self:_CloseDropdown()" in clear_page,
+        "dropdown dismissal, option selection, and page cleanup must close the popup")
 require("for _, featureModule in ipairs(self.Modules) do" in dispatch
         and "featureModule.Handle" in dispatch,
         "FeatureManager must dispatch the action to the registered feature modules")

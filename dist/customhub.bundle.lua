@@ -72,6 +72,7 @@ local Config = {
         SidebarSearchInset = 8,
         SidebarNavTop = 52,
         SidebarNavInsetTop = 4,
+        SidebarNavInsetLeft = 5,
         SidebarRowHeight = 27,
         SidebarRowGap = 2,
         PageHeaderHeight = 32,
@@ -91,6 +92,10 @@ local Config = {
         SelectorTitleGap = 8,
         SelectorOptionsTop = 6,
         SelectorOptionsHeight = 28,
+        DropdownWidthRatio = 0.54,
+        DropdownTitleGap = 8,
+        DropdownHeight = 26,
+        DropdownOptionHeight = 30,
         ToggleValueTop = 9,
         ToggleValueWidth = 52,
         ToggleValueHeight = 20,
@@ -156,7 +161,7 @@ local Config = {
                     Action = "farm.status.copy",
                 },
                 {
-                    Kind = "settingSelect",
+                    Kind = "settingDropdown",
                     Label = "Weapon category",
                     Action = "farm.weaponCategory.select",
                     Setting = "WeaponCategory",
@@ -743,6 +748,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         TabMarkers = {},
         ToggleLabels = {},
         SelectorEntries = {},
+        ActiveDropdown = nil,
         ActiveTweens = {},
         TweenCompletedConnections = {},
         PressedButtonScale = nil,
@@ -772,6 +778,7 @@ function UI:_WatchViewport(camera)
         return
     end
     self.ViewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+        self:_CloseDropdown()
         self:_ApplySize(self.State:GetSnapshot())
         self:_UpdateControlGridLayout()
         self:_ClampRestoreButton()
@@ -940,6 +947,9 @@ function UI:_SetMinimized(minimized)
         return false
     end
 
+    if minimized then
+        self:_CloseDropdown()
+    end
     self.IsMinimized = minimized
     self.Root.Visible = not minimized
     self.RestoreButton.Visible = minimized
@@ -1112,14 +1122,30 @@ function UI:_Refresh(snapshot)
         local selectedValue = entry.Setting == "UiSize"
             and snapshot.uiSize
             or farmSettings[entry.Setting]
-        for _, option in ipairs(entry.Options) do
-            local selected = option.Value == selectedValue
-            option.Button.BackgroundColor3 = selected and theme.Accent or theme.TabBar
-            option.Button.TextColor3 = selected and theme.Text or theme.MutedText
-            local stroke = option.Button:FindFirstChildOfClass("UIStroke")
-            if stroke then
-                stroke.Color = selected and theme.AccentBorder or theme.Border
-                stroke.Transparency = selected and 0.12 or 0.65
+        if entry.Kind == "dropdown" then
+            entry.SelectedValue = selectedValue
+            if entry.Button then
+                local isOpen = self.ActiveDropdown and self.ActiveDropdown.Entry == entry
+                entry.Button.Text = tostring(selectedValue or "Select")
+                entry.Button.BackgroundColor3 = theme.TabBar
+                entry.Button.TextColor3 = theme.Text
+            end
+            if entry.Arrow then
+                entry.Arrow.Text = self.ActiveDropdown
+                    and self.ActiveDropdown.Entry == entry
+                    and "▲"
+                    or "▼"
+            end
+        else
+            for _, option in ipairs(entry.Options) do
+                local selected = option.Value == selectedValue
+                option.Button.BackgroundColor3 = selected and theme.Accent or theme.TabBar
+                option.Button.TextColor3 = selected and theme.Text or theme.MutedText
+                local stroke = option.Button:FindFirstChildOfClass("UIStroke")
+                if stroke then
+                    stroke.Color = selected and theme.AccentBorder or theme.Border
+                    stroke.Transparency = selected and 0.12 or 0.65
+                end
             end
         end
     end
@@ -1136,6 +1162,7 @@ function UI:_Refresh(snapshot)
 end
 
 function UI:_ClearPage()
+    self:_CloseDropdown()
     disconnectAll(self.PageConnections)
     self.ToggleLabels = {}
     self.SelectorEntries = {}
@@ -1242,7 +1269,7 @@ function UI:_ApplySearchFilter()
         if button then
             button.Visible = matches
             if matches then
-                button.Position = UDim2.fromOffset(0, top)
+                button.Position = UDim2.fromOffset(layout.SidebarNavInsetLeft, top)
                 top = top + layout.SidebarRowHeight + layout.SidebarRowGap
                 firstMatch = firstMatch or tabName
             end
@@ -1277,14 +1304,162 @@ function UI:_ActivateControl(control)
     return self.Dispatch(control.Action, true)
 end
 
+function UI:_CloseDropdown()
+    local dropdown = self.ActiveDropdown
+    if not dropdown then
+        return
+    end
+    self.ActiveDropdown = nil
+    for _, connection in ipairs(dropdown.Connections) do
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+    end
+    for _, instance in ipairs(dropdown.Instances) do
+        if instance and instance.Parent then
+            self:_CancelTweensIn(instance)
+            instance:Destroy()
+        end
+    end
+    local entry = dropdown.Entry
+    if entry and entry.Button and entry.Button.Parent then
+        entry.Button.Text = tostring(entry.SelectedValue or "Select")
+    end
+    if entry and entry.Arrow and entry.Arrow.Parent then
+        entry.Arrow.Text = "▼"
+    end
+end
+
+function UI:_OpenDropdown(entry)
+    self:_CloseDropdown()
+    local options = entry.Options or {}
+    if not self.Gui or not entry.Button or #options == 0 then
+        self.State:SetStatus("This selector has no available options.", "error")
+        return false
+    end
+
+    local layout = self.Config.Layout
+    local theme = self.Config.Theme
+    local viewport = self.Compatibility:GetViewportSize()
+    if typeof(viewport) ~= "Vector2" then
+        viewport = Vector2.new(390, 844)
+    end
+    local scale = self.RootScale and self.RootScale.Scale or 1
+    local optionHeight = math.max(22, layout.DropdownOptionHeight * scale)
+    local totalHeight = optionHeight * #options
+    local menuHeight = math.min(totalHeight, math.max(1, viewport.Y - 16))
+    local menuWidth = math.min(entry.Button.AbsoluteSize.X, math.max(1, viewport.X - 16))
+    local fieldPosition = entry.Button.AbsolutePosition
+    local top = fieldPosition.Y + entry.Button.AbsoluteSize.Y + 4
+    if top + menuHeight > viewport.Y - 8 then
+        top = fieldPosition.Y - menuHeight - 4
+    end
+    top = math.clamp(top, 8, math.max(8, viewport.Y - menuHeight - 8))
+    local left = math.clamp(
+        fieldPosition.X,
+        8,
+        math.max(8, viewport.X - menuWidth - 8)
+    )
+
+    local active = {
+        Entry = entry,
+        Connections = {},
+        Instances = {},
+    }
+    self.ActiveDropdown = active
+    if entry.Arrow then
+        entry.Arrow.Text = "▲"
+    end
+
+    local overlay = create("TextButton", {
+        Name = "DropdownDismissOverlay",
+        Position = UDim2.fromScale(0, 0),
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Selectable = false,
+        Text = "",
+        ZIndex = 50,
+    }, self.Gui)
+    table.insert(active.Instances, overlay)
+    table.insert(active.Connections, overlay.Activated:Connect(function()
+        self:_CloseDropdown()
+    end))
+
+    local menu = create("ScrollingFrame", {
+        Name = "DropdownMenu",
+        Position = UDim2.fromOffset(left, top),
+        Size = UDim2.fromOffset(menuWidth, menuHeight),
+        BackgroundColor3 = theme.Panel,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = theme.Accent,
+        CanvasSize = UDim2.fromOffset(0, totalHeight),
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ScrollingEnabled = totalHeight > menuHeight,
+        AutomaticCanvasSize = Enum.AutomaticSize.None,
+        ClipsDescendants = true,
+        Active = true,
+        ZIndex = 60,
+    }, self.Gui)
+    addCorner(menu, 4)
+    create("UIStroke", {
+        Color = theme.AccentBorder,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, menu)
+    table.insert(active.Instances, menu)
+
+    for index, value in ipairs(options) do
+        local selected = value == entry.SelectedValue
+        local optionButton = create("TextButton", {
+            Name = "DropdownOption_" .. tostring(value):gsub("[^%w]", "_"),
+            Position = UDim2.fromOffset(2, (index - 1) * optionHeight),
+            Size = UDim2.new(1, -4, 0, optionHeight),
+            BackgroundColor3 = selected and theme.Selected or theme.Panel,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            Font = theme.StrongFont,
+            Text = tostring(value),
+            TextColor3 = selected and theme.Accent or theme.Text,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 61,
+        }, menu)
+        addCorner(optionButton, 3)
+        self:_AttachButtonFeedback(optionButton, active.Connections, 0.97)
+        table.insert(active.Connections, optionButton.Activated:Connect(function()
+            self:_CloseDropdown()
+            local ok, result, actionError = pcall(self.Dispatch, entry.Control.Action, value)
+            if not ok then
+                self.State:SetStatus("UI action error: " .. tostring(result), "error")
+            elseif result == false and actionError then
+                self.State:SetStatus(tostring(actionError), "error")
+            end
+        end))
+    end
+    return true
+end
+
+function UI:_ToggleDropdown(entry)
+    if self.ActiveDropdown and self.ActiveDropdown.Entry == entry then
+        self:_CloseDropdown()
+        return
+    end
+    self:_OpenDropdown(entry)
+end
+
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
     local hasToggle = control.Kind == "featureToggle"
         or control.Kind == "settingToggle"
     local isSelector = control.Kind == "settingSelect"
+    local isDropdown = control.Kind == "settingDropdown"
     local reservedTitleSpace = hasToggle and (layout.ToggleValueWidth + layout.ToggleGap) or 0
-    local row = create(isSelector and "Frame" or "TextButton", {
+    local row = create((isSelector or isDropdown) and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
         Size = UDim2.new(1, 0, 0, layout.RowHeight),
         BackgroundColor3 = theme.Control,
@@ -1310,9 +1485,24 @@ function UI:_AddControl(control)
 
     local titleTop = isSelector and layout.SelectorTitleTop or layout.RowTitleTop
     local titleHeight = isSelector and layout.SelectorTitleHeight or layout.RowTitleHeight
-    local titleSize = isSelector
-        and UDim2.new(0, layout.SelectorTitleWidth, 0, titleHeight)
-        or UDim2.new(1, -layout.RowInset * 2 - reservedTitleSpace, 0, titleHeight)
+    local titleSize
+    if isSelector then
+        titleSize = UDim2.new(0, layout.SelectorTitleWidth, 0, titleHeight)
+    elseif isDropdown then
+        titleSize = UDim2.new(
+            1 - layout.DropdownWidthRatio,
+            -(layout.RowInset * 2 + layout.DropdownTitleGap),
+            0,
+            titleHeight
+        )
+    else
+        titleSize = UDim2.new(
+            1,
+            -layout.RowInset * 2 - reservedTitleSpace,
+            0,
+            titleHeight
+        )
+    end
     create("TextLabel", {
         Name = "Title",
         Position = UDim2.fromOffset(layout.RowInset, titleTop),
@@ -1425,6 +1615,71 @@ function UI:_AddControl(control)
             Setting = control.Setting,
             Options = optionEntries,
         })
+    elseif isDropdown then
+        rowStroke.Transparency = 0.15
+        local options = control.Options or {}
+        local farmSettings = self.Config.FarmSettings or {}
+        local selectedValue = farmSettings[control.Setting] or options[1]
+        local dropdownButton = create("TextButton", {
+            Name = "DropdownValue",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -layout.RowInset, 0.5, 0),
+            Size = UDim2.new(
+                layout.DropdownWidthRatio,
+                -layout.RowInset,
+                0,
+                layout.DropdownHeight
+            ),
+            BackgroundColor3 = theme.TabBar,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            Font = theme.StrongFont,
+            Text = tostring(selectedValue or "Select"),
+            TextColor3 = theme.Text,
+            TextSize = 10,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, row)
+        addCorner(dropdownButton, 3)
+        create("UIPadding", {
+            PaddingLeft = UDim.new(0, 8),
+            PaddingRight = UDim.new(0, 24),
+        }, dropdownButton)
+        local arrow = create("TextLabel", {
+            Name = "DropdownArrow",
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -5, 0, 0),
+            Size = UDim2.new(0, 18, 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = "▼",
+            TextColor3 = theme.MutedText,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+        }, dropdownButton)
+        self:_AttachButtonFeedback(dropdownButton, self.PageConnections, 0.97)
+        create("UIStroke", {
+            Color = theme.Border,
+            Thickness = layout.BorderThickness,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        }, dropdownButton)
+        local entry = {
+            Kind = "dropdown",
+            Setting = control.Setting,
+            Options = options,
+            Button = dropdownButton,
+            Arrow = arrow,
+            Control = control,
+            SelectedValue = selectedValue,
+        }
+        table.insert(self.SelectorEntries, entry)
+        self:_Connect(self.PageConnections, dropdownButton.Activated, function()
+            local ok, actionError = pcall(self._ToggleDropdown, self, entry)
+            if not ok then
+                self.State:SetStatus("UI action error: " .. tostring(actionError), "error")
+            end
+        end)
     else
         self:_Connect(self.PageConnections, row.Activated, function()
             local ok, actionError = pcall(self._ActivateControl, self, control)
@@ -1934,8 +2189,8 @@ function UI:Mount()
     for _, tabName in ipairs(self.Config.Tabs) do
         local button = create("TextButton", {
             Name = "Tab_" .. tabName,
-            Position = UDim2.fromOffset(0, navTop),
-            Size = UDim2.new(1, -2, 0, layout.SidebarRowHeight),
+            Position = UDim2.fromOffset(layout.SidebarNavInsetLeft, navTop),
+            Size = UDim2.new(1, -layout.SidebarNavInsetLeft * 2, 0, layout.SidebarRowHeight),
             BackgroundColor3 = theme.Selected,
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
@@ -2100,6 +2355,7 @@ function UI:Mount()
 end
 
 function UI:Destroy()
+    self:_CloseDropdown()
     if self.StateConnection then
         self.StateConnection:Disconnect()
         self.StateConnection = nil
@@ -2140,6 +2396,7 @@ function UI:Destroy()
     self.TabMarkers = {}
     self.ToggleLabels = {}
     self.SelectorEntries = {}
+    self.ActiveDropdown = nil
     self.PressedButtonScale = nil
     self.PressedButtonInput = nil
     self.Scroll = nil
