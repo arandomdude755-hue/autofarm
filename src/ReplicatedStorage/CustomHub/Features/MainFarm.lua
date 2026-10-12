@@ -6,6 +6,9 @@ local CombatService = require(script.Parent.Farm.CombatService)
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
 local MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH = 1400
+local QUEST_CONFIRMATION_TIMEOUT = 8
+local QUEST_START_RETRY_INTERVAL = 2
+local MAX_QUEST_START_ATTEMPTS = 3
 local NPC_SCAN_INTERVAL = 0.35
 local SPAWN_SCAN_INTERVAL = 0.5
 local SPAWN_LOAD_GRACE = 1
@@ -186,7 +189,8 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
             "===== [QuestDiagnostic] REPORT BEGIN =====",
             "Candidate: quest=" .. tostring(report.CandidateQuestName)
                 .. " id=" .. tostring(report.CandidateQuestId),
-            "StartQuest: pcall_succeeded=" .. pcallOutcome,
+            "StartQuest: pcall_succeeded=" .. pcallOutcome
+                .. " attempts=" .. tostring(report.AttemptCount or 0),
             "Result: type=" .. tostring(report.ResultType)
                 .. " summary=" .. tostring(report.ResultSummary),
             questDataSummary("QuestData after request", report.PostRequestQuestData),
@@ -245,6 +249,8 @@ function MainFarm:_PrintSpawnDiagnosticReport(report)
         local lines = {
             "===== [SpawnDiagnostic] REPORT BEGIN =====",
             "Target NPC: " .. diagnosticScalar(report.TargetName),
+            "EnemySpawns container found: "
+                .. tostring(report.EnemySpawnsContainerFound == true),
             "Normal EnemySpawns marker: " .. tostring(report.NormalMarkerFound == true),
             "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
                 .. " (discovery_available="
@@ -421,36 +427,58 @@ function MainFarm:_RequestQuest(candidate, session)
         )
         return
     end
-    if self.LastQuestAttemptKey == key then
-        local elapsed = now - (self.LastQuestAttemptAt or 0)
-        if elapsed < 8 then
-            self:_SetStatus(
-                "Waiting for active quest confirmation; "
-                    .. boundedReason(self.LastQuestStateReason),
-                "warning"
-            )
-            return
-        end
+    local isNewCandidate = self.LastQuestAttemptKey ~= key
+    if isNewCandidate then
+        self.LastQuestAttemptKey = key
+        self.LastQuestAttemptAt = 0
+        self.QuestStartAttemptCount = 0
+        self.QuestDiagnosticWaitKey = key
+        self.QuestDiagnosticWaitStartedAt = now
+        self.QuestDiagnosticReport = {
+            CandidateQuestName = diagnosticScalar(candidate.QuestName),
+            CandidateQuestId = diagnosticScalar(candidate.Id),
+            RequestStage = "pcall_not_reached",
+            PcallSucceeded = nil,
+            ResultType = "n/a",
+            ResultSummary = "not returned",
+            AttemptCount = 0,
+        }
+        self.PendingQuestTargetName = candidate.Mob
+    end
+
+    local confirmationStartedAt = self.QuestDiagnosticWaitStartedAt or now
+    if now - confirmationStartedAt >= QUEST_CONFIRMATION_TIMEOUT then
         self:_TimeoutQuestConfirmation(key, now)
         return
     end
 
-    self.LastQuestAttemptKey = key
+    local attempts = self.QuestStartAttemptCount or 0
+    if attempts >= MAX_QUEST_START_ATTEMPTS then
+        self:_SetStatus(
+            "Waiting for active quest confirmation; "
+                .. boundedReason(self.LastQuestStateReason),
+            "warning"
+        )
+        return
+    end
+    if attempts > 0 and now - (self.LastQuestAttemptAt or 0) < QUEST_START_RETRY_INTERVAL then
+        self:_SetStatus(
+            "Waiting for active quest confirmation; "
+                .. boundedReason(self.LastQuestStateReason),
+            "warning"
+        )
+        return
+    end
+
     self.LastQuestAttemptAt = now
-    self.QuestDiagnosticWaitKey = key
-    self.QuestDiagnosticWaitStartedAt = now
-    self.QuestDiagnosticReport = {
-        CandidateQuestName = diagnosticScalar(candidate.QuestName),
-        CandidateQuestId = diagnosticScalar(candidate.Id),
-        RequestStage = "pcall_not_reached",
-        PcallSucceeded = nil,
-        ResultType = "n/a",
-        ResultSummary = "not returned",
-    }
+    self.QuestStartAttemptCount = attempts + 1
+    self.QuestDiagnosticReport.AttemptCount = self.QuestStartAttemptCount
     self.PendingQuestTargetName = candidate.Mob
     self:_SetStatus(
         "Requesting quest: " .. tostring(candidate.QuestName) .. " (ID "
-            .. tostring(candidate.Id) .. ")",
+            .. tostring(candidate.Id) .. ", attempt "
+            .. tostring(self.QuestStartAttemptCount) .. "/" .. tostring(MAX_QUEST_START_ATTEMPTS)
+            .. ")",
         "info"
     )
     local requested = self.QuestService:RequestStart(candidate)
@@ -476,6 +504,8 @@ function MainFarm:_RequestQuest(candidate, session)
             self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
             self.TimedOutQuestKey = nil
             self.LastQuestAttemptKey = nil
+            self.LastQuestAttemptAt = 0
+            self.QuestStartAttemptCount = 0
             self.PendingQuestTargetName = nil
             self.PendingQuestKey = nil
             self.PendingQuestReachedAt = nil
@@ -485,6 +515,9 @@ function MainFarm:_RequestQuest(candidate, session)
             )
         else
             self:_EndQuestDiagnosticWait("active_state_target_mismatch", os.clock())
+            self.LastQuestAttemptKey = nil
+            self.LastQuestAttemptAt = 0
+            self.QuestStartAttemptCount = 0
             self.PendingQuestTargetName = nil
             self.PendingQuestKey = nil
             self.PendingQuestReachedAt = nil
@@ -551,6 +584,8 @@ function MainFarm:_Step(session)
                 self:_EndQuestDiagnosticWait("active_state_observed", now)
                 self.TimedOutQuestKey = nil
                 self.LastQuestAttemptKey = nil
+                self.LastQuestAttemptAt = 0
+                self.QuestStartAttemptCount = 0
                 self.PendingQuestTargetName = nil
                 self.PendingQuestKey = nil
                 self.PendingQuestReachedAt = nil
@@ -560,6 +595,9 @@ function MainFarm:_Step(session)
                 )
             else
                 self:_EndQuestDiagnosticWait("active_state_target_mismatch", now)
+                self.LastQuestAttemptKey = nil
+                self.LastQuestAttemptAt = 0
+                self.QuestStartAttemptCount = 0
                 self.PendingQuestTargetName = nil
                 self.PendingQuestKey = nil
                 self.PendingQuestReachedAt = nil
@@ -568,7 +606,7 @@ function MainFarm:_Step(session)
                     "warning"
                 )
             end
-        elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= 8 then
+        elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= QUEST_CONFIRMATION_TIMEOUT then
             self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
             self:_TimeoutQuestConfirmation(self.QuestDiagnosticWaitKey, now)
         end
@@ -580,6 +618,8 @@ function MainFarm:_Step(session)
         self.TimedOutQuestKey = nil
         self.QuestTimeoutReason = nil
         self.LastQuestAttemptKey = nil
+        self.LastQuestAttemptAt = 0
+        self.QuestStartAttemptCount = 0
         self.PendingQuestTargetName = nil
         self.PendingQuestKey = nil
         self.PendingQuestReachedAt = nil
@@ -899,6 +939,7 @@ function MainFarm:Initialize(context)
     self.CombatDependencyError = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.QuestStartAttemptCount = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.PendingQuestTargetName = nil
@@ -1006,6 +1047,7 @@ function MainFarm:Stop()
     self.PendingQuestTargetName = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.QuestStartAttemptCount = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.LastQuestStateReason = nil

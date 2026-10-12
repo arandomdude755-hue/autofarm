@@ -4,12 +4,84 @@ EnemyService.__index = EnemyService
 local HIDDEN_SPAWN_REFRESH_INTERVAL = 1
 local HIDDEN_SPAWN_RETRY_INTERVAL = 5
 
-local function normalizeEnemyName(name)
-    return (name:gsub(" %p?Lv%.? %d+%p?", ""))
+local function singularizeEnemyWord(word)
+    if #word > 3 and word:sub(-3) == "ies" then
+        local stem = word:sub(1, -4)
+        local lastStemCharacter = stem:sub(-1)
+        if lastStemCharacter ~= "" and not lastStemCharacter:match("[aeiou]") then
+            return stem .. "y"
+        end
+    end
+
+    if #word > 4 and word:sub(-2) == "es" then
+        local stem = word:sub(1, -3)
+        if stem:sub(-1) == "s" or stem:sub(-1) == "x" or stem:sub(-1) == "z"
+            or stem:sub(-2) == "ch" or stem:sub(-2) == "sh"
+        then
+            return stem
+        end
+    end
+
+    local ending = word:sub(-2)
+    if #word > 2 and word:sub(-1) == "s"
+        and ending ~= "ss" and ending ~= "us" and ending ~= "is"
+    then
+        return word:sub(1, -2)
+    end
+    return word
 end
 
-local function matchesSpawnName(spawnName, targetName, normalizedTarget)
-    return spawnName == targetName or normalizeEnemyName(spawnName) == normalizedTarget
+local function normalizeEnemyName(name)
+    if type(name) ~= "string" or #name == 0 then
+        return nil
+    end
+
+    local baseName = name:lower():gsub("%s+%p?lv%.?%s*%d+%p?%s*$", "")
+    local words = {}
+    for word in baseName:gmatch("[%w]+") do
+        table.insert(words, word)
+    end
+    if #words == 0 then
+        return nil
+    end
+
+    words[#words] = singularizeEnemyWord(words[#words])
+    return table.concat(words, " ")
+end
+
+local function matchesEnemyName(enemyName, targetName)
+    local normalizedEnemyName = normalizeEnemyName(enemyName)
+    if not normalizedEnemyName then
+        return false
+    end
+
+    if type(targetName) == "string" then
+        return normalizedEnemyName == normalizeEnemyName(targetName)
+    end
+    if type(targetName) == "table" then
+        for _, candidateName in ipairs(targetName) do
+            if type(candidateName) == "string"
+                and normalizedEnemyName == normalizeEnemyName(candidateName)
+            then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function isDescendantOf(instance, container)
+    if not instance or not container then
+        return false
+    end
+    local ok, result = pcall(function()
+        return instance:IsDescendantOf(container)
+    end)
+    return ok and result == true
+end
+
+local function matchesSpawnName(spawnName, normalizedTarget)
+    return normalizedTarget ~= nil and normalizeEnemyName(spawnName) == normalizedTarget
 end
 
 function EnemyService.new(compatibility)
@@ -24,16 +96,19 @@ end
 
 function EnemyService:_GetEnemySpawnsFolder()
     local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
-    if not worldOrigin or worldOrigin.Parent ~= self.Workspace then
-        return nil
+    if not worldOrigin then
+        worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin", true)
+    end
+    if not worldOrigin then
+        return self.Workspace:FindFirstChild("EnemySpawns", true)
     end
 
     local enemySpawns = worldOrigin:FindFirstChild("EnemySpawns")
-    if not enemySpawns
-        or not enemySpawns:IsA("Folder")
-        or enemySpawns.Parent ~= worldOrigin
-    then
-        return nil
+    if not enemySpawns then
+        enemySpawns = worldOrigin:FindFirstChild("EnemySpawns", true)
+    end
+    if not enemySpawns then
+        enemySpawns = self.Workspace:FindFirstChild("EnemySpawns", true)
     end
     return enemySpawns
 end
@@ -87,10 +162,11 @@ function EnemyService:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
         local matchingName = readOk
             and isBasePart
             and type(name) == "string"
-            and matchesSpawnName(name, targetName, normalizedTarget)
+            and matchesSpawnName(name, normalizedTarget)
         local replicated = matchingName
             and enemySpawns ~= nil
-            and parent == enemySpawns
+            and parent ~= nil
+            and isDescendantOf(spawnPart, enemySpawns)
         local hidden = matchingName
             and parent == nil
             and hiddenCache.Available
@@ -112,16 +188,19 @@ end
 
 function EnemyService:FindNearest(targetName, origin)
     local enemies = self.Workspace:FindFirstChild("Enemies")
+    if not enemies then
+        enemies = self.Workspace:FindFirstChild("Enemies", true)
+    end
     if not enemies or not targetName or not origin then
         return nil
     end
 
     local nearest, nearestDistance = nil, math.huge
-    for _, enemy in ipairs(enemies:GetChildren()) do
-        local matches = type(targetName) == "table"
-            and table.find(targetName, enemy.Name) ~= nil
-            or enemy.Name == targetName
-        if matches and self:IsAlive(enemy) then
+    for _, enemy in ipairs(enemies:GetDescendants()) do
+        if enemy:IsA("Model")
+            and matchesEnemyName(enemy.Name, targetName)
+            and self:IsAlive(enemy)
+        then
             local distance = (enemy.HumanoidRootPart.Position - origin).Magnitude
             if distance < nearestDistance then
                 nearest, nearestDistance = enemy, distance
@@ -134,6 +213,7 @@ end
 function EnemyService:FindSpawn(targetName, origin)
     local diagnostic = {
         TargetName = targetName,
+        EnemySpawnsContainerFound = false,
         NormalMarkerFound = false,
         HiddenMarkerFound = false,
         HiddenDiscoveryAvailable = false,
@@ -147,6 +227,7 @@ function EnemyService:FindSpawn(targetName, origin)
 
     local enemySpawns = self:_GetEnemySpawnsFolder()
     local hiddenCache = self:_RefreshHiddenSpawnCache()
+    diagnostic.EnemySpawnsContainerFound = enemySpawns ~= nil
     diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
     local normalizedTarget = normalizeEnemyName(targetName)
     self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
@@ -157,12 +238,16 @@ function EnemyService:FindSpawn(targetName, origin)
         local readOk, isBasePart, name, parent, position = pcall(function()
             return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent, spawnPart.Position
         end)
+        local inExpectedContainer = source == "EnemySpawns"
+            and isDescendantOf(spawnPart, expectedParent)
+        local inHiddenCache = source == "unparented-cache" and parent == nil
         if not readOk
             or not isBasePart
-            or parent ~= expectedParent
+            or (source == "EnemySpawns" and not inExpectedContainer)
+            or (source == "unparented-cache" and not inHiddenCache)
             or type(name) ~= "string"
             or (expectedName and name ~= expectedName)
-            or not matchesSpawnName(name, targetName, normalizedTarget)
+            or not matchesSpawnName(name, normalizedTarget)
         then
             return
         end
@@ -189,7 +274,7 @@ function EnemyService:FindSpawn(targetName, origin)
 
     if enemySpawns then
         local childrenOk, children = pcall(function()
-            return enemySpawns:GetChildren()
+            return enemySpawns:GetDescendants()
         end)
         if childrenOk then
             for _, spawnPart in ipairs(children) do
@@ -202,7 +287,7 @@ function EnemyService:FindSpawn(targetName, origin)
     -- potentially expensive runtime enumeration no more than once per cache interval.
     if hiddenCache.Available and os.clock() < hiddenCache.ExpiresAt then
         for spawnPart, cachedName in pairs(hiddenCache.Parts) do
-            if matchesSpawnName(cachedName, targetName, normalizedTarget) then
+            if matchesSpawnName(cachedName, normalizedTarget) then
                 considerSpawn(spawnPart, nil, cachedName, "unparented-cache")
             end
         end
@@ -230,12 +315,12 @@ function EnemyService:IsSpawnAvailable(spawnPart, targetName)
     end
 
     local normalizedTarget = normalizeEnemyName(targetName)
-    if not matchesSpawnName(name, targetName, normalizedTarget) then
+    if not matchesSpawnName(name, normalizedTarget) then
         return false
     end
 
     local enemySpawns = self:_GetEnemySpawnsFolder()
-    if enemySpawns ~= nil and parent == enemySpawns then
+    if enemySpawns ~= nil and parent ~= nil and isDescendantOf(spawnPart, enemySpawns) then
         return true
     end
 

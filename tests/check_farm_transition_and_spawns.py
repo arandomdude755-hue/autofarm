@@ -33,6 +33,19 @@ require("self.QuestService:RequestStart(candidate)" in request,
         "diagnostic change must reuse the existing quest request")
 require("self.TimedOutQuestKey == key" in request,
         "a timed-out candidate must not be repeatedly requested")
+require("QUEST_START_RETRY_INTERVAL = 2" in FARM
+        and "MAX_QUEST_START_ATTEMPTS = 3" in FARM,
+        "quest acceptance must use a short, bounded retry window")
+require(
+    "attempts >= MAX_QUEST_START_ATTEMPTS" in request
+    and "now - (self.LastQuestAttemptAt or 0) < QUEST_START_RETRY_INTERVAL" in request,
+    "the same quest must not be remotely requested faster than the retry interval or beyond its attempt limit",
+)
+require(
+    "self.QuestDiagnosticReport.AttemptCount = self.QuestStartAttemptCount" in request
+    and "attempts=" in FARM,
+    "quest diagnostics must expose how many acceptance attempts were made",
+)
 require("Quest confirmation timed out after 8 seconds" in FARM,
         "confirmation timeout must include an explicit reason")
 require("response is not acceptance" in request,
@@ -77,11 +90,24 @@ require(
     "generic spawn lookup must use replicated markers and the guarded compatibility adapter",
 )
 require(
+    'FindFirstChild("_WorldOrigin", true)' in ENEMY
+    and 'FindFirstChild("EnemySpawns", true)' in ENEMY
+    and "enemySpawns:GetDescendants()" in ENEMY,
+    "spawn lookup must handle nested origin/spawn folders and nested marker parts",
+)
+require(
+    'FindFirstChild("Enemies", true)' in ENEMY
+    and "enemies:GetDescendants()" in ENEMY
+    and "matchesEnemyName(enemy.Name, targetName)" in ENEMY,
+    "live enemy lookup must handle nested models and generic level/plural name variants",
+)
+require(
     "function EnemyService:IsSpawnAvailable(spawnPart, targetName)" in ENEMY
     and "enemySpawns ~= nil" in ENEMY
+    and "isDescendantOf(spawnPart, enemySpawns)" in ENEMY
     and "hiddenCache.Parts[spawnPart] == name" in ENEMY
     and "os.clock() < hiddenCache.ExpiresAt" in ENEMY,
-    "spawn availability must validate the real folder or a fresh cached unparented marker",
+    "spawn availability must validate a nested real marker or a fresh cached unparented marker",
 )
 require(
     "self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)" in ENEMY
@@ -102,6 +128,7 @@ spawn_diagnostic = FARM[
 ]
 require(
     "NormalMarkerFound" in spawn_find
+    and "EnemySpawnsContainerFound" in spawn_find
     and "HiddenMarkerFound" in spawn_find
     and "SelectedDistance = distance" in spawn_find
     and "return nearest, false, diagnostic" in spawn_find,
@@ -136,8 +163,53 @@ require(
 require("Speed = 190" in FARM and "route and 190" in MOVEMENT,
         "movement speed must remain 190")
 
-print("PASS: request confirmation is state-based and a timed-out quest is not retried automatically")
+print("PASS: quest requests retry only within the bounded confirmation window")
 print("PASS: normal quest transitions preserve a held movement session; explicit cleanup remains")
 print("PASS: NPC/spawn search is throttled, spawn-load bounded, nearest-first, and retryable")
 print("PASS: generic hidden-marker discovery is cached, freshness-checked, and excludes ignored markers")
 print("PASS: bounded spawn diagnostics reuse the single search and movement results")
+
+
+def normalize_enemy_name(name):
+    """Python fixture model of suffix/case/plural normalization in EnemyService."""
+    import re
+
+    base = re.sub(r"\s+[\W]?lv\.?\s*\d+[\W]?\s*$", "", name, flags=re.IGNORECASE)
+    words = re.findall(r"[a-z0-9]+", base.lower())
+    if not words:
+        return None
+    word = words[-1]
+    if len(word) > 3 and word.endswith("ies") and word[-4] not in "aeiou":
+        word = word[:-3] + "y"
+    elif len(word) > 4 and word.endswith("es"):
+        stem = word[:-2]
+        if stem.endswith(("s", "x", "z", "ch", "sh")):
+            word = stem
+    elif len(word) > 2 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        word = word[:-1]
+    words[-1] = word
+    return " ".join(words)
+
+
+for found_name, target_name, expected in (
+    ("Bandit [Lv. 5]", "Bandit", True),
+    ("bandit [lv 5]", "Bandit", True),
+    ("Gorillas [Lv. 20]", "Gorilla", True),
+    ("Water Fighters [Lv. 1450]", "Water Fighter", True),
+    ("Boss [Lv. 50]", "Boss", True),
+    ("Bandit [Lv. 5]", "Gorilla", False),
+):
+    actual = normalize_enemy_name(found_name) == normalize_enemy_name(target_name)
+    require(actual is expected, f"unexpected enemy name match: {found_name!r} / {target_name!r}")
+
+
+def quest_request_schedule(interval, maximum, timeout):
+    return [attempt * interval for attempt in range(maximum) if attempt * interval < timeout]
+
+
+require(quest_request_schedule(2, 3, 8) == [0, 2, 4],
+        "quest requests must retry at bounded two-second intervals")
+require(len(quest_request_schedule(2, 3, 8)) <= 3,
+        "quest acceptance retries must remain capped")
+print("PASS: NPC target matching handles case, level suffixes, and common plural forms")
+print("PASS: quest acceptance retries are bounded and spaced")

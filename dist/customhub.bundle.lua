@@ -2447,12 +2447,84 @@ EnemyService.__index = EnemyService
 local HIDDEN_SPAWN_REFRESH_INTERVAL = 1
 local HIDDEN_SPAWN_RETRY_INTERVAL = 5
 
-local function normalizeEnemyName(name)
-    return (name:gsub(" %p?Lv%.? %d+%p?", ""))
+local function singularizeEnemyWord(word)
+    if #word > 3 and word:sub(-3) == "ies" then
+        local stem = word:sub(1, -4)
+        local lastStemCharacter = stem:sub(-1)
+        if lastStemCharacter ~= "" and not lastStemCharacter:match("[aeiou]") then
+            return stem .. "y"
+        end
+    end
+
+    if #word > 4 and word:sub(-2) == "es" then
+        local stem = word:sub(1, -3)
+        if stem:sub(-1) == "s" or stem:sub(-1) == "x" or stem:sub(-1) == "z"
+            or stem:sub(-2) == "ch" or stem:sub(-2) == "sh"
+        then
+            return stem
+        end
+    end
+
+    local ending = word:sub(-2)
+    if #word > 2 and word:sub(-1) == "s"
+        and ending ~= "ss" and ending ~= "us" and ending ~= "is"
+    then
+        return word:sub(1, -2)
+    end
+    return word
 end
 
-local function matchesSpawnName(spawnName, targetName, normalizedTarget)
-    return spawnName == targetName or normalizeEnemyName(spawnName) == normalizedTarget
+local function normalizeEnemyName(name)
+    if type(name) ~= "string" or #name == 0 then
+        return nil
+    end
+
+    local baseName = name:lower():gsub("%s+%p?lv%.?%s*%d+%p?%s*$", "")
+    local words = {}
+    for word in baseName:gmatch("[%w]+") do
+        table.insert(words, word)
+    end
+    if #words == 0 then
+        return nil
+    end
+
+    words[#words] = singularizeEnemyWord(words[#words])
+    return table.concat(words, " ")
+end
+
+local function matchesEnemyName(enemyName, targetName)
+    local normalizedEnemyName = normalizeEnemyName(enemyName)
+    if not normalizedEnemyName then
+        return false
+    end
+
+    if type(targetName) == "string" then
+        return normalizedEnemyName == normalizeEnemyName(targetName)
+    end
+    if type(targetName) == "table" then
+        for _, candidateName in ipairs(targetName) do
+            if type(candidateName) == "string"
+                and normalizedEnemyName == normalizeEnemyName(candidateName)
+            then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function isDescendantOf(instance, container)
+    if not instance or not container then
+        return false
+    end
+    local ok, result = pcall(function()
+        return instance:IsDescendantOf(container)
+    end)
+    return ok and result == true
+end
+
+local function matchesSpawnName(spawnName, normalizedTarget)
+    return normalizedTarget ~= nil and normalizeEnemyName(spawnName) == normalizedTarget
 end
 
 function EnemyService.new(compatibility)
@@ -2467,16 +2539,19 @@ end
 
 function EnemyService:_GetEnemySpawnsFolder()
     local worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin")
-    if not worldOrigin or worldOrigin.Parent ~= self.Workspace then
-        return nil
+    if not worldOrigin then
+        worldOrigin = self.Workspace:FindFirstChild("_WorldOrigin", true)
+    end
+    if not worldOrigin then
+        return self.Workspace:FindFirstChild("EnemySpawns", true)
     end
 
     local enemySpawns = worldOrigin:FindFirstChild("EnemySpawns")
-    if not enemySpawns
-        or not enemySpawns:IsA("Folder")
-        or enemySpawns.Parent ~= worldOrigin
-    then
-        return nil
+    if not enemySpawns then
+        enemySpawns = worldOrigin:FindFirstChild("EnemySpawns", true)
+    end
+    if not enemySpawns then
+        enemySpawns = self.Workspace:FindFirstChild("EnemySpawns", true)
     end
     return enemySpawns
 end
@@ -2530,10 +2605,11 @@ function EnemyService:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
         local matchingName = readOk
             and isBasePart
             and type(name) == "string"
-            and matchesSpawnName(name, targetName, normalizedTarget)
+            and matchesSpawnName(name, normalizedTarget)
         local replicated = matchingName
             and enemySpawns ~= nil
-            and parent == enemySpawns
+            and parent ~= nil
+            and isDescendantOf(spawnPart, enemySpawns)
         local hidden = matchingName
             and parent == nil
             and hiddenCache.Available
@@ -2555,16 +2631,19 @@ end
 
 function EnemyService:FindNearest(targetName, origin)
     local enemies = self.Workspace:FindFirstChild("Enemies")
+    if not enemies then
+        enemies = self.Workspace:FindFirstChild("Enemies", true)
+    end
     if not enemies or not targetName or not origin then
         return nil
     end
 
     local nearest, nearestDistance = nil, math.huge
-    for _, enemy in ipairs(enemies:GetChildren()) do
-        local matches = type(targetName) == "table"
-            and table.find(targetName, enemy.Name) ~= nil
-            or enemy.Name == targetName
-        if matches and self:IsAlive(enemy) then
+    for _, enemy in ipairs(enemies:GetDescendants()) do
+        if enemy:IsA("Model")
+            and matchesEnemyName(enemy.Name, targetName)
+            and self:IsAlive(enemy)
+        then
             local distance = (enemy.HumanoidRootPart.Position - origin).Magnitude
             if distance < nearestDistance then
                 nearest, nearestDistance = enemy, distance
@@ -2577,6 +2656,7 @@ end
 function EnemyService:FindSpawn(targetName, origin)
     local diagnostic = {
         TargetName = targetName,
+        EnemySpawnsContainerFound = false,
         NormalMarkerFound = false,
         HiddenMarkerFound = false,
         HiddenDiscoveryAvailable = false,
@@ -2590,6 +2670,7 @@ function EnemyService:FindSpawn(targetName, origin)
 
     local enemySpawns = self:_GetEnemySpawnsFolder()
     local hiddenCache = self:_RefreshHiddenSpawnCache()
+    diagnostic.EnemySpawnsContainerFound = enemySpawns ~= nil
     diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
     local normalizedTarget = normalizeEnemyName(targetName)
     self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
@@ -2600,12 +2681,16 @@ function EnemyService:FindSpawn(targetName, origin)
         local readOk, isBasePart, name, parent, position = pcall(function()
             return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent, spawnPart.Position
         end)
+        local inExpectedContainer = source == "EnemySpawns"
+            and isDescendantOf(spawnPart, expectedParent)
+        local inHiddenCache = source == "unparented-cache" and parent == nil
         if not readOk
             or not isBasePart
-            or parent ~= expectedParent
+            or (source == "EnemySpawns" and not inExpectedContainer)
+            or (source == "unparented-cache" and not inHiddenCache)
             or type(name) ~= "string"
             or (expectedName and name ~= expectedName)
-            or not matchesSpawnName(name, targetName, normalizedTarget)
+            or not matchesSpawnName(name, normalizedTarget)
         then
             return
         end
@@ -2632,7 +2717,7 @@ function EnemyService:FindSpawn(targetName, origin)
 
     if enemySpawns then
         local childrenOk, children = pcall(function()
-            return enemySpawns:GetChildren()
+            return enemySpawns:GetDescendants()
         end)
         if childrenOk then
             for _, spawnPart in ipairs(children) do
@@ -2645,7 +2730,7 @@ function EnemyService:FindSpawn(targetName, origin)
     -- potentially expensive runtime enumeration no more than once per cache interval.
     if hiddenCache.Available and os.clock() < hiddenCache.ExpiresAt then
         for spawnPart, cachedName in pairs(hiddenCache.Parts) do
-            if matchesSpawnName(cachedName, targetName, normalizedTarget) then
+            if matchesSpawnName(cachedName, normalizedTarget) then
                 considerSpawn(spawnPart, nil, cachedName, "unparented-cache")
             end
         end
@@ -2673,12 +2758,12 @@ function EnemyService:IsSpawnAvailable(spawnPart, targetName)
     end
 
     local normalizedTarget = normalizeEnemyName(targetName)
-    if not matchesSpawnName(name, targetName, normalizedTarget) then
+    if not matchesSpawnName(name, normalizedTarget) then
         return false
     end
 
     local enemySpawns = self:_GetEnemySpawnsFolder()
-    if enemySpawns ~= nil and parent == enemySpawns then
+    if enemySpawns ~= nil and parent ~= nil and isDescendantOf(spawnPart, enemySpawns) then
         return true
     end
 
@@ -3472,6 +3557,9 @@ local CombatService = __bundleLoad("CustomHub.Features.Farm.CombatService")
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
 local MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH = 1400
+local QUEST_CONFIRMATION_TIMEOUT = 8
+local QUEST_START_RETRY_INTERVAL = 2
+local MAX_QUEST_START_ATTEMPTS = 3
 local NPC_SCAN_INTERVAL = 0.35
 local SPAWN_SCAN_INTERVAL = 0.5
 local SPAWN_LOAD_GRACE = 1
@@ -3652,7 +3740,8 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
             "===== [QuestDiagnostic] REPORT BEGIN =====",
             "Candidate: quest=" .. tostring(report.CandidateQuestName)
                 .. " id=" .. tostring(report.CandidateQuestId),
-            "StartQuest: pcall_succeeded=" .. pcallOutcome,
+            "StartQuest: pcall_succeeded=" .. pcallOutcome
+                .. " attempts=" .. tostring(report.AttemptCount or 0),
             "Result: type=" .. tostring(report.ResultType)
                 .. " summary=" .. tostring(report.ResultSummary),
             questDataSummary("QuestData after request", report.PostRequestQuestData),
@@ -3711,6 +3800,8 @@ function MainFarm:_PrintSpawnDiagnosticReport(report)
         local lines = {
             "===== [SpawnDiagnostic] REPORT BEGIN =====",
             "Target NPC: " .. diagnosticScalar(report.TargetName),
+            "EnemySpawns container found: "
+                .. tostring(report.EnemySpawnsContainerFound == true),
             "Normal EnemySpawns marker: " .. tostring(report.NormalMarkerFound == true),
             "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
                 .. " (discovery_available="
@@ -3887,36 +3978,58 @@ function MainFarm:_RequestQuest(candidate, session)
         )
         return
     end
-    if self.LastQuestAttemptKey == key then
-        local elapsed = now - (self.LastQuestAttemptAt or 0)
-        if elapsed < 8 then
-            self:_SetStatus(
-                "Waiting for active quest confirmation; "
-                    .. boundedReason(self.LastQuestStateReason),
-                "warning"
-            )
-            return
-        end
+    local isNewCandidate = self.LastQuestAttemptKey ~= key
+    if isNewCandidate then
+        self.LastQuestAttemptKey = key
+        self.LastQuestAttemptAt = 0
+        self.QuestStartAttemptCount = 0
+        self.QuestDiagnosticWaitKey = key
+        self.QuestDiagnosticWaitStartedAt = now
+        self.QuestDiagnosticReport = {
+            CandidateQuestName = diagnosticScalar(candidate.QuestName),
+            CandidateQuestId = diagnosticScalar(candidate.Id),
+            RequestStage = "pcall_not_reached",
+            PcallSucceeded = nil,
+            ResultType = "n/a",
+            ResultSummary = "not returned",
+            AttemptCount = 0,
+        }
+        self.PendingQuestTargetName = candidate.Mob
+    end
+
+    local confirmationStartedAt = self.QuestDiagnosticWaitStartedAt or now
+    if now - confirmationStartedAt >= QUEST_CONFIRMATION_TIMEOUT then
         self:_TimeoutQuestConfirmation(key, now)
         return
     end
 
-    self.LastQuestAttemptKey = key
+    local attempts = self.QuestStartAttemptCount or 0
+    if attempts >= MAX_QUEST_START_ATTEMPTS then
+        self:_SetStatus(
+            "Waiting for active quest confirmation; "
+                .. boundedReason(self.LastQuestStateReason),
+            "warning"
+        )
+        return
+    end
+    if attempts > 0 and now - (self.LastQuestAttemptAt or 0) < QUEST_START_RETRY_INTERVAL then
+        self:_SetStatus(
+            "Waiting for active quest confirmation; "
+                .. boundedReason(self.LastQuestStateReason),
+            "warning"
+        )
+        return
+    end
+
     self.LastQuestAttemptAt = now
-    self.QuestDiagnosticWaitKey = key
-    self.QuestDiagnosticWaitStartedAt = now
-    self.QuestDiagnosticReport = {
-        CandidateQuestName = diagnosticScalar(candidate.QuestName),
-        CandidateQuestId = diagnosticScalar(candidate.Id),
-        RequestStage = "pcall_not_reached",
-        PcallSucceeded = nil,
-        ResultType = "n/a",
-        ResultSummary = "not returned",
-    }
+    self.QuestStartAttemptCount = attempts + 1
+    self.QuestDiagnosticReport.AttemptCount = self.QuestStartAttemptCount
     self.PendingQuestTargetName = candidate.Mob
     self:_SetStatus(
         "Requesting quest: " .. tostring(candidate.QuestName) .. " (ID "
-            .. tostring(candidate.Id) .. ")",
+            .. tostring(candidate.Id) .. ", attempt "
+            .. tostring(self.QuestStartAttemptCount) .. "/" .. tostring(MAX_QUEST_START_ATTEMPTS)
+            .. ")",
         "info"
     )
     local requested = self.QuestService:RequestStart(candidate)
@@ -3942,6 +4055,8 @@ function MainFarm:_RequestQuest(candidate, session)
             self:_EndQuestDiagnosticWait("active_state_observed", os.clock())
             self.TimedOutQuestKey = nil
             self.LastQuestAttemptKey = nil
+            self.LastQuestAttemptAt = 0
+            self.QuestStartAttemptCount = 0
             self.PendingQuestTargetName = nil
             self.PendingQuestKey = nil
             self.PendingQuestReachedAt = nil
@@ -3951,6 +4066,9 @@ function MainFarm:_RequestQuest(candidate, session)
             )
         else
             self:_EndQuestDiagnosticWait("active_state_target_mismatch", os.clock())
+            self.LastQuestAttemptKey = nil
+            self.LastQuestAttemptAt = 0
+            self.QuestStartAttemptCount = 0
             self.PendingQuestTargetName = nil
             self.PendingQuestKey = nil
             self.PendingQuestReachedAt = nil
@@ -4017,6 +4135,8 @@ function MainFarm:_Step(session)
                 self:_EndQuestDiagnosticWait("active_state_observed", now)
                 self.TimedOutQuestKey = nil
                 self.LastQuestAttemptKey = nil
+                self.LastQuestAttemptAt = 0
+                self.QuestStartAttemptCount = 0
                 self.PendingQuestTargetName = nil
                 self.PendingQuestKey = nil
                 self.PendingQuestReachedAt = nil
@@ -4026,6 +4146,9 @@ function MainFarm:_Step(session)
                 )
             else
                 self:_EndQuestDiagnosticWait("active_state_target_mismatch", now)
+                self.LastQuestAttemptKey = nil
+                self.LastQuestAttemptAt = 0
+                self.QuestStartAttemptCount = 0
                 self.PendingQuestTargetName = nil
                 self.PendingQuestKey = nil
                 self.PendingQuestReachedAt = nil
@@ -4034,7 +4157,7 @@ function MainFarm:_Step(session)
                     "warning"
                 )
             end
-        elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= 8 then
+        elseif now - (self.QuestDiagnosticWaitStartedAt or now) >= QUEST_CONFIRMATION_TIMEOUT then
             self:_LogQuestDataSnapshot("confirmation_poll", questState, true, readerEvidence)
             self:_TimeoutQuestConfirmation(self.QuestDiagnosticWaitKey, now)
         end
@@ -4046,6 +4169,8 @@ function MainFarm:_Step(session)
         self.TimedOutQuestKey = nil
         self.QuestTimeoutReason = nil
         self.LastQuestAttemptKey = nil
+        self.LastQuestAttemptAt = 0
+        self.QuestStartAttemptCount = 0
         self.PendingQuestTargetName = nil
         self.PendingQuestKey = nil
         self.PendingQuestReachedAt = nil
@@ -4365,6 +4490,7 @@ function MainFarm:Initialize(context)
     self.CombatDependencyError = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.QuestStartAttemptCount = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.PendingQuestTargetName = nil
@@ -4472,6 +4598,7 @@ function MainFarm:Stop()
     self.PendingQuestTargetName = nil
     self.LastQuestAttemptKey = nil
     self.LastQuestAttemptAt = 0
+    self.QuestStartAttemptCount = 0
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.LastQuestStateReason = nil
