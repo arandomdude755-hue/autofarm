@@ -23,6 +23,7 @@ local TIKI_SKILL_HOLD_SECONDS = 0.5
 local FARM_SKILL_SCAN_INTERVAL = 0.4
 local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
+local MASTERY_M1_FALLBACK_INTERVAL = 0.5
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
@@ -815,6 +816,31 @@ function MainFarm:_GetMasteryCategory(target, farmSettings, allowMastery)
     return nil
 end
 
+function MainFarm:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)
+    local now = os.clock()
+    if now < (self.NextMasteryM1FallbackAt or 0) then
+        return false, "throttled"
+    end
+    self.NextMasteryM1FallbackAt = now + MASTERY_M1_FALLBACK_INTERVAL
+
+    local equipped, equipResult = self.CombatService:EquipWeapon(masteryCategory)
+    if not equipped then
+        return false, tostring(equipResult)
+    end
+    if masteryCategory == "Gun" then
+        return self.CombatService:AttackGunM1(target)
+    end
+    if masteryCategory == "Blox Fruit" then
+        return self.CombatService:AttackM1(
+            target,
+            30,
+            "Blox Fruit",
+            farmSettings and farmSettings.AttackNoAnimation == true
+        )
+    end
+    return false, "Unsupported mastery category"
+end
+
 function MainFarm:_TryStartFarmSkill(
     target,
     session,
@@ -841,15 +867,19 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillPreparing = nil
             return false
         end
+        local equipped, equipResult = self.CombatService:EquipWeapon(masteryCategory)
+        if not equipped then
+            self:_SetStatus(
+                "Mastery weapon waiting: " .. tostring(equipResult),
+                "warning"
+            )
+            return true
+        end
     end
     local skillCategory = masteryCategory or weaponCategory
     if not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory) then
         self.FarmSkillPreparing = nil
         return masteryCategory ~= nil
-    end
-    local gunM1Issued, gunM1Result
-    if masteryCategory == "Gun" then
-        gunM1Issued, gunM1Result = self.CombatService:AttackGunM1(target)
     end
     if masteryCategory == nil
         and (not farmSettings or farmSettings.UseFarmSkills ~= true)
@@ -861,6 +891,7 @@ function MainFarm:_TryStartFarmSkill(
     local now = os.clock()
     if now < (self.NextFarmSkillScanAt or 0) then
         if masteryCategory then
+            self:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)
             return true
         end
         return self.FarmSkillPreparing ~= nil
@@ -892,16 +923,35 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillPreparing = preparation
         end
         if now < preparation.Deadline then
-            self:_SetStatus("Preparing skill controls for " .. preparingTool.Name, "info")
+            if masteryCategory then
+                local issued, result = self:_TryMasteryM1Fallback(
+                    target,
+                    masteryCategory,
+                    farmSettings
+                )
+                self:_SetStatus(
+                    "Preparing " .. preparingTool.Name
+                        .. (issued and "; mastery M1 sent" or ""),
+                    issued and "success" or "info"
+                )
+            else
+                self:_SetStatus("Preparing skill controls for " .. preparingTool.Name, "info")
+            end
             return true
         end
         self.FarmSkillIgnoredTools[preparingTool.Name] = now + FARM_SKILL_UNAVAILABLE_RETRY
         self.FarmSkillPreparing = nil
         self.CombatService:EquipWeapon(masteryCategory or weaponCategory)
         if masteryCategory then
+            local issued, result = self:_TryMasteryM1Fallback(
+                target,
+                masteryCategory,
+                farmSettings
+            )
             self:_SetStatus(
-                "Mastery skill controls did not load for " .. preparingTool.Name,
-                "warning"
+                "Skill controls unavailable: " .. preparingTool.Name
+                    .. (issued and "; mastery M1 sent" or ": " .. tostring(result)),
+                issued and "success" or "warning"
             )
             return true
         end
@@ -917,15 +967,27 @@ function MainFarm:_TryStartFarmSkill(
             self:_SetStatus("Farm skills unavailable: " .. tostring(skillError), "warning")
         end
         if masteryCategory then
-            local waitMessage = "Mastery waiting for a ready selected "
-                .. masteryCategory
-                .. " skill"
-            if masteryCategory == "Gun" then
-                waitMessage = gunM1Issued
-                    and "Gun M1 activation sent; waiting for a selected Gun skill"
-                    or "Gun mastery waiting: " .. tostring(gunM1Result)
+            local issued, result = self:_TryMasteryM1Fallback(
+                target,
+                masteryCategory,
+                farmSettings
+            )
+            if issued then
+                self:_SetStatus(
+                    masteryCategory .. " mastery M1 fallback sent; damage is unconfirmed",
+                    "success"
+                )
+            elseif result ~= "throttled" then
+                self:_SetStatus(
+                    masteryCategory .. " mastery waiting: " .. tostring(result),
+                    "warning"
+                )
+            else
+                self:_SetStatus(
+                    "Mastery waiting for a ready selected " .. masteryCategory .. " skill",
+                    "info"
+                )
             end
-            self:_SetStatus(waitMessage, "info")
             return true
         end
         return false
@@ -992,7 +1054,47 @@ function MainFarm:_TryStartFarmSkill(
                     "success"
                 )
             elseif not activated and self:_IsCurrent(session) and self.Target == target then
-                self:_SetStatus("Farm skill was not sent: " .. tostring(activationResult), "warning")
+                local currentSettings = self.Context and self.Context.Config
+                    and self.Context.Config.FarmSettings
+                local currentRoot
+                if self.Context and self.Context.Compatibility then
+                    local _, _, playerRoot = self.Context.Compatibility:GetCharacterParts()
+                    currentRoot = playerRoot
+                end
+                local fallbackIssued, fallbackResult
+                if masteryCategory
+                    and currentSettings
+                    and currentSettings.FarmMastery == true
+                    and self:_GetMasteryCategory(
+                        target,
+                        currentSettings,
+                        allowMastery
+                    ) == masteryCategory
+                    and currentRoot
+                    and self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
+                then
+                    fallbackIssued, fallbackResult = self:_TryMasteryM1Fallback(
+                        target,
+                        masteryCategory,
+                        currentSettings
+                    )
+                end
+                if fallbackIssued then
+                    self:_SetStatus(
+                        "Skill failed; " .. masteryCategory .. " M1 fallback sent",
+                        "warning"
+                    )
+                elseif masteryCategory and fallbackResult and fallbackResult ~= "throttled" then
+                    self:_SetStatus(
+                        "Skill failed; mastery M1 waiting: " .. tostring(fallbackResult),
+                        "warning"
+                    )
+                else
+                    self:_SetStatus(
+                        "Farm skill was not sent: " .. tostring(activationResult),
+                        "warning"
+                    )
+                end
             end
         end
         local currentCharacter = self.Context and self.Context.Compatibility
@@ -2429,6 +2531,7 @@ function MainFarm:Start()
     self.TikiEventActive = false
     self.TikiEventTarget = nil
     self.NextFarmSkillScanAt = 0
+    self.NextMasteryM1FallbackAt = 0
     self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
     self.FarmSkillActive = false
     self.FarmSkillPreparing = nil
