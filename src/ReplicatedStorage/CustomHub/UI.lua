@@ -466,9 +466,77 @@ function UI:_UpdateShellLayout()
     end
 end
 
+function UI:_GetSubsectionForPage(pageName)
+    for tabName, subsections in pairs(self.Config.TabSubsections or {}) do
+        for _, subsection in ipairs(subsections) do
+            if (subsection.Page or tabName) == pageName then
+                return tabName, subsection
+            end
+        end
+    end
+    return nil, nil
+end
+
+function UI:_PageMatchesSearch(pageName, query)
+    if query == "" then
+        return true
+    end
+    local page = self.Config.Pages[pageName]
+    if not page then
+        return false
+    end
+    local pageNameText = page.Title or displayTabName(pageName)
+    if string.find(normalizeSearchText(pageNameText), query, 1, true) then
+        return true
+    end
+    for _, control in ipairs(page.Controls or {}) do
+        if string.find(normalizeSearchText(control.Label), query, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+function UI:_FindMatchingPageForTab(tabName, query)
+    for _, subsection in ipairs((self.Config.TabSubsections or {})[tabName] or {}) do
+        local labelMatches = string.find(normalizeSearchText(subsection.Label), query, 1, true) ~= nil
+        if labelMatches or self:_PageMatchesSearch(subsection.Page or tabName, query) then
+            return subsection.Page or tabName
+        end
+    end
+    if self:_PageMatchesSearch(tabName, query) then
+        return tabName
+    end
+    return nil
+end
+
 function UI:_Refresh(snapshot)
     if not self.Gui then
         return
+    end
+    local selectedParent, selectedSubsection = self:_GetSubsectionForPage(snapshot.selectedTab)
+    local navigationChanged = false
+    for tabName in pairs(self.ExpandedTabs) do
+        local shouldExpand = tabName == selectedParent
+        if self.ExpandedTabs[tabName] ~= shouldExpand then
+            self.ExpandedTabs[tabName] = shouldExpand
+            navigationChanged = true
+        end
+    end
+    if selectedParent and self.ExpandedTabs[selectedParent] ~= true then
+        self.ExpandedTabs[selectedParent] = true
+        navigationChanged = true
+    end
+    local nextSubsectionTab = selectedParent
+    local nextSubsectionLabel = selectedSubsection and selectedSubsection.Label or nil
+    if self.ActiveSubsectionTab ~= nextSubsectionTab
+        or self.ActiveSubsectionLabel ~= nextSubsectionLabel
+    then
+        self.ActiveSubsectionTab = nextSubsectionTab
+        self.ActiveSubsectionLabel = nextSubsectionLabel
+    end
+    if navigationChanged and self.NavScroll then
+        self:_LayoutNavigation(true)
     end
 
     local theme = self.Config.Theme
@@ -490,7 +558,7 @@ function UI:_Refresh(snapshot)
     end
 
     for tabName, button in pairs(self.TabButtons) do
-        local selected = tabName == snapshot.selectedTab
+        local selected = tabName == snapshot.selectedTab or tabName == selectedParent
         button.BackgroundColor3 = theme.Selected
         button.BackgroundTransparency = selected and 0 or 1
         local stroke = button:FindFirstChildOfClass("UIStroke")
@@ -666,18 +734,13 @@ function UI:_TabMatchesSearch(tabName, query)
         return true
     end
     for _, subsection in ipairs((self.Config.TabSubsections or {})[tabName] or {}) do
-        if string.find(normalizeSearchText(subsection.Label), query, 1, true) then
+        if string.find(normalizeSearchText(subsection.Label), query, 1, true)
+            or self:_PageMatchesSearch(subsection.Page or tabName, query)
+        then
             return true
         end
     end
-
-    local page = self.Config.Pages[tabName]
-    for _, control in ipairs(page and page.Controls or {}) do
-        if string.find(normalizeSearchText(control.Label), query, 1, true) then
-            return true
-        end
-    end
-    return false
+    return self:_PageMatchesSearch(tabName, query)
 end
 
 function UI:_ControlNodeName(control)
@@ -923,11 +986,7 @@ function UI:_LayoutNavigation(animate)
 end
 
 function UI:_SelectSubsection(tabName, subsection)
-    self.ExpandedTabs[tabName] = true
-    self.ActiveSubsectionTab = tabName
-    self.ActiveSubsectionLabel = subsection.Label
-    self:_SelectTab(tabName)
-    self:_LayoutNavigation(true)
+    self:_SelectTab(subsection.Page or tabName)
     if subsection.GroupId then
         self:_SetControlGroupExpanded(subsection.GroupId, true)
         task.defer(function()
@@ -973,13 +1032,13 @@ function UI:_ApplySearchFilter()
     for _, tabName in ipairs(self.Config.Tabs) do
         local matches = self:_TabMatchesSearch(tabName, query)
         if matches then
-            firstMatch = firstMatch or tabName
+            firstMatch = firstMatch or self:_FindMatchingPageForTab(tabName, query) or tabName
         end
     end
     self:_LayoutNavigation(false)
 
     local selectedTab = self.State:GetSnapshot().selectedTab
-    if query ~= "" and firstMatch and not self:_TabMatchesSearch(selectedTab, query) then
+    if query ~= "" and firstMatch and not self:_PageMatchesSearch(selectedTab, query) then
         self:_SelectTab(firstMatch)
     end
     self:_ExpandMatchingControlGroups()
@@ -991,7 +1050,18 @@ function UI:_SelectTab(tabName)
         self.State:SetStatus("Unknown tab: " .. tostring(tabName), "error")
         return false
     end
+
+    local parentTab, subsection = self:_GetSubsectionForPage(tabName)
+    for expandedTab in pairs(self.ExpandedTabs) do
+        self.ExpandedTabs[expandedTab] = expandedTab == parentTab
+    end
+    if parentTab then
+        self.ExpandedTabs[parentTab] = true
+    end
+    self.ActiveSubsectionTab = parentTab
+    self.ActiveSubsectionLabel = subsection and subsection.Label or nil
     self.State:SetSelectedTab(tabName)
+    self:_LayoutNavigation(true)
     return true
 end
 
@@ -1666,7 +1736,7 @@ function UI:_RenderTab(tabName)
 
     self.ActiveTab = tabName
     if self.PageTitle then
-        self.PageTitle.Text = displayTabName(tabName)
+        self.PageTitle.Text = page.Title or displayTabName(tabName)
     end
     self:_ClearPage()
     local theme = self.Config.Theme
@@ -2236,15 +2306,8 @@ function UI:Mount()
         end
         self:_Connect(self.PersistentConnections, button.Activated, function()
             if #subsections > 0 then
-                self.ActiveSubsectionTab = nil
-                self.ActiveSubsectionLabel = nil
-                self:_SelectTab(tabName)
-                self.ExpandedTabs[tabName] = not self.ExpandedTabs[tabName]
-                self:_LayoutNavigation(true)
-                self:_Refresh(self.State:GetSnapshot())
+                self:_SelectSubsection(tabName, subsections[1])
             else
-                self.ActiveSubsectionTab = nil
-                self.ActiveSubsectionLabel = nil
                 self:_SelectTab(tabName)
             end
         end)

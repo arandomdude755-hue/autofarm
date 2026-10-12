@@ -58,43 +58,53 @@ require(
     and 'Action = "farm.status.copy"' in farm_config,
     "Farm page must expose a button for copying the complete status report",
 )
-settings_config = CONFIG[CONFIG.index("Settings = {"):]
+pages_start = CONFIG.index("Pages = {")
+settings_start = CONFIG.index("        Settings = {", pages_start)
+farm_settings_start = CONFIG.index("        FarmSettings = {", settings_start)
+pages_end = CONFIG.index("\n    },\n}\n\nfor settingName", farm_settings_start)
+settings_config = CONFIG[settings_start:farm_settings_start]
+farm_settings_config = CONFIG[farm_settings_start:pages_end]
 require('Action = "farm.weaponCategory.select"' not in farm_config
-        and 'Kind = "collapsibleHeader"' in settings_config
-        and 'Label = "Farm settings"' in settings_config
+        and 'Title = "Main settings"' in settings_config
         and 'Kind = "settingDropdown"' in settings_config
-        and 'Label = "Farm weapon"' in settings_config
-        and 'Action = "farm.weaponCategory.select"' in settings_config
-        and 'Setting = "WeaponCategory"' in settings_config
-        and "Options = weaponCategories" in settings_config,
-        "Farm weapon must be inside the dedicated Farm settings subsection")
+        and 'Label = "UI size"' in settings_config
+        and 'Label = "Farm weapon"' not in settings_config
+        and 'Title = "Farm settings"' in farm_settings_config
+        and 'Label = "Farm weapon"' in farm_settings_config
+        and 'Action = "farm.weaponCategory.select"' in farm_settings_config
+        and 'Setting = "WeaponCategory"' in farm_settings_config
+        and "Options = weaponCategories" in farm_settings_config,
+        "Main settings and Farm settings must be separate pages")
 require('TabSubsections = {' in CONFIG
         and 'Settings = {' in CONFIG
-        and '{ Label = "UI settings" }' in CONFIG
-        and '{ Label = "Farm settings", GroupId = "farmSettings" }' in CONFIG
+        and '{ Label = "Main settings", Page = "Settings" }' in CONFIG
+        and '{ Label = "Farm settings", Page = "FarmSettings" }' in CONFIG
         and 'Kind = "collapsibleHeader"' in CONFIG
         and 'GroupId = "farmSkillKeys"' in CONFIG
-        and 'Groups = { "farmSettings", "farmSkillKeys" }' in CONFIG,
-        "Settings navigation and skill keys must use nested, in-flow collapsible groups")
+        and 'Groups = { "farmSkillKeys" }' in CONFIG
+        and 'table.insert(Config.Pages.FarmSettings.Controls, control)' in CONFIG,
+        "Settings routes and collapsible skill keys must use the dedicated Farm settings page")
 require('function UI:_LayoutNavigation(animate)' in UI
         and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI
         and 'function UI:_ToggleControlGroup(groupId)' in UI
+        and 'self:_SelectSubsection(tabName, subsections[1])' in UI
+        and 'self.ExpandedTabs[expandedTab] = expandedTab == parentTab' in UI
         and 'row.Visible = self:_IsControlVisible(control)' in UI
         and 'self:_PlayTween(childButton, 0.14' in UI,
         "Nested settings navigation must animate and reflow without overlapping neighboring tabs")
-require('Label = "Bring mobs"' in settings_config
-        and 'Action = "farm.settings.bringMobs"' in settings_config
-        and 'Setting = "BringMobs"' in settings_config
+require('Label = "Bring mobs"' in farm_settings_config
+        and 'Action = "farm.settings.bringMobs"' in farm_settings_config
+        and 'Setting = "BringMobs"' in farm_settings_config
         and "BringMobs = false" in CONFIG
-        and 'Label = "Bring mob count"' in settings_config
-        and 'Action = "farm.bringMobCount.set"' in settings_config
-        and 'Setting = "BringMobCount"' in settings_config
+        and 'Label = "Bring mob count"' in farm_settings_config
+        and 'Action = "farm.bringMobCount.set"' in farm_settings_config
+        and 'Setting = "BringMobCount"' in farm_settings_config
         and 'BringMobCount = 2' in CONFIG
-        and 'Min = 2' in settings_config
-        and 'Max = 6' in settings_config
-        and 'Label = "Auto turn on Buso"' in settings_config
-        and 'Action = "farm.settings.autoBuso"' in settings_config
-        and 'Setting = "AutoBuso"' in settings_config
+        and 'Min = 2' in farm_settings_config
+        and 'Max = 6' in farm_settings_config
+        and 'Label = "Auto turn on Buso"' in farm_settings_config
+        and 'Action = "farm.settings.autoBuso"' in farm_settings_config
+        and 'Setting = "AutoBuso"' in farm_settings_config
         and "AutoBuso = false" in CONFIG
         and 'Label = "Use skills while farming"' in CONFIG
         and 'Action = "farm.skills.enabled"' in CONFIG

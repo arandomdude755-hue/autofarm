@@ -99,24 +99,32 @@ require("SidebarNavInsetTop = 4" in CONFIG
         and "UDim2.fromOffset(layout.SidebarNavInsetLeft, navTop)" in UI_MODULE
         and "layout.SidebarNavInsetLeft * 2" in UI_MODULE,
         "navigation rows need top and side insets so selected outlines are not clipped")
-settings_page = CONFIG[CONFIG.index("Settings = {"):]
+pages_start = CONFIG.index("Pages = {")
+settings_start = CONFIG.index("        Settings = {", pages_start)
+farm_settings_start = CONFIG.index("        FarmSettings = {", settings_start)
+pages_end = CONFIG.index("\n    },\n}\n\nfor settingName", farm_settings_start)
+settings_page = CONFIG[settings_start:farm_settings_start]
+farm_settings_page = CONFIG[farm_settings_start:pages_end]
 require('Label = "UI size"' in settings_page
         and 'Kind = "settingDropdown"' in settings_page
         and 'Action = "settings.uiSize.select"' in settings_page
         and 'Setting = "UiSize"' in settings_page
-        and 'Options = { "Small", "Medium", "Large" }' in settings_page,
-        "Settings must expose UI size through the shared dropdown")
-require('SingleColumn = true' in settings_page
-        and 'Kind = "collapsibleHeader"' in settings_page
-        and 'Label = "Farm settings"' in settings_page
-        and 'Label = "Farm weapon"' in settings_page
-        and 'Label = "Bring mobs"' in settings_page
-        and 'Label = "Auto turn on Buso"' in settings_page,
-        "Settings must group farm controls under a full-width Farm settings subsection")
+        and 'Options = { "Small", "Medium", "Large" }' in settings_page
+        and 'Label = "Compact layout"' in settings_page
+        and 'Label = "Reset UI settings"' in settings_page
+        and 'Label = "Farm weapon"' not in settings_page,
+        "Main settings must contain UI controls only, not Farm settings")
+require('Title = "Farm settings"' in farm_settings_page
+        and 'SingleColumn = true' in farm_settings_page
+        and 'Label = "Farm weapon"' in farm_settings_page
+        and 'Label = "Bring mobs"' in farm_settings_page
+        and 'Label = "Auto turn on Buso"' in farm_settings_page
+        and 'Kind = "collapsibleHeader"' not in farm_settings_page,
+        "Farm settings must have its own page instead of a nested section on Main settings")
 require('Label = "Combat skills"' in CONFIG
         and 'Label = "Available skill keys"' in CONFIG
         and 'GroupId = "farmSkillKeys"' in CONFIG
-        and 'Groups = { "farmSettings", "farmSkillKeys" }' in CONFIG
+        and 'Groups = { "farmSkillKeys" }' in CONFIG
         and 'function UI:_IsControlVisible(control)' in UI_MODULE
         and 'function UI:_SetControlGroupExpanded(groupId, expanded)' in UI_MODULE
         and 'function UI:_ExpandMatchingControlGroups()' in UI_MODULE
@@ -125,10 +133,13 @@ require('Label = "Combat skills"' in CONFIG
         "Combat skill headings must be retained while skill-key controls collapse in the page flow")
 require('TabSubsections = {' in CONFIG
         and 'Settings = {' in CONFIG
-        and '{ Label = "UI settings" }' in CONFIG
-        and '{ Label = "Farm settings", GroupId = "farmSettings" }' in CONFIG
+        and '{ Label = "Main settings", Page = "Settings" }' in CONFIG
+        and '{ Label = "Farm settings", Page = "FarmSettings" }' in CONFIG
         and 'function UI:_LayoutNavigation(animate)' in UI_MODULE
         and 'function UI:_SelectSubsection(tabName, subsection)' in UI_MODULE
+        and 'self:_SelectSubsection(tabName, subsections[1])' in UI_MODULE
+        and 'tabName == snapshot.selectedTab or tabName == selectedParent' in UI_MODULE
+        and 'self.ExpandedTabs[expandedTab] = expandedTab == parentTab' in UI_MODULE
         and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI_MODULE
         and 'self.NavScroll.CanvasSize = UDim2.new(' in UI_MODULE,
         "Settings sidebar children must reflow the following tabs instead of overlaying them")
