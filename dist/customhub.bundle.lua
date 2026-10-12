@@ -598,6 +598,85 @@ function Compatibility:GetUnparentedInstances()
     return instances
 end
 
+function Compatibility:GetSignalConnections(signal)
+    if typeof(signal) ~= "RBXScriptSignal" then
+        return nil, "Signal is unavailable"
+    end
+
+    local getterOk, getter = pcall(function()
+        return getconnections
+    end)
+    if not getterOk or type(getter) ~= "function" then
+        return nil, "Signal connection access is unavailable"
+    end
+
+    local callOk, connections = pcall(getter, signal)
+    if not callOk or type(connections) ~= "table" then
+        return nil, "Signal connections could not be read"
+    end
+    return connections
+end
+
+function Compatibility:GetGunShootFunction()
+    if type(self.GunShootFunction) == "function" then
+        return self.GunShootFunction
+    end
+
+    local controllers = self.ReplicatedStorage:FindFirstChild("Controllers")
+    local controllerModule = controllers and controllers:FindFirstChild("CombatController")
+    if not controllerModule then
+        return nil, "CombatController is unavailable"
+    end
+
+    local requireOk, combatController = pcall(require, controllerModule)
+    local attack = requireOk and type(combatController) == "table"
+        and combatController.Attack
+    if type(attack) ~= "function" then
+        return nil, "CombatController.Attack is unavailable"
+    end
+
+    local shootGun
+    local getterOk, getUpvalues = pcall(function()
+        return getupvalues
+    end)
+    if getterOk and type(getUpvalues) == "function" then
+        local upvaluesOk, upvalues = pcall(getUpvalues, attack)
+        if upvaluesOk and type(upvalues) == "table" then
+            shootGun = upvalues[9]
+        end
+    end
+
+    if type(shootGun) ~= "function" then
+        local debugOk, debugLibrary = pcall(function()
+            return debug
+        end)
+        local getUpvalue = debugOk and debugLibrary and debugLibrary.getupvalue
+        if type(getUpvalue) == "function" then
+            local upvalueOk, _, value = pcall(getUpvalue, attack, 9)
+            if upvalueOk then
+                shootGun = value
+            end
+        end
+    end
+
+    if type(shootGun) ~= "function" then
+        return nil, "CombatController shootGun input is unavailable"
+    end
+
+    local infoOk, debugInfo = pcall(function()
+        return debug.info
+    end)
+    if not infoOk or type(debugInfo) ~= "function" then
+        return nil, "CombatController shootGun cannot be validated"
+    end
+    local nameOk, functionName = pcall(debugInfo, shootGun, "n")
+    if not nameOk or functionName ~= "shootGun" then
+        return nil, "CombatController attack input did not match shootGun"
+    end
+    self.GunShootFunction = shootGun
+    return shootGun
+end
+
 function Compatibility:IsTouchEnabled()
     return UserInputService.TouchEnabled
 end
@@ -5843,19 +5922,31 @@ function CombatService:FindWeapon(category)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
     local character = player and player.Character
+    local foundPuzzleOnlySkullGuitar = false
     if backpack then
         for _, item in ipairs(backpack:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
-                return item
+                if category == "Gun" and item.Name == "Skull Guitar" then
+                    foundPuzzleOnlySkullGuitar = true
+                else
+                    return item
+                end
             end
         end
     end
     if character then
         for _, item in ipairs(character:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
-                return item
+                if category == "Gun" and item.Name == "Skull Guitar" then
+                    foundPuzzleOnlySkullGuitar = true
+                else
+                    return item
+                end
             end
         end
+    end
+    if foundPuzzleOnlySkullGuitar then
+        return nil, "Skull Guitar is reserved for the Tiki puzzle and is not used for farming"
     end
     return nil
 end
@@ -5903,9 +5994,9 @@ function CombatService:EquipTool(tool)
 end
 
 function CombatService:EquipWeapon(category)
-    local tool = self:FindWeapon(category)
+    local tool, findError = self:FindWeapon(category)
     if not tool then
-        return false, "No owned " .. tostring(category) .. " tool was found"
+        return false, findError or ("No owned " .. tostring(category) .. " tool was found")
     end
     return self:EquipTool(tool)
 end
@@ -5962,15 +6053,25 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
                     local title = frame and frame:FindFirstChild("Title")
                     local cooldown = frame and frame:FindFirstChild("Cooldown")
                     local titleText = title and title:IsA("TextLabel") and title.Text or ""
+                    local cooldownEmpty = cooldown
+                        and cooldown:IsA("GuiObject")
+                        and cooldown.Size == UDim2.new(0, 0, 1, -1)
+                    local cooldownFull = cooldown
+                        and cooldown:IsA("GuiObject")
+                        and cooldown.Size == UDim2.new(1, 0, 1, -1)
                     local isReady = frame
                         and frame:IsA("Frame")
+                        and frame.Visible
                         and title
                         and title:IsA("TextLabel")
-                        and title.TextColor3 == Color3.new(1, 1, 1)
                         and cooldown
                         and cooldown:IsA("GuiObject")
-                        and cooldown.Size.X.Scale == 0
-                        and cooldown.Size.X.Offset == 0
+                        and (
+                            (title.TextColor3 == Color3.new(1, 1, 1) and cooldownEmpty)
+                            or cooldownFull
+                        )
+                        and titleText ~= ""
+                        and titleText ~= "???"
                         and not string.find(titleText, "Transformation", 1, true)
                     if isReady then
                         return {
@@ -6109,22 +6210,94 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     local inputOk, inputService = pcall(function()
         return game:GetService("VirtualInputManager")
     end)
-    if not inputOk or not inputService then
-        return false, "VirtualInputManager is unavailable in this runtime"
-    end
-
     local aimContext, aimError = self:_SetTemporaryAim(target)
     if not aimContext then
         return false, tostring(aimError)
     end
-    local pressed, pressError = pcall(function()
-        inputService:SendKeyEvent(true, keyName, false, game)
-    end)
+
+    local function fireConnections(connections)
+        local firedCount = 0
+        local lastError
+        for _, connection in ipairs(connections or {}) do
+            local fireOk, fireError = pcall(function()
+                connection:Fire()
+            end)
+            if fireOk then
+                firedCount += 1
+            else
+                lastError = fireError
+            end
+        end
+        return firedCount, lastError
+    end
+
+    local mobilePressed = false
+    local mobileReleaseConnections
+    if self.Compatibility:IsTouchEnabled()
+        and type(self.Compatibility.GetSignalConnections) == "function"
+    then
+        local connectionsOk, downConnections, upConnections = pcall(function()
+            local playerGui = self.Compatibility:GetPlayerGui()
+            local main = playerGui and playerGui:FindFirstChild("Main")
+            local skills = main and main:FindFirstChild("Skills")
+            local toolSkills = skills and skills:FindFirstChild(tool.Name)
+            local keyFrame = toolSkills and toolSkills:FindFirstChild(keyName)
+            local mobileButton = keyFrame and keyFrame:FindFirstChild("Mobile")
+            if not mobileButton or not mobileButton:IsA("GuiButton") then
+                return nil, nil
+            end
+            local down = self.Compatibility:GetSignalConnections(
+                mobileButton.MouseButton1Down
+            )
+            local up = self.Compatibility:GetSignalConnections(
+                mobileButton.MouseButton1Up
+            )
+            return down, up
+        end)
+        if connectionsOk and type(downConnections) == "table"
+            and #downConnections > 0 and type(upConnections) == "table"
+            and #upConnections > 0
+        then
+            local firedCount = fireConnections(downConnections)
+            mobilePressed = firedCount > 0
+            if mobilePressed then
+                mobileReleaseConnections = upConnections
+            end
+        end
+    end
+
+    local pressed, pressError = mobilePressed, nil
+    if not mobilePressed then
+        if not inputOk or not inputService then
+            self:_RestoreTemporaryAim(aimContext)
+            return false, "Skill input is unavailable in this runtime"
+        end
+        pressed, pressError = pcall(function()
+            inputService:SendKeyEvent(true, keyName, false, game)
+        end)
+    end
     if not pressed then
         self:_RestoreTemporaryAim(aimContext)
         return false, "Skill key press failed: " .. tostring(pressError)
     end
-    self.ActiveInputService = inputService
+    local inputReleased = false
+    local function releaseInput()
+        if inputReleased then
+            return true
+        end
+        inputReleased = true
+        if mobilePressed then
+            local releasedCount, releaseError = fireConnections(mobileReleaseConnections)
+            if releasedCount == 0 then
+                return false, releaseError or "Mobile skill release had no active connection"
+            end
+            return true
+        end
+        inputService:SendKeyEvent(false, keyName, false, game)
+        return true
+    end
+    self.ActiveInputRelease = releaseInput
+    self.ActiveInputService = mobilePressed and nil or inputService
     self.ActiveSkillKey = keyName
 
     local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
@@ -6144,11 +6317,13 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         end
     end)
 
-    local releaseOk, releaseError = pcall(function()
-        inputService:SendKeyEvent(false, keyName, false, game)
-    end)
-    self.ActiveInputService = nil
-    self.ActiveSkillKey = nil
+    local releaseOk, releaseResult = pcall(releaseInput)
+    local releaseError = releaseResult == false and "Skill release did not fire" or releaseResult
+    if self.ActiveInputRelease == releaseInput then
+        self.ActiveInputRelease = nil
+        self.ActiveInputService = nil
+        self.ActiveSkillKey = nil
+    end
     self:_RestoreTemporaryAim(aimContext)
 
     if not releaseOk then
@@ -6193,9 +6368,9 @@ function CombatService:AttackGunM1(target)
         return false, "Gun M1 is cooling down"
     end
 
-    local tool = self:FindWeapon("Gun")
+    local tool, findError = self:FindWeapon("Gun")
     if not tool then
-        return false, "No owned Gun tool was found"
+        return false, findError or "No owned Gun tool was found"
     end
     local equipped, equipResult = self:EquipTool(tool)
     if not equipped then
@@ -6236,13 +6411,87 @@ function CombatService:AttackGunM1(target)
         return math.clamp(cooldown, 0.05, 5)
     end
 
+    local camera = self.Compatibility.Workspace.CurrentCamera
+    if not camera then
+        return false, "Gun M1 camera is unavailable"
+    end
+    local screenPoint = camera:WorldToViewportPoint(targetRoot.Position)
+    local insetOk, inset = pcall(function()
+        return game:GetService("GuiService"):GetGuiInset()
+    end)
+    if not insetOk or typeof(inset) ~= "Vector2" then
+        inset = Vector2.zero
+    end
+    local touchEnabled = self.Compatibility:IsTouchEnabled()
+    local inputPosition = touchEnabled
+        and Vector3.new(screenPoint.X - inset.X, screenPoint.Y - inset.Y, 0)
+        or Vector3.new(screenPoint.X, screenPoint.Y, 0)
+
     local aimContext, aimError = self:_SetTemporaryAim(target)
     if not aimContext then
         return false, tostring(aimError)
     end
-    local activationOk, activationError = pcall(function()
-        tool:Activate()
-    end)
+
+    local shootGun, shootGunError = self.Compatibility:GetGunShootFunction()
+    local inputIssued = false
+    local inputResult
+    if shootGun then
+        local inputType = touchEnabled
+            and Enum.UserInputType.Touch
+            or Enum.UserInputType.MouseButton1
+        local callOk, callError = pcall(shootGun, tool, {
+            UserInputType = inputType,
+            Position = inputPosition,
+        })
+        if callOk then
+            inputIssued = true
+            inputResult = "CombatController shootGun input sent"
+        else
+            inputResult = "CombatController shootGun failed: " .. tostring(callError)
+        end
+    else
+        inputResult = tostring(shootGunError)
+    end
+
+    if not inputIssued then
+        local inputOk, inputService = pcall(function()
+            return game:GetService("VirtualInputManager")
+        end)
+        if inputOk and inputService then
+            local downOk, downError = pcall(function()
+                inputService:SendMouseButtonEvent(
+                    screenPoint.X,
+                    screenPoint.Y,
+                    0,
+                    true,
+                    game,
+                    0
+                )
+            end)
+            if downOk then
+                task.wait(0.05)
+                local upOk, upError = pcall(function()
+                    inputService:SendMouseButtonEvent(
+                        screenPoint.X,
+                        screenPoint.Y,
+                        0,
+                        false,
+                        game,
+                        0
+                    )
+                end)
+                inputIssued = upOk
+                inputResult = upOk
+                    and "Virtual mouse click sent"
+                    or ("Virtual mouse release failed: " .. tostring(upError))
+            else
+                inputResult = "Virtual mouse click failed: " .. tostring(downError)
+            end
+        else
+            inputResult = inputResult .. "; VirtualInputManager is unavailable"
+        end
+    end
+
     local aimWaitOk, aimWaitError = pcall(function()
         local runService = self.Compatibility.RunService
         if runService and runService.Heartbeat then
@@ -6252,14 +6501,14 @@ function CombatService:AttackGunM1(target)
         end
     end)
     self:_RestoreTemporaryAim(aimContext)
-    if not activationOk then
-        return false, "Gun Tool:Activate failed: " .. tostring(activationError)
+    if not inputIssued then
+        return false, tostring(inputResult)
     end
     if not aimWaitOk then
         return false, "Gun aim release wait failed: " .. tostring(aimWaitError)
     end
     self.NextGunM1At = now + getGunCooldown()
-    return true, "Gun Tool:Activate request issued; server damage is not confirmed"
+    return true, tostring(inputResult) .. "; server damage is not confirmed"
 end
 
 function CombatService:TapSkullGuitar(targetPosition)
@@ -6488,11 +6737,14 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
 end
 
 function CombatService:Cancel()
-    if self.ActiveInputService and self.ActiveSkillKey then
+    if self.ActiveInputRelease then
+        pcall(self.ActiveInputRelease)
+    elseif self.ActiveInputService and self.ActiveSkillKey then
         pcall(function()
             self.ActiveInputService:SendKeyEvent(false, self.ActiveSkillKey, false, game)
         end)
     end
+    self.ActiveInputRelease = nil
     self.ActiveInputService = nil
     self.ActiveSkillKey = nil
     return true
@@ -7506,9 +7758,17 @@ function MainFarm:_TryStartFarmSkill(
                 farmSettings
             )
             if issued then
+                local routeSuffix = ""
+                local resultText = tostring(result)
+                if string.find(resultText, "shootGun", 1, true) then
+                    routeSuffix = " (shootGun)"
+                elseif string.find(resultText, "Virtual mouse click", 1, true) then
+                    routeSuffix = " (mouse click)"
+                end
                 self:_SetStatus(
                     masteryCategory
                         .. " M1 fallback sent"
+                        .. routeSuffix
                         .. skillSuffix
                         .. "; hit unconfirmed",
                     "success"

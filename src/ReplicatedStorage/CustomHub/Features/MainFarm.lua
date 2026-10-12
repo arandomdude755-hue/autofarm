@@ -1000,9 +1000,17 @@ function MainFarm:_TryStartFarmSkill(
                 farmSettings
             )
             if issued then
+                local routeSuffix = ""
+                local resultText = tostring(result)
+                if string.find(resultText, "shootGun", 1, true) then
+                    routeSuffix = " (shootGun)"
+                elseif string.find(resultText, "Virtual mouse click", 1, true) then
+                    routeSuffix = " (mouse click)"
+                end
                 self:_SetStatus(
                     masteryCategory
                         .. " M1 fallback sent"
+                        .. routeSuffix
                         .. skillSuffix
                         .. "; hit unconfirmed",
                     "success"

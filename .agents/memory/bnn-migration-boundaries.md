@@ -5,7 +5,7 @@ description: Project decisions for migrating Banana Cat Hub farming features and
 
 Migrate BNN features in functional slices, and add settings alongside the feature that uses them. Use this project’s configuration path rather than copying BNN executor filesystem persistence. Do not expose BNN controls until their behavior is implemented.
 
-For the Tiki Outpost puzzle, automatically use any currently ready skill; do not expose puzzle-only skill selection settings. Regular farming skill selection is separate and opt-in. Skull Guitar may be loaded and used against puzzle objects only if already owned; never buy items or server-hop for this feature. Resume the selected Farm Weapon after the puzzle phase.
+For the Tiki Outpost puzzle, automatically use any currently ready skill; do not expose puzzle-only skill selection settings. Regular farming skill selection is separate and opt-in. Skull Guitar may be loaded and used against puzzle objects only if already owned; never buy items or server-hop for this feature. Do not use or equip Skull Guitar for ordinary farming or Farm Mastery. Resume the selected Farm Weapon after the puzzle phase.
 
 The general “Use skills while farming” toggle gates only ordinary farm skill use. Farm Mastery uses the universal skill-key selections for its configured mastery category without requiring that toggle.
 
@@ -29,6 +29,6 @@ Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary a
 
 For Gun Mastery, use the validated CombatController `shootGun` input path with target screen coordinates; keep the optional internal-function lookup in Compatibility and do not manually fire validator or ShootGunEvent remotes. On touch devices, use the skill GUI's down/up connections when available; preserve keyboard input as fallback. Recognize both reference-ready cooldown bar sizes.
 
-**Why:** in-game testing showed `Tool:Activate()` could return successfully without firing a gun shot. The references use the game's internal shooting input handler, and their skill readiness logic accepts both empty-width and full-width cooldown states. Mobile references also press the on-screen skill buttons.
+**Why:** in-game testing showed `Tool:Activate()` could return successfully without firing a gun shot. The references use the game's internal shooting input handler, and their skill readiness logic accepts both empty-width and full-width cooldown states. Mobile references also press the on-screen skill buttons. The user clarified that Skull Guitar remains puzzle-only and must not be used for Farm Mastery.
 
-**How to apply:** only invoke an upvalue after validating it is the named `shootGun` function; synthesize the target's screen input and retain existing range/reload/cooldown checks. Report input sent—not confirmed damage—until live testing proves a hit.
+**How to apply:** keep Skull Guitar TAP confined to the Tiki puzzle path. For Farm Mastery, exclude Skull Guitar regardless of whether it is equipped; for regular guns, only invoke an upvalue after validating it is the named `shootGun` function. Synthesize target screen input and retain existing range/reload/cooldown checks. Report input sent—not confirmed damage—until live testing proves a hit.

@@ -44,19 +44,31 @@ function CombatService:FindWeapon(category)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
     local character = player and player.Character
+    local foundPuzzleOnlySkullGuitar = false
     if backpack then
         for _, item in ipairs(backpack:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
-                return item
+                if category == "Gun" and item.Name == "Skull Guitar" then
+                    foundPuzzleOnlySkullGuitar = true
+                else
+                    return item
+                end
             end
         end
     end
     if character then
         for _, item in ipairs(character:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
-                return item
+                if category == "Gun" and item.Name == "Skull Guitar" then
+                    foundPuzzleOnlySkullGuitar = true
+                else
+                    return item
+                end
             end
         end
+    end
+    if foundPuzzleOnlySkullGuitar then
+        return nil, "Skull Guitar is reserved for the Tiki puzzle and is not used for farming"
     end
     return nil
 end
@@ -104,9 +116,9 @@ function CombatService:EquipTool(tool)
 end
 
 function CombatService:EquipWeapon(category)
-    local tool = self:FindWeapon(category)
+    local tool, findError = self:FindWeapon(category)
     if not tool then
-        return false, "No owned " .. tostring(category) .. " tool was found"
+        return false, findError or ("No owned " .. tostring(category) .. " tool was found")
     end
     return self:EquipTool(tool)
 end
@@ -478,9 +490,9 @@ function CombatService:AttackGunM1(target)
         return false, "Gun M1 is cooling down"
     end
 
-    local tool = self:FindWeapon("Gun")
+    local tool, findError = self:FindWeapon("Gun")
     if not tool then
-        return false, "No owned Gun tool was found"
+        return false, findError or "No owned Gun tool was found"
     end
     local equipped, equipResult = self:EquipTool(tool)
     if not equipped then

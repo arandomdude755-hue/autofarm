@@ -65,6 +65,10 @@ function Compatibility:GetSignalConnections(signal)
 end
 
 function Compatibility:GetGunShootFunction()
+    if type(self.GunShootFunction) == "function" then
+        return self.GunShootFunction
+    end
+
     local controllers = self.ReplicatedStorage:FindFirstChild("Controllers")
     local controllerModule = controllers and controllers:FindFirstChild("CombatController")
     if not controllerModule then
@@ -116,6 +120,7 @@ function Compatibility:GetGunShootFunction()
     if not nameOk or functionName ~= "shootGun" then
         return nil, "CombatController attack input did not match shootGun"
     end
+    self.GunShootFunction = shootGun
     return shootGun
 end
 

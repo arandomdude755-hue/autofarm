@@ -119,6 +119,20 @@ require(
     "Regular combat must honor skill selection while Tiki automatically accepts any ready skill",
 )
 
+find_weapon = function_body(
+    COMBAT,
+    "function CombatService:FindWeapon",
+    "\nfunction CombatService:FindToolByName",
+)
+require(
+    'category == "Gun" and item.Name == "Skull Guitar"' in find_weapon
+    and "foundPuzzleOnlySkullGuitar = true" in find_weapon
+    and "if foundPuzzleOnlySkullGuitar then" in find_weapon
+    and "Skull Guitar is reserved for the Tiki puzzle and is not used for farming" in find_weapon
+    and "equippedSkullGuitar" not in find_weapon,
+    "Gun selection must exclude Skull Guitar from farming, even when it is already equipped",
+)
+
 gun_m1 = function_body(
     COMBAT,
     "function CombatService:AttackGunM1",
@@ -131,6 +145,8 @@ require(
     and "NextGunM1At" in gun_m1
     and "self:_SetTemporaryAim(target)" in gun_m1
     and "self.Compatibility:GetGunShootFunction()" in gun_m1
+    and 'tool.Name == "Skull Guitar"' not in gun_m1
+    and "TapSkullGuitar" not in gun_m1
     and "WorldToViewportPoint(targetRoot.Position)" in gun_m1
     and "Enum.UserInputType.Touch" in gun_m1
     and "SendMouseButtonEvent" in gun_m1
@@ -140,7 +156,7 @@ require(
     and "validator2:FireServer" not in gun_m1
     and "ShootGunEvent" not in gun_m1
     and "debugLibrary" not in gun_m1,
-    "Gun M1 must invoke the validated CombatController shootGun path with screen-targeted input",
+    "Gun M1 must use validated screen-targeted input for regular guns and exclude Skull Guitar",
 )
 gun_shoot_lookup = function_body(
     COMPATIBILITY,
@@ -275,6 +291,8 @@ require(
     and "Mastery waiting for a ready selected " not in farm_skill
     and "selected skills cooling down" in farm_skill
     and "no skill keys enabled" in farm_skill
+    and 'string.find(resultText, "shootGun", 1, true)' in farm_skill
+    and 'routeSuffix = " (shootGun)"' in farm_skill
     and "M1 cooling down; last request issued" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition")
     < farm_skill.index("self:_TryMasteryM1Fallback")
@@ -326,7 +344,7 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: ready skills use validated UI state, target-model aim, and cancellation-safe key release")
-print("PASS: Gun Mastery uses scoped Mouse aim and standard Tool activation")
+print("PASS: ready skills use validated cooldown states, mobile-button input, and cancellation-safe release")
+print("PASS: Gun Mastery uses validated regular-gun input and never uses Skull Guitar")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")
