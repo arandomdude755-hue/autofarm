@@ -75,6 +75,12 @@ for token in (
 require("task.wait(0.15)" not in main_farm,
         "Main Farm still imposes a poll delay that is absent from BNN's level loop")
 
+unknown_state_start = main_farm.index('if questState == "unknown" then')
+unknown_state_end = main_farm.index('elseif questState == "active-unknown" then', unknown_state_start)
+unknown_state_branch = main_farm[unknown_state_start:unknown_state_end]
+require("boundedReason(readerEvidence)" in unknown_state_branch,
+        "unknown quest states must show the reader's reason before safely stopping")
+
 for token in ('InvokeServer("StartQuest"', "npcEntry.Levels", "quest.Task", "numericCount > 1"):
     require(token in quest, f"Quest selector/request path missing: {token}")
 for token in (

@@ -631,7 +631,7 @@ function MainFarm:_Step(session)
     if questState == "unknown" then
         self:_ClearTarget(true)
         self:_SetStatus(
-            "Waiting: no reliable active quest state; movement session held safely",
+            "Quest reader: " .. boundedReason(readerEvidence),
             "warning"
         )
         return
