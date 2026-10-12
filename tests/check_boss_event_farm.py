@@ -64,11 +64,10 @@ require(
     and "Hop Find Katakuri" not in CONFIG
     and "SpecialHop" not in MAIN_FARM
     and "__ServerBrowser" not in MAIN_FARM
-    and "Tiki puzzle skills" in CONFIG
-    and 'Token = "Melee"' in CONFIG
-    and 'tikiSkillDefaults[settingName] = true' in CONFIG
-    and '"TikiSkill_" .. category.Token' in CONFIG,
-    "Tiki puzzle automation must expose configured skill choices without enabling server hopping",
+    and "TikiSkill_" not in CONFIG
+    and 'Action = "farm.skills.enabled"' in CONFIG
+    and "UseFarmSkills = false" in CONFIG,
+    "regular farming skills must be opt-in and Tiki must not expose puzzle-only skill settings",
 )
 
 targets = function_body(
@@ -182,8 +181,12 @@ require(
     "HasOwnedInventoryItem(\"Skull Guitar\")" in event_action
     and 'InvokeServer("LoadItem", "Skull Guitar")' in event_action
     and "TapSkullGuitar(targetPosition)" in event_action
-    and "FindReadyTikiSkill(farmSettings)" in event_action
-    and "UseTikiSkill(" in event_action
+    and "FindReadyTikiSkill()" in event_action
+    and "UseSkill(" in event_action
+    and "Tiki puzzle waiting for any ready skill" in event_action
+    and 'ownershipError = "Skull Guitar is reloading"' in event_action
+    and event_action.index('ownershipError = "Skull Guitar is reloading"')
+        < event_action.index("FindReadyTikiSkill()")
     and '"Buy"' not in event_action
     and "ServerHop" not in event_action
     and "self.TikiPuzzleActive = true" in event_step,
@@ -199,6 +202,7 @@ require(
     and 'remote:FireServer("TAP", targetPosition)' in skull_tap
     and "IsGunReloading" in skull_tap
     and "function CombatService:UseTikiSkill" in COMBAT
+    and "function CombatService:UseSkill" in COMBAT
     and "SendKeyEvent(true, keyName" in COMBAT
     and "SendKeyEvent(false, keyName" in COMBAT
     and "mouse.Hit = targetPart.CFrame" in COMBAT

@@ -18,6 +18,12 @@ local validHitPartNames = {
     LowerTorso = true,
     Head = true,
 }
+local skillCategories = {
+    { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
+    { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
+    { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
+    { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
+}
 
 function CombatService.new(compatibility, enemyService)
     local dependencies, dependencyError = compatibility:GetCombatDependencies()
@@ -104,13 +110,7 @@ function CombatService:EquipWeapon(category)
     return self:EquipTool(tool)
 end
 
-function CombatService:FindReadyTikiSkill(farmSettings)
-    local skillCategories = {
-        { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
-        { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
-        { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
-        { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
-    }
+function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTools)
     local playerGui = self.Compatibility:GetPlayerGui()
     local main = playerGui and playerGui:FindFirstChild("Main")
     local skills = main and main:FindFirstChild("Skills")
@@ -118,40 +118,53 @@ function CombatService:FindReadyTikiSkill(farmSettings)
         return nil, "PlayerGui.Main.Skills is unavailable"
     end
 
+    local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
+        if category.Name == preferredCategory then
+            table.insert(orderedCategories, 1, category)
+        else
+            table.insert(orderedCategories, category)
+        end
+    end
+    for _, category in ipairs(orderedCategories) do
         local tool = self:FindWeapon(category.Name)
-        if tool then
+        local selectedKeys = {}
+        for _, keyName in ipairs(category.Keys) do
+            if isEnabled(category, keyName) then
+                table.insert(selectedKeys, keyName)
+            end
+        end
+        if tool and #selectedKeys > 0 and not (ignoredTools and ignoredTools[tool.Name]) then
             local toolSkills = skills:FindFirstChild(tool.Name)
             if not toolSkills then
                 local equipped, equipResult = self:EquipTool(tool)
                 if not equipped then
                     return nil, tostring(equipResult)
                 end
-                return nil, "Waiting for skill UI for " .. tool.Name
+                return nil, "Waiting for skill UI for " .. tool.Name, tool
             end
-            for _, keyName in ipairs(category.Keys) do
-                if farmSettings["TikiSkill_" .. category.Token .. "_" .. keyName] == true then
-                    local frame = toolSkills:FindFirstChild(keyName)
-                    local title = frame and frame:FindFirstChild("Title")
-                    local cooldown = frame and frame:FindFirstChild("Cooldown")
-                    local titleText = title and title:IsA("TextLabel") and title.Text or ""
-                    local isReady = frame
-                        and frame:IsA("Frame")
-                        and title
-                        and title:IsA("TextLabel")
-                        and title.TextColor3 == Color3.new(1, 1, 1)
-                        and cooldown
-                        and cooldown:IsA("GuiObject")
-                        and cooldown.Size.X.Scale == 0
-                        and cooldown.Size.X.Offset == 0
-                        and not string.find(titleText, "Transformation", 1, true)
-                    if isReady then
-                        return {
-                            Tool = tool,
-                            Category = category.Name,
-                            Key = keyName,
-                        }
-                    end
+            for _, keyName in ipairs(selectedKeys) do
+                local frame = toolSkills:FindFirstChild(keyName)
+                local title = frame and frame:FindFirstChild("Title")
+                local cooldown = frame and frame:FindFirstChild("Cooldown")
+                local titleText = title and title:IsA("TextLabel") and title.Text or ""
+                local isReady = frame
+                    and frame:IsA("Frame")
+                    and title
+                    and title:IsA("TextLabel")
+                    and title.TextColor3 == Color3.new(1, 1, 1)
+                    and cooldown
+                    and cooldown:IsA("GuiObject")
+                    and cooldown.Size.X.Scale == 0
+                    and cooldown.Size.X.Offset == 0
+                    and not string.find(titleText, "Transformation", 1, true)
+                if isReady then
+                    return {
+                        Tool = tool,
+                        Category = category.Name,
+                        Key = keyName,
+                        Setting = "FarmSkill_" .. category.Token .. "_" .. keyName,
+                    }
                 end
             end
         end
@@ -159,12 +172,24 @@ function CombatService:FindReadyTikiSkill(farmSettings)
     return nil, "No selected skill is currently ready"
 end
 
-function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldContinue)
+function CombatService:FindReadyFarmSkill(farmSettings, preferredCategory, ignoredTools)
+    return self:_FindReadySkill(function(category, keyName)
+        return farmSettings["FarmSkill_" .. category.Token .. "_" .. keyName] == true
+    end, preferredCategory, ignoredTools)
+end
+
+function CombatService:FindReadyTikiSkill()
+    return self:_FindReadySkill(function()
+        return true
+    end)
+end
+
+function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
-        return false, "Configured skill input is invalid"
+        return false, "Skill input is invalid"
     end
     if not target or not target.Parent or target:GetAttribute("AlreadyDestroyedClient") == true then
-        return false, "Tiki puzzle target is no longer available"
+        return false, "Skill target is no longer available"
     end
 
     local targetPart
@@ -175,7 +200,7 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
             or target:FindFirstChildWhichIsA("BasePart", true)
     end
     if not targetPart or not targetPart:IsA("BasePart") then
-        return false, "Tiki puzzle target has no aimable BasePart"
+        return false, "Skill target has no aimable BasePart"
     end
 
     local equipped, equipResult = self:EquipTool(tool)
@@ -217,7 +242,7 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
             mouse.Hit = oldHit
             mouse.Target = oldTarget
         end)
-        return false, "ReplicatedStorage.Mouse rejected the temporary Tiki aim target"
+        return false, "ReplicatedStorage.Mouse rejected the temporary skill aim target"
     end
 
     local function restoreAim()
@@ -236,7 +261,7 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
     self.ActiveInputService = inputService
     self.ActiveSkillKey = keyName
 
-    local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 1)
+    local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
     local holdUntil = os.clock() + holdDuration
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
@@ -260,7 +285,11 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
     if not waitOk then
         return false, "Skill hold failed: " .. tostring(waitError)
     end
-    return true, "Configured " .. keyName .. " skill key sent"
+    return true, keyName .. " skill key sent"
+end
+
+function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldContinue)
+    return self:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
 end
 
 function CombatService:TapSkullGuitar(targetPosition)

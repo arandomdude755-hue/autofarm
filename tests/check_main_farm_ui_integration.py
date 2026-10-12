@@ -81,7 +81,18 @@ require('Label = "Bring mobs"' in settings_config
         and 'Label = "Auto turn on Buso"' in settings_config
         and 'Action = "farm.settings.autoBuso"' in settings_config
         and 'Setting = "AutoBuso"' in settings_config
-        and "AutoBuso = false" in CONFIG,
+        and "AutoBuso = false" in CONFIG
+        and 'Label = "Use skills while farming"' in CONFIG
+        and 'Action = "farm.skills.enabled"' in CONFIG
+        and 'Setting = "UseFarmSkills"' in CONFIG
+        and "UseFarmSkills = false" in CONFIG
+        and 'Label = "Skill hold duration"' in CONFIG
+        and 'Action = "farm.skills.holdSeconds.set"' in CONFIG
+        and 'Setting = "FarmSkillHoldSeconds"' in CONFIG
+        and 'Label = "Fast skill release"' in CONFIG
+        and 'Action = "farm.skills.fastRelease"' in CONFIG
+        and 'Action = "farm.skills." .. category.Token .. "." .. keyName' in CONFIG
+        and 'Setting = settingName' in CONFIG,
         "Farm settings must expose opt-in Bring mobs and Auto Buso controls")
 require('local weaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG
         and "WeaponCategories = weaponCategories" in CONFIG,
@@ -182,7 +193,14 @@ require('actionId == "farm.settings.bringMobs"' in handle
         and 'actionId == "farm.bringMobCount.set"' in handle
         and "farmSettings.BringMobCount = math.min(selectedCount, maximum)" in handle
         and 'actionId == "farm.settings.autoBuso"' in handle
-        and "self:_SetAutoBuso(payload)" in handle,
+        and "self:_SetAutoBuso(payload)" in handle
+        and 'actionId == "farm.skills.enabled"' in handle
+        and "farmSettings.UseFarmSkills = payload" in handle
+        and 'actionId == "farm.skills.fastRelease"' in handle
+        and "farmSettings.FarmSkillFastRelease = payload" in handle
+        and 'actionId == "farm.skills.holdSeconds.set"' in handle
+        and "farmSettings.FarmSkillHoldSeconds =" in handle
+        and '"^farm%.skills%.([%w]+)%.([ZXCVF])$"' in handle,
         "MainFarm must handle both new farm settings")
 auto_buso = function_body(
     MAIN_FARM,

@@ -62,22 +62,53 @@ local farmModeProfiles = {
         TikiEventPhase = true,
     },
 }
-local tikiSkillCategories = {
+local farmSkillCategories = {
     { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
     { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
     { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
     { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
 }
-local tikiSkillDefaults = {}
-local tikiSkillControls = {}
-for _, category in ipairs(tikiSkillCategories) do
+local farmSkillDefaults = {}
+local farmSkillControls = {
+    {
+        Kind = "sectionHeader",
+        Label = "Combat skills",
+    },
+    {
+        Kind = "settingToggle",
+        Label = "Use skills while farming",
+        Action = "farm.skills.enabled",
+        Setting = "UseFarmSkills",
+    },
+    {
+        Kind = "settingSlider",
+        Label = "Skill hold duration",
+        Action = "farm.skills.holdSeconds.set",
+        Setting = "FarmSkillHoldSeconds",
+        Min = 0.05,
+        Max = 5,
+        Step = 0.05,
+        Unit = "sec",
+    },
+    {
+        Kind = "settingToggle",
+        Label = "Fast skill release",
+        Action = "farm.skills.fastRelease",
+        Setting = "FarmSkillFastRelease",
+    },
+    {
+        Kind = "sectionHeader",
+        Label = "Available skill keys",
+    },
+}
+for _, category in ipairs(farmSkillCategories) do
     for _, keyName in ipairs(category.Keys) do
-        local settingName = "TikiSkill_" .. category.Token .. "_" .. keyName
-        tikiSkillDefaults[settingName] = true
-        table.insert(tikiSkillControls, {
+        local settingName = "FarmSkill_" .. category.Token .. "_" .. keyName
+        farmSkillDefaults[settingName] = true
+        table.insert(farmSkillControls, {
             Kind = "settingToggle",
-            Label = "Tiki skill: " .. category.Name .. " " .. keyName,
-            Action = "farm.tikiSkill." .. category.Token .. "." .. keyName,
+            Label = category.Name .. " " .. keyName,
+            Action = "farm.skills." .. category.Token .. "." .. keyName,
             Setting = settingName,
         })
     end
@@ -111,6 +142,9 @@ local Config = {
         BringMobCountMax = 6,
         BringMobCountStep = 1,
         AutoBuso = false,
+        UseFarmSkills = false,
+        FarmSkillHoldSeconds = 0.5,
+        FarmSkillFastRelease = false,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
     },
@@ -338,21 +372,17 @@ local Config = {
                     Action = "farm.settings.autoBuso",
                     Setting = "AutoBuso",
                 },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Tiki puzzle skills",
-                },
             },
         },
     },
 }
 
-for settingName, defaultValue in pairs(tikiSkillDefaults) do
+for settingName, defaultValue in pairs(farmSkillDefaults) do
     if Config.FarmSettings[settingName] == nil then
         Config.FarmSettings[settingName] = defaultValue
     end
 end
-for _, control in ipairs(tikiSkillControls) do
+for _, control in ipairs(farmSkillControls) do
     table.insert(Config.Pages.Settings.Controls, control)
 end
 
@@ -5269,6 +5299,12 @@ local validHitPartNames = {
     LowerTorso = true,
     Head = true,
 }
+local skillCategories = {
+    { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
+    { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
+    { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
+    { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
+}
 
 function CombatService.new(compatibility, enemyService)
     local dependencies, dependencyError = compatibility:GetCombatDependencies()
@@ -5355,13 +5391,7 @@ function CombatService:EquipWeapon(category)
     return self:EquipTool(tool)
 end
 
-function CombatService:FindReadyTikiSkill(farmSettings)
-    local skillCategories = {
-        { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
-        { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
-        { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
-        { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
-    }
+function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTools)
     local playerGui = self.Compatibility:GetPlayerGui()
     local main = playerGui and playerGui:FindFirstChild("Main")
     local skills = main and main:FindFirstChild("Skills")
@@ -5369,40 +5399,53 @@ function CombatService:FindReadyTikiSkill(farmSettings)
         return nil, "PlayerGui.Main.Skills is unavailable"
     end
 
+    local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
+        if category.Name == preferredCategory then
+            table.insert(orderedCategories, 1, category)
+        else
+            table.insert(orderedCategories, category)
+        end
+    end
+    for _, category in ipairs(orderedCategories) do
         local tool = self:FindWeapon(category.Name)
-        if tool then
+        local selectedKeys = {}
+        for _, keyName in ipairs(category.Keys) do
+            if isEnabled(category, keyName) then
+                table.insert(selectedKeys, keyName)
+            end
+        end
+        if tool and #selectedKeys > 0 and not (ignoredTools and ignoredTools[tool.Name]) then
             local toolSkills = skills:FindFirstChild(tool.Name)
             if not toolSkills then
                 local equipped, equipResult = self:EquipTool(tool)
                 if not equipped then
                     return nil, tostring(equipResult)
                 end
-                return nil, "Waiting for skill UI for " .. tool.Name
+                return nil, "Waiting for skill UI for " .. tool.Name, tool
             end
-            for _, keyName in ipairs(category.Keys) do
-                if farmSettings["TikiSkill_" .. category.Token .. "_" .. keyName] == true then
-                    local frame = toolSkills:FindFirstChild(keyName)
-                    local title = frame and frame:FindFirstChild("Title")
-                    local cooldown = frame and frame:FindFirstChild("Cooldown")
-                    local titleText = title and title:IsA("TextLabel") and title.Text or ""
-                    local isReady = frame
-                        and frame:IsA("Frame")
-                        and title
-                        and title:IsA("TextLabel")
-                        and title.TextColor3 == Color3.new(1, 1, 1)
-                        and cooldown
-                        and cooldown:IsA("GuiObject")
-                        and cooldown.Size.X.Scale == 0
-                        and cooldown.Size.X.Offset == 0
-                        and not string.find(titleText, "Transformation", 1, true)
-                    if isReady then
-                        return {
-                            Tool = tool,
-                            Category = category.Name,
-                            Key = keyName,
-                        }
-                    end
+            for _, keyName in ipairs(selectedKeys) do
+                local frame = toolSkills:FindFirstChild(keyName)
+                local title = frame and frame:FindFirstChild("Title")
+                local cooldown = frame and frame:FindFirstChild("Cooldown")
+                local titleText = title and title:IsA("TextLabel") and title.Text or ""
+                local isReady = frame
+                    and frame:IsA("Frame")
+                    and title
+                    and title:IsA("TextLabel")
+                    and title.TextColor3 == Color3.new(1, 1, 1)
+                    and cooldown
+                    and cooldown:IsA("GuiObject")
+                    and cooldown.Size.X.Scale == 0
+                    and cooldown.Size.X.Offset == 0
+                    and not string.find(titleText, "Transformation", 1, true)
+                if isReady then
+                    return {
+                        Tool = tool,
+                        Category = category.Name,
+                        Key = keyName,
+                        Setting = "FarmSkill_" .. category.Token .. "_" .. keyName,
+                    }
                 end
             end
         end
@@ -5410,12 +5453,24 @@ function CombatService:FindReadyTikiSkill(farmSettings)
     return nil, "No selected skill is currently ready"
 end
 
-function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldContinue)
+function CombatService:FindReadyFarmSkill(farmSettings, preferredCategory, ignoredTools)
+    return self:_FindReadySkill(function(category, keyName)
+        return farmSettings["FarmSkill_" .. category.Token .. "_" .. keyName] == true
+    end, preferredCategory, ignoredTools)
+end
+
+function CombatService:FindReadyTikiSkill()
+    return self:_FindReadySkill(function()
+        return true
+    end)
+end
+
+function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
-        return false, "Configured skill input is invalid"
+        return false, "Skill input is invalid"
     end
     if not target or not target.Parent or target:GetAttribute("AlreadyDestroyedClient") == true then
-        return false, "Tiki puzzle target is no longer available"
+        return false, "Skill target is no longer available"
     end
 
     local targetPart
@@ -5426,7 +5481,7 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
             or target:FindFirstChildWhichIsA("BasePart", true)
     end
     if not targetPart or not targetPart:IsA("BasePart") then
-        return false, "Tiki puzzle target has no aimable BasePart"
+        return false, "Skill target has no aimable BasePart"
     end
 
     local equipped, equipResult = self:EquipTool(tool)
@@ -5468,7 +5523,7 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
             mouse.Hit = oldHit
             mouse.Target = oldTarget
         end)
-        return false, "ReplicatedStorage.Mouse rejected the temporary Tiki aim target"
+        return false, "ReplicatedStorage.Mouse rejected the temporary skill aim target"
     end
 
     local function restoreAim()
@@ -5487,7 +5542,7 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
     self.ActiveInputService = inputService
     self.ActiveSkillKey = keyName
 
-    local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 1)
+    local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
     local holdUntil = os.clock() + holdDuration
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
@@ -5511,7 +5566,11 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
     if not waitOk then
         return false, "Skill hold failed: " .. tostring(waitError)
     end
-    return true, "Configured " .. keyName .. " skill key sent"
+    return true, keyName .. " skill key sent"
+end
+
+function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldContinue)
+    return self:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
 end
 
 function CombatService:TapSkullGuitar(targetPosition)
@@ -5778,6 +5837,9 @@ local SPAWN_SCAN_INTERVAL = 1
 local TIKI_EVENT_SCAN_INTERVAL = 1
 local TIKI_ACTION_INTERVAL = 0.4
 local TIKI_SKILL_HOLD_SECONDS = 0.5
+local FARM_SKILL_SCAN_INTERVAL = 0.4
+local FARM_SKILL_PREPARE_TIMEOUT = 1.2
+local FARM_SKILL_UNAVAILABLE_RETRY = 10
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
@@ -6510,6 +6572,120 @@ function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
     )
 end
 
+function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettings)
+    if self.FarmSkillActive then
+        return true
+    end
+    if not farmSettings or farmSettings.UseFarmSkills ~= true then
+        self.FarmSkillPreparing = nil
+        return false
+    end
+
+    local now = os.clock()
+    if now < (self.NextFarmSkillScanAt or 0) then
+        return self.FarmSkillPreparing ~= nil
+            and now < self.FarmSkillPreparing.Deadline
+    end
+    self.NextFarmSkillScanAt = now + FARM_SKILL_SCAN_INTERVAL
+
+    self.FarmSkillIgnoredTools = self.FarmSkillIgnoredTools or {}
+    for toolName, retryAt in pairs(self.FarmSkillIgnoredTools) do
+        if now >= retryAt then
+            self.FarmSkillIgnoredTools[toolName] = nil
+        end
+    end
+
+    local skill, skillError, preparingTool = self.CombatService:FindReadyFarmSkill(
+        farmSettings,
+        weaponCategory,
+        self.FarmSkillIgnoredTools
+    )
+    if preparingTool then
+        local preparation = self.FarmSkillPreparing
+        if not preparation or preparation.ToolName ~= preparingTool.Name then
+            preparation = {
+                ToolName = preparingTool.Name,
+                StartedAt = now,
+                Deadline = now + FARM_SKILL_PREPARE_TIMEOUT,
+            }
+            self.FarmSkillPreparing = preparation
+        end
+        if now < preparation.Deadline then
+            self:_SetStatus("Preparing skill controls for " .. preparingTool.Name, "info")
+            return true
+        end
+        self.FarmSkillIgnoredTools[preparingTool.Name] = now + FARM_SKILL_UNAVAILABLE_RETRY
+        self.FarmSkillPreparing = nil
+        self.CombatService:EquipWeapon(weaponCategory)
+        self:_SetStatus(
+            "Skill controls did not load for " .. preparingTool.Name .. "; using M1",
+            "warning"
+        )
+        return false
+    end
+    self.FarmSkillPreparing = nil
+    if not skill then
+        if skillError and skillError ~= "No selected skill is currently ready" then
+            self:_SetStatus("Farm skills unavailable: " .. tostring(skillError), "warning")
+        end
+        return false
+    end
+
+    self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+    local generation = self.FarmSkillGeneration
+    self.FarmSkillActive = true
+    local originalCharacter = self.Character
+    local combatService = self.CombatService
+    local skillHold = tonumber(farmSettings.FarmSkillHoldSeconds) or 0.5
+    if farmSettings.FarmSkillFastRelease == true then
+        skillHold = 0.05
+    end
+    self:_SetStatus(
+        "Using " .. skill.Category .. " " .. skill.Key .. " skill",
+        "success"
+    )
+    task.spawn(function()
+        local activated, activationResult = combatService:UseSkill(
+            skill.Tool,
+            skill.Key,
+            target,
+            skillHold,
+            function()
+                local currentSettings = self.Context and self.Context.Config
+                    and self.Context.Config.FarmSettings
+                return self:_IsCurrent(session)
+                    and self.Target == target
+                    and self.EnemyService:IsAlive(target)
+                    and currentSettings
+                    and currentSettings.UseFarmSkills == true
+                    and currentSettings[skill.Setting] == true
+            end
+        )
+        if self.FarmSkillGeneration == generation then
+            self.FarmSkillActive = false
+            self.NextFarmSkillScanAt = os.clock() + FARM_SKILL_SCAN_INTERVAL
+            if activated and self:_IsCurrent(session) and self.Target == target then
+                self:_SetStatus(
+                    "Sent " .. skill.Category .. " " .. skill.Key .. " skill",
+                    "success"
+                )
+            elseif not activated and self:_IsCurrent(session) and self.Target == target then
+                self:_SetStatus("Farm skill was not sent: " .. tostring(activationResult), "warning")
+            end
+        end
+        local currentCharacter = self.Context and self.Context.Compatibility
+            and self.Context.Compatibility:GetCharacterParts()
+        if originalCharacter and currentCharacter == originalCharacter
+            and combatService == self.CombatService
+        then
+            local currentSettings = self.Context and self.Context.Config
+                and self.Context.Config.FarmSettings
+            combatService:EquipWeapon(currentSettings and currentSettings.WeaponCategory or weaponCategory)
+        end
+    end)
+    return true
+end
+
 function MainFarm:_StepAura(session, root)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local radius = tonumber(farmSettings.AuraDistance) or 300
@@ -6559,21 +6735,23 @@ function MainFarm:_StepAura(session, root)
     local weaponCategory = farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
-        if equipped then
-            local attackIssued, attackResult = self.CombatService:AttackM1(
-                target,
-                30,
-                weaponCategory,
-                farmSettings.AttackNoAnimation == true
-            )
-            if attackIssued then
-                self:_SetStatus("Aura M1 request issued; server damage is not yet confirmed", "info")
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings) then
+            local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+            if equipped then
+                local attackIssued, attackResult = self.CombatService:AttackM1(
+                    target,
+                    30,
+                    weaponCategory,
+                    farmSettings.AttackNoAnimation == true
+                )
+                if attackIssued then
+                    self:_SetStatus("Aura M1 request issued; server damage is not yet confirmed", "info")
+                else
+                    self:_SetStatus("Aura combat waiting: " .. tostring(attackResult), "warning")
+                end
             else
-                self:_SetStatus("Aura combat waiting: " .. tostring(attackResult), "warning")
+                self:_SetStatus("Aura combat waiting: " .. tostring(equipResult), "warning")
             end
-        else
-            self:_SetStatus("Aura combat waiting: " .. tostring(equipResult), "warning")
         end
     else
         self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
@@ -6678,21 +6856,23 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
-        if equipped then
-            local attackIssued, attackResult = self.CombatService:AttackM1(
-                target,
-                30,
-                weaponCategory,
-                farmSettings and farmSettings.AttackNoAnimation == true
-            )
-            if attackIssued then
-                self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings) then
+            local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+            if equipped then
+                local attackIssued, attackResult = self.CombatService:AttackM1(
+                    target,
+                    30,
+                    weaponCategory,
+                    farmSettings and farmSettings.AttackNoAnimation == true
+                )
+                if attackIssued then
+                    self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
+                else
+                    self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
+                end
             else
-                self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
+                self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
             end
-        else
-            self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
         end
     else
         self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
@@ -6820,7 +7000,6 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
     end
 
     local compatibility = self.Context.Compatibility
-    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local guitar = self.CombatService:FindToolByName("Skull Guitar")
     local ownsGuitar = guitar ~= nil
     local ownershipError = nil
@@ -6863,13 +7042,13 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
             )
             return true
         elseif tapResult == "Skull Guitar is reloading" then
-            self:_SetStatus("Tiki puzzle: Skull Guitar is reloading", "info")
-            return true
+            ownershipError = "Skull Guitar is reloading"
+        else
+            ownershipError = "Skull Guitar unavailable for puzzle action: " .. tostring(tapResult)
         end
-        ownershipError = "Skull Guitar unavailable for puzzle action: " .. tostring(tapResult)
     end
 
-    local skill, skillError = self.CombatService:FindReadyTikiSkill(farmSettings)
+    local skill, skillError = self.CombatService:FindReadyTikiSkill()
     if not skill then
         local reason = tostring(skillError)
         if ownershipError then
@@ -6877,11 +7056,11 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
         elseif ownershipError ~= nil then
             reason = "Skull Guitar ownership could not be verified; " .. reason
         end
-        self:_SetStatus("Tiki puzzle waiting for a configured action: " .. reason, "info")
+        self:_SetStatus("Tiki puzzle waiting for any ready skill: " .. reason, "info")
         return true
     end
 
-    local activated, activationResult = self.CombatService:UseTikiSkill(
+    local activated, activationResult = self.CombatService:UseSkill(
         skill.Tool,
         skill.Key,
         eventTarget,
@@ -6895,7 +7074,7 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
     )
     if activated then
         self:_SetStatus(
-            "Tiki puzzle: sent configured " .. skill.Category .. " " .. skill.Key
+            "Tiki puzzle: sent available " .. skill.Category .. " " .. skill.Key
                 .. " skill key; waiting for event update",
             "success"
         )
@@ -7635,21 +7814,23 @@ function MainFarm:_Step(session)
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
-        if equipped then
-            local attackIssued, attackResult = self.CombatService:AttackM1(
-                target,
-                30,
-                weaponCategory,
-                farmSettings and farmSettings.AttackNoAnimation == true
-            )
-            if attackIssued then
-                self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings) then
+            local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+            if equipped then
+                local attackIssued, attackResult = self.CombatService:AttackM1(
+                    target,
+                    30,
+                    weaponCategory,
+                    farmSettings and farmSettings.AttackNoAnimation == true
+                )
+                if attackIssued then
+                    self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
+                else
+                    self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
+                end
             else
-                self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
+                self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
             end
-        else
-            self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
         end
     else
         self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
@@ -7806,6 +7987,11 @@ function MainFarm:Initialize(context)
     self.NextTikiEventScanAt = 0
     self.TikiEventActive = false
     self.TikiEventTarget = nil
+    self.NextFarmSkillScanAt = 0
+    self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+    self.FarmSkillActive = false
+    self.FarmSkillPreparing = nil
+    self.FarmSkillIgnoredTools = {}
     self.TikiPuzzleActive = false
     self.TikiPuzzleRestorePending = false
     self.NextTikiActionAt = 0
@@ -7830,6 +8016,10 @@ function MainFarm:Initialize(context)
             self.NextTikiEventScanAt = 0
             self.TikiEventActive = false
             self.TikiEventTarget = nil
+            self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+            self.FarmSkillActive = false
+            self.FarmSkillPreparing = nil
+            self.FarmSkillIgnoredTools = {}
             self.TikiPuzzleActive = false
             self.TikiPuzzleRestorePending = false
             self.NextTikiActionAt = 0
@@ -7844,6 +8034,9 @@ function MainFarm:Initialize(context)
             if self.CombatService then
                 self.CombatService:Cancel()
             end
+            self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+            self.FarmSkillActive = false
+            self.FarmSkillPreparing = nil
             self.QuestDialogueRecovery = nil
             self:_ClearTarget()
             self:_ResetSpawnSearch(nil)
@@ -7887,6 +8080,11 @@ function MainFarm:Start()
     self.NextTikiEventScanAt = 0
     self.TikiEventActive = false
     self.TikiEventTarget = nil
+    self.NextFarmSkillScanAt = 0
+    self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+    self.FarmSkillActive = false
+    self.FarmSkillPreparing = nil
+    self.FarmSkillIgnoredTools = {}
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
@@ -7906,6 +8104,10 @@ function MainFarm:Stop()
     if self.CombatService then
         self.CombatService:Cancel()
     end
+    self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+    self.FarmSkillActive = false
+    self.FarmSkillPreparing = nil
+    self.FarmSkillIgnoredTools = {}
     if self.TikiPuzzleActive then
         self.TikiPuzzleActive = false
         self.TikiPuzzleRestorePending = true
@@ -7991,6 +8193,75 @@ function MainFarm:Handle(actionId, payload)
     if actionId == "farm.settings.autoBuso" then
         return self:_SetAutoBuso(payload)
     end
+    if actionId == "farm.skills.enabled" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Farm skills setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.UseFarmSkills = payload
+        self:_SetStatus(
+            "Farm combat skills " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.skills.fastRelease" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Fast skill release setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.FarmSkillFastRelease = payload
+        self:_SetStatus(
+            "Fast skill release " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.skills.holdSeconds.set" then
+        local selectedDuration = tonumber(payload)
+        if not farmSettings or not selectedDuration
+            or selectedDuration ~= selectedDuration
+            or math.abs(selectedDuration) == math.huge
+            or selectedDuration < 0.05
+            or selectedDuration > 5
+        then
+            self:_SetStatus("Skill hold duration is invalid", "error")
+            return false
+        end
+        farmSettings.FarmSkillHoldSeconds =
+            math.clamp(math.floor(selectedDuration * 20 + 0.5) / 20, 0.05, 5)
+        self:_SetStatus(
+            "Skill hold duration: " .. tostring(farmSettings.FarmSkillHoldSeconds) .. " sec",
+            "success"
+        )
+        return true
+    end
+    local farmSkillToken, farmSkillKey = actionId:match(
+        "^farm%.skills%.([%w]+)%.([ZXCVF])$"
+    )
+    if farmSkillToken then
+        local allowedKeys = {
+            Melee = { Z = true, X = true, C = true },
+            Sword = { Z = true, X = true },
+            Gun = { Z = true, X = true },
+            BloxFruit = { Z = true, X = true, C = true, V = true, F = true },
+        }
+        local categoryKeys = allowedKeys[farmSkillToken]
+        if not farmSettings or type(payload) ~= "boolean"
+            or not categoryKeys or categoryKeys[farmSkillKey] ~= true
+        then
+            self:_SetStatus("Combat skill selection is unavailable or invalid", "error")
+            return false
+        end
+        local settingName = "FarmSkill_" .. farmSkillToken .. "_" .. farmSkillKey
+        farmSettings[settingName] = payload
+        self:_SetStatus(
+            farmSkillToken .. " " .. farmSkillKey .. " skill "
+                .. (payload and "selected" or "unselected"),
+            "success"
+        )
+        return true
+    end
     if actionId == "farm.autoModeQuest" then
         if not farmSettings or type(payload) ~= "boolean" then
             self:_SetStatus("Auto quest setting is unavailable or invalid", "error")
@@ -8011,32 +8282,6 @@ function MainFarm:Handle(actionId, payload)
         farmSettings.IgnoreCakePrince = payload
         self:_SetStatus(
             "Cake Prince boss " .. (payload and "ignored" or "enabled as a target"),
-            "success"
-        )
-        return true
-    end
-    local tikiSkillToken, tikiSkillKey = actionId:match(
-        "^farm%.tikiSkill%.([%w]+)%.([ZXCVF])$"
-    )
-    if tikiSkillToken then
-        local allowedKeys = {
-            Melee = { Z = true, X = true, C = true },
-            Sword = { Z = true, X = true },
-            Gun = { Z = true, X = true },
-            BloxFruit = { Z = true, X = true, C = true, V = true, F = true },
-        }
-        local categoryKeys = allowedKeys[tikiSkillToken]
-        if not farmSettings or type(payload) ~= "boolean"
-            or not categoryKeys or categoryKeys[tikiSkillKey] ~= true
-        then
-            self:_SetStatus("Tiki skill setting is unavailable or invalid", "error")
-            return false
-        end
-        local settingName = "TikiSkill_" .. tikiSkillToken .. "_" .. tikiSkillKey
-        farmSettings[settingName] = payload
-        self:_SetStatus(
-            "Tiki " .. tikiSkillToken .. " " .. tikiSkillKey .. " skill "
-                .. (payload and "enabled" or "disabled"),
             "success"
         )
         return true

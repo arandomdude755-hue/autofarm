@@ -33,22 +33,53 @@ local farmModeProfiles = {
         TikiEventPhase = true,
     },
 }
-local tikiSkillCategories = {
+local farmSkillCategories = {
     { Name = "Melee", Token = "Melee", Keys = { "Z", "X", "C" } },
     { Name = "Sword", Token = "Sword", Keys = { "Z", "X" } },
     { Name = "Gun", Token = "Gun", Keys = { "Z", "X" } },
     { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
 }
-local tikiSkillDefaults = {}
-local tikiSkillControls = {}
-for _, category in ipairs(tikiSkillCategories) do
+local farmSkillDefaults = {}
+local farmSkillControls = {
+    {
+        Kind = "sectionHeader",
+        Label = "Combat skills",
+    },
+    {
+        Kind = "settingToggle",
+        Label = "Use skills while farming",
+        Action = "farm.skills.enabled",
+        Setting = "UseFarmSkills",
+    },
+    {
+        Kind = "settingSlider",
+        Label = "Skill hold duration",
+        Action = "farm.skills.holdSeconds.set",
+        Setting = "FarmSkillHoldSeconds",
+        Min = 0.05,
+        Max = 5,
+        Step = 0.05,
+        Unit = "sec",
+    },
+    {
+        Kind = "settingToggle",
+        Label = "Fast skill release",
+        Action = "farm.skills.fastRelease",
+        Setting = "FarmSkillFastRelease",
+    },
+    {
+        Kind = "sectionHeader",
+        Label = "Available skill keys",
+    },
+}
+for _, category in ipairs(farmSkillCategories) do
     for _, keyName in ipairs(category.Keys) do
-        local settingName = "TikiSkill_" .. category.Token .. "_" .. keyName
-        tikiSkillDefaults[settingName] = true
-        table.insert(tikiSkillControls, {
+        local settingName = "FarmSkill_" .. category.Token .. "_" .. keyName
+        farmSkillDefaults[settingName] = true
+        table.insert(farmSkillControls, {
             Kind = "settingToggle",
-            Label = "Tiki skill: " .. category.Name .. " " .. keyName,
-            Action = "farm.tikiSkill." .. category.Token .. "." .. keyName,
+            Label = category.Name .. " " .. keyName,
+            Action = "farm.skills." .. category.Token .. "." .. keyName,
             Setting = settingName,
         })
     end
@@ -82,6 +113,9 @@ local Config = {
         BringMobCountMax = 6,
         BringMobCountStep = 1,
         AutoBuso = false,
+        UseFarmSkills = false,
+        FarmSkillHoldSeconds = 0.5,
+        FarmSkillFastRelease = false,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
     },
@@ -309,21 +343,17 @@ local Config = {
                     Action = "farm.settings.autoBuso",
                     Setting = "AutoBuso",
                 },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Tiki puzzle skills",
-                },
             },
         },
     },
 }
 
-for settingName, defaultValue in pairs(tikiSkillDefaults) do
+for settingName, defaultValue in pairs(farmSkillDefaults) do
     if Config.FarmSettings[settingName] == nil then
         Config.FarmSettings[settingName] = defaultValue
     end
 end
-for _, control in ipairs(tikiSkillControls) do
+for _, control in ipairs(farmSkillControls) do
     table.insert(Config.Pages.Settings.Controls, control)
 end
 
