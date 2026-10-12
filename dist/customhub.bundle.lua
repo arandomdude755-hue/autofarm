@@ -45,14 +45,14 @@ local Config = {
         AttackNoAnimation = false,
     },
     Layout = {
-        MobileWidth = 0.92,
+        MobileWidth = 0.98,
         MobileHeight = 0.78,
         DesktopWidth = 0.72,
         DesktopHeight = 0.78,
-        ExpandedWidth = 0.96,
+        ExpandedWidth = 0.98,
         ExpandedHeight = 0.88,
-        MinSize = Vector2.new(280, 270),
-        MaxSize = Vector2.new(760, 740),
+        MinSize = Vector2.new(280, 370),
+        MaxSize = Vector2.new(920, 740),
         HeaderTop = 7,
         HeaderHeight = 34,
         CloseWidth = 26,
@@ -60,7 +60,7 @@ local Config = {
         TitleRightInset = 84,
         SidebarWidthRatio = 0.25,
         SidebarMinWidth = 88,
-        SidebarMaxWidth = 192,
+        SidebarMaxWidth = 224,
         MainPaneMinWidth = 180,
         SidebarSearchHeight = 30,
         SidebarSearchInset = 8,
@@ -864,14 +864,16 @@ function UI:_ApplySize(snapshot)
     end
     local landscape = viewport.X > viewport.Y
     local layout = self.Config.Layout
-    local widthScale = snapshot.compact and (touch and 0.92 or 0.72) or 0.96
-    local maxWidth = landscape and 760 or 500
+    local widthScale = snapshot.compact
+        and (touch and layout.MobileWidth or layout.DesktopWidth)
+        or layout.ExpandedWidth
+    local maxWidth = landscape and layout.MaxSize.X or 500
     local verticalInset = landscape and 56 or 32
     local maxHeight = math.min(
         landscape and 420 or 740,
         math.max(1, viewport.Y - verticalInset)
     )
-    local minHeight = math.min(landscape and 270 or 320, maxHeight)
+    local minHeight = math.min(landscape and 370 or 320, maxHeight)
     local pageHeight = self.ContentLayout and self.ContentLayout.AbsoluteContentSize.Y or 0
     local desiredHeight = HEADER_HEIGHT + layout.PageHeaderHeight + pageHeight + FOOTER_HEIGHT + 14
     local width = math.min(viewport.X * widthScale, maxWidth, math.max(1, viewport.X - 16))
@@ -986,7 +988,7 @@ function UI:_UpdateShellLayout()
         self.PageHeader.Size = UDim2.new(1, 0, 0, layout.PageHeaderHeight)
     end
     if self.SearchBox then
-        self.SearchBox.PlaceholderText = sidebarWidth < 148
+        self.SearchBox.PlaceholderText = sidebarWidth < 214
             and "Search..."
             or "Search section or function"
     end
@@ -1803,7 +1805,7 @@ function UI:Mount()
         BackgroundTransparency = 1,
         ClearTextOnFocus = false,
         Font = theme.MonoFont,
-        PlaceholderText = "Search section or function",
+        PlaceholderText = "Search...",
         PlaceholderColor3 = theme.MutedText,
         Text = "",
         TextColor3 = theme.Text,

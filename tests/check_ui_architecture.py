@@ -49,7 +49,9 @@ for token in (
     'Name = "PulseHalo"',
     'function UI:_AttachButtonFeedback',
     'function UI:_ApplySearchFilter()',
-    'PlaceholderText = "Search section or function"',
+    'PlaceholderText = "Search..."',
+    'sidebarWidth < 214',
+    'or "Search section or function"',
     "self.Root.Position = clampWindowDragPosition(",
     "landscape and 56 or 32",
     'Position = UDim2.new(0, 28, 0, 0)',
@@ -80,6 +82,13 @@ require(
 )
 
 require("RowHeight = 40" in CONFIG, "production control rows should stay compact")
+require("MobileWidth = 0.98" in CONFIG
+        and "ExpandedWidth = 0.98" in CONFIG
+        and "MaxSize = Vector2.new(920, 740)" in CONFIG
+        and "SidebarMaxWidth = 224" in CONFIG,
+        "landscape panel sizing should match the reference footprint")
+require("landscape and 370 or 320" in UI_MODULE,
+        "landscape panel should retain the larger reference-height footprint")
 require('Name = "PageDescription"' not in UI_MODULE
         and 'Name = "SectionHeader"' not in UI_MODULE
         and 'Name = "Detail"' not in UI_MODULE,
