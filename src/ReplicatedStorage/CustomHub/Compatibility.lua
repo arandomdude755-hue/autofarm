@@ -45,25 +45,6 @@ function Compatibility:GetUnparentedInstances()
     return instances
 end
 
-function Compatibility:GetSignalConnections(signal)
-    if typeof(signal) ~= "RBXScriptSignal" then
-        return nil, "Signal is unavailable"
-    end
-
-    local getterOk, getter = pcall(function()
-        return getconnections
-    end)
-    if not getterOk or type(getter) ~= "function" then
-        return nil, "Signal connection access is unavailable"
-    end
-
-    local callOk, connections = pcall(getter, signal)
-    if not callOk or type(connections) ~= "table" then
-        return nil, "Signal connections could not be read"
-    end
-    return connections
-end
-
 function Compatibility:GetGunShootFunction()
     if type(self.GunShootFunction) == "function" then
         return self.GunShootFunction

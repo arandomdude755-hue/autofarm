@@ -179,8 +179,7 @@ require(
     "function Compatibility:GetUnparentedInstances()" in compatibility_text
     and "return getnilinstances" in compatibility_text
     and "pcall(getter)" in compatibility_text
-    and "function Compatibility:GetSignalConnections(signal)" in compatibility_text
-    and "pcall(getter, signal)" in compatibility_text
+    and "GetSignalConnections" not in compatibility_text
     and "function Compatibility:GetGunShootFunction()" in compatibility_text
     and "pcall(getUpvalues, attack)" in compatibility_text,
     "optional executor helpers must be guarded and isolated in Compatibility",

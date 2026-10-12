@@ -90,7 +90,7 @@ require(
     and 'title.TextColor3 == Color3.new(1, 1, 1)' in ready_skill
     and 'UDim2.new(0, 0, 1, -1)' in ready_skill
     and 'UDim2.new(1, 0, 1, -1)' in ready_skill
-    and "frame.Visible" in ready_skill
+    and "frame.Visible" not in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
     and "ignoredTools" in ready_skill
@@ -99,7 +99,7 @@ require(
     and "No selected skill keys are enabled" in ready_skill
     and "All selected skill keys are on cooldown" in ready_skill
     and "GetDescendants" not in ready_skill,
-    "Skill readiness must match both BNN cooldown-ready states and skip hidden/invalid skill frames",
+    "Skill readiness must match BNN cooldown/title states without rejecting hidden ready frames",
 )
 farm_skill_lookup = function_body(
     COMBAT,
@@ -125,12 +125,11 @@ find_weapon = function_body(
     "\nfunction CombatService:FindToolByName",
 )
 require(
-    'category == "Gun" and item.Name == "Skull Guitar"' in find_weapon
-    and "foundPuzzleOnlySkullGuitar = true" in find_weapon
-    and "if foundPuzzleOnlySkullGuitar then" in find_weapon
-    and "Skull Guitar is reserved for the Tiki puzzle and is not used for farming" in find_weapon
-    and "equippedSkullGuitar" not in find_weapon,
-    "Gun selection must exclude Skull Guitar from farming, even when it is already equipped",
+    find_weapon.index("if character then") < find_weapon.index("if backpack then")
+    and 'category == "Gun" and item.Name == "Skull Guitar"' in find_weapon
+    and "foundUnequippedSkullGuitar = true" in find_weapon
+    and "Skull Guitar is in the Backpack; it will not be equipped for farming" in find_weapon,
+    "Gun selection must preserve an equipped Skull Guitar but never auto-equip one from Backpack",
 )
 
 gun_m1 = function_body(
@@ -143,10 +142,12 @@ require(
     and "self:EquipTool(tool)" in gun_m1
     and "IsGunReloading" in gun_m1
     and "NextGunM1At" in gun_m1
-    and "self:_SetTemporaryAim(target)" in gun_m1
+    and 'if tool.Name == "Skull Guitar" then' in gun_m1
+    and 'remote:FireServer("TAP", targetRoot.Position)' in gun_m1
+    and "server damage is unconfirmed" in gun_m1
     and "self.Compatibility:GetGunShootFunction()" in gun_m1
-    and 'tool.Name == "Skull Guitar"' not in gun_m1
     and "TapSkullGuitar" not in gun_m1
+    and "self:_SetTemporaryAim(target)" in gun_m1
     and "WorldToViewportPoint(targetRoot.Position)" in gun_m1
     and "Enum.UserInputType.Touch" in gun_m1
     and "SendMouseButtonEvent" in gun_m1
@@ -156,25 +157,21 @@ require(
     and "validator2:FireServer" not in gun_m1
     and "ShootGunEvent" not in gun_m1
     and "debugLibrary" not in gun_m1,
-    "Gun M1 must use validated screen-targeted input for regular guns and exclude Skull Guitar",
+    "Gun M1 must use validated screen-targeted input for regular guns and TAP only an already-equipped Skull Guitar",
 )
 gun_shoot_lookup = function_body(
     COMPATIBILITY,
     "function Compatibility:GetGunShootFunction",
     "\nfunction Compatibility:IsTouchEnabled",
 )
-mobile_signal_lookup = function_body(
-    COMPATIBILITY,
-    "function Compatibility:GetSignalConnections",
-    "\nfunction Compatibility:GetGunShootFunction",
-)
 require(
     "upvalues[9]" in gun_shoot_lookup
     and 'pcall(debugInfo, shootGun, "n")' in gun_shoot_lookup
     and 'functionName ~= "shootGun"' in gun_shoot_lookup
     and "pcall(getUpvalues, attack)" in gun_shoot_lookup
-    and "pcall(getter, signal)" in mobile_signal_lookup,
-    "Executor-specific mobile and gun helpers must be optional, guarded, and validate the game callback",
+    and "GetSignalConnections" not in COMBAT
+    and "GetSignalConnections" not in COMPATIBILITY,
+    "Optional gun internals are validated and mobile skills avoid synthetic GUI connection firing",
 )
 
 aim_target = function_body(
@@ -206,17 +203,16 @@ use_skill = function_body(
 require(
     "SendKeyEvent(true, keyName" in use_skill
     and "SendKeyEvent(false, keyName" in use_skill
-    and "GetSignalConnections" in use_skill
-    and "MouseButton1Down" in use_skill
-    and "MouseButton1Up" in use_skill
-    and "connection:Fire()" in use_skill
+    and "GetSignalConnections" not in use_skill
+    and "SendKeyEvent(true," in BNN
+    and "SendKeyEvent(false," in BNN
     and "self.ActiveInputRelease = releaseInput" in use_skill
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
-    "Skill use must prefer mobile skill-button inputs, retain keyboard fallback, and release safely",
+    "Skill use must match reference key down/hold/up behavior, keep target aim, and release safely",
 )
 
 attack_position = function_body(
@@ -344,7 +340,7 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: ready skills use validated cooldown states, mobile-button input, and cancellation-safe release")
-print("PASS: Gun Mastery uses validated regular-gun input and never uses Skull Guitar")
+print("PASS: ready skills use BNN cooldown states, VIM key input, and cancellation-safe release")
+print("PASS: Gun Mastery uses regular-gun input and only uses an already-equipped Skull Guitar")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")

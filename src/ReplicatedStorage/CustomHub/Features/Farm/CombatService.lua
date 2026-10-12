@@ -44,31 +44,29 @@ function CombatService:FindWeapon(category)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
     local character = player and player.Character
-    local foundPuzzleOnlySkullGuitar = false
+    -- Keep an already-equipped tool selected. In particular, an equipped
+    -- Skull Guitar may be used, but one in the Backpack must not be auto-equipped.
+    if character then
+        for _, item in ipairs(character:GetChildren()) do
+            if item:IsA("Tool") and item.ToolTip == category then
+                return item
+            end
+        end
+    end
+    local foundUnequippedSkullGuitar = false
     if backpack then
         for _, item in ipairs(backpack:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
                 if category == "Gun" and item.Name == "Skull Guitar" then
-                    foundPuzzleOnlySkullGuitar = true
+                    foundUnequippedSkullGuitar = true
                 else
                     return item
                 end
             end
         end
     end
-    if character then
-        for _, item in ipairs(character:GetChildren()) do
-            if item:IsA("Tool") and item.ToolTip == category then
-                if category == "Gun" and item.Name == "Skull Guitar" then
-                    foundPuzzleOnlySkullGuitar = true
-                else
-                    return item
-                end
-            end
-        end
-    end
-    if foundPuzzleOnlySkullGuitar then
-        return nil, "Skull Guitar is reserved for the Tiki puzzle and is not used for farming"
+    if foundUnequippedSkullGuitar then
+        return nil, "Skull Guitar is in the Backpack; it will not be equipped for farming"
     end
     return nil
 end
@@ -183,7 +181,6 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
                         and cooldown.Size == UDim2.new(1, 0, 1, -1)
                     local isReady = frame
                         and frame:IsA("Frame")
-                        and frame.Visible
                         and title
                         and title:IsA("TextLabel")
                         and cooldown
@@ -329,75 +326,24 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         return false, tostring(equipResult)
     end
 
-    local inputOk, inputService = pcall(function()
-        return game:GetService("VirtualInputManager")
-    end)
     local aimContext, aimError = self:_SetTemporaryAim(target)
     if not aimContext then
         return false, tostring(aimError)
     end
 
-    local function fireConnections(connections)
-        local firedCount = 0
-        local lastError
-        for _, connection in ipairs(connections or {}) do
-            local fireOk, fireError = pcall(function()
-                connection:Fire()
-            end)
-            if fireOk then
-                firedCount += 1
-            else
-                lastError = fireError
-            end
-        end
-        return firedCount, lastError
+    -- Match the reference hubs: activate skill keys through VirtualInputManager
+    -- on desktop and touch clients alike. Firing GUI signal connections does not
+    -- produce a real input event on many mobile executors.
+    local inputOk, inputService = pcall(function()
+        return game:GetService("VirtualInputManager")
+    end)
+    if not inputOk or not inputService then
+        self:_RestoreTemporaryAim(aimContext)
+        return false, "Skill input is unavailable in this runtime"
     end
-
-    local mobilePressed = false
-    local mobileReleaseConnections
-    if self.Compatibility:IsTouchEnabled()
-        and type(self.Compatibility.GetSignalConnections) == "function"
-    then
-        local connectionsOk, downConnections, upConnections = pcall(function()
-            local playerGui = self.Compatibility:GetPlayerGui()
-            local main = playerGui and playerGui:FindFirstChild("Main")
-            local skills = main and main:FindFirstChild("Skills")
-            local toolSkills = skills and skills:FindFirstChild(tool.Name)
-            local keyFrame = toolSkills and toolSkills:FindFirstChild(keyName)
-            local mobileButton = keyFrame and keyFrame:FindFirstChild("Mobile")
-            if not mobileButton or not mobileButton:IsA("GuiButton") then
-                return nil, nil
-            end
-            local down = self.Compatibility:GetSignalConnections(
-                mobileButton.MouseButton1Down
-            )
-            local up = self.Compatibility:GetSignalConnections(
-                mobileButton.MouseButton1Up
-            )
-            return down, up
-        end)
-        if connectionsOk and type(downConnections) == "table"
-            and #downConnections > 0 and type(upConnections) == "table"
-            and #upConnections > 0
-        then
-            local firedCount = fireConnections(downConnections)
-            mobilePressed = firedCount > 0
-            if mobilePressed then
-                mobileReleaseConnections = upConnections
-            end
-        end
-    end
-
-    local pressed, pressError = mobilePressed, nil
-    if not mobilePressed then
-        if not inputOk or not inputService then
-            self:_RestoreTemporaryAim(aimContext)
-            return false, "Skill input is unavailable in this runtime"
-        end
-        pressed, pressError = pcall(function()
-            inputService:SendKeyEvent(true, keyName, false, game)
-        end)
-    end
+    local pressed, pressError = pcall(function()
+        inputService:SendKeyEvent(true, keyName, false, game)
+    end)
     if not pressed then
         self:_RestoreTemporaryAim(aimContext)
         return false, "Skill key press failed: " .. tostring(pressError)
@@ -408,18 +354,11 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
             return true
         end
         inputReleased = true
-        if mobilePressed then
-            local releasedCount, releaseError = fireConnections(mobileReleaseConnections)
-            if releasedCount == 0 then
-                return false, releaseError or "Mobile skill release had no active connection"
-            end
-            return true
-        end
         inputService:SendKeyEvent(false, keyName, false, game)
         return true
     end
     self.ActiveInputRelease = releaseInput
-    self.ActiveInputService = mobilePressed and nil or inputService
+    self.ActiveInputService = inputService
     self.ActiveSkillKey = keyName
 
     local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
@@ -531,6 +470,21 @@ function CombatService:AttackGunM1(target)
             end
         end
         return math.clamp(cooldown, 0.05, 5)
+    end
+
+    if tool.Name == "Skull Guitar" then
+        local remote = tool:FindFirstChild("RemoteEvent")
+        if not remote or not remote:IsA("RemoteEvent") then
+            return false, "Equipped Skull Guitar has no supported RemoteEvent"
+        end
+        local fireOk, fireError = pcall(function()
+            remote:FireServer("TAP", targetRoot.Position)
+        end)
+        if not fireOk then
+            return false, "Equipped Skull Guitar TAP failed: " .. tostring(fireError)
+        end
+        self.NextGunM1At = now + getGunCooldown()
+        return true, "Equipped Skull Guitar TAP sent; server damage is unconfirmed"
     end
 
     local camera = self.Compatibility.Workspace.CurrentCamera
