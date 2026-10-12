@@ -381,7 +381,39 @@ local function visibleDialogueText(label, playerGui)
     return text
 end
 
-local function hasVisibleQuestGiverDialogue(playerGui, guideData)
+local function matchesQuestDialogueTaskTitle(titleText, quests)
+    if type(titleText) ~= "string" or type(quests) ~= "table" then
+        return false
+    end
+    local normalizedTitle = normalizeQuestTargetName(titleText)
+    if not normalizedTitle then
+        return false
+    end
+
+    for _, questGroup in pairs(quests) do
+        if type(questGroup) == "table" then
+            for _, questData in pairs(questGroup) do
+                local task = type(questData) == "table" and questData.Task or nil
+                if type(task) == "table" then
+                    local targetName, count = next(task)
+                    local numericCount = tonumber(count)
+                    if type(targetName) == "string" and numericCount and numericCount > 0 then
+                        local expectedTitle = "Defeat "
+                            .. tostring(numericCount)
+                            .. " "
+                            .. targetName
+                        if normalizeQuestTargetName(expectedTitle) == normalizedTitle then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function hasVisibleQuestGiverDialogue(playerGui, guideData, quests)
     local dialogueGui = playerGui and playerGui:FindFirstChild("DialogueGui")
     local titleFrame = dialogueGui
         and dialogueGui:FindFirstChild("dialogueTitleFrame", true)
@@ -396,29 +428,33 @@ local function hasVisibleQuestGiverDialogue(playerGui, guideData)
         return true
     end
 
-    -- Later quest-dialogue pages can replace the generic role title with the
-    -- speaker name. Match that label against the live quest catalog instead of
-    -- hardcoding any NPC name.
+    -- Some quest-giver pages show the NPC name instead of the generic role
+    -- title. Match that label against the live quest catalog.
     local speakerLabel = titleFrame:FindFirstChild("name")
     local speakerText = visibleDialogueText(speakerLabel, playerGui)
     local npcList = type(guideData) == "table" and guideData.NPCList or nil
-    if type(npcList) ~= "table" then
-        return false
-    end
-
-    for _, npcEntry in pairs(npcList) do
-        local npcName = type(npcEntry) == "table" and npcEntry.NPCName or nil
-        if type(npcName) == "string" then
-            npcName = npcName:match("^%s*(.-)%s*$")
-            local normalizedNpcName = string.lower(npcName)
-            if (titleText and string.lower(titleText) == normalizedNpcName)
-                or (speakerText and string.lower(speakerText) == normalizedNpcName)
-            then
-                return true
+    if type(npcList) == "table" then
+        for _, npcEntry in pairs(npcList) do
+            local npcName = type(npcEntry) == "table" and npcEntry.NPCName or nil
+            if type(npcName) == "string" then
+                npcName = npcName:match("^%s*(.-)%s*$")
+                local normalizedNpcName = string.lower(npcName)
+                if (titleText and string.lower(titleText) == normalizedNpcName)
+                    or (speakerText and string.lower(speakerText) == normalizedNpcName)
+                then
+                    return true
+                end
             end
         end
     end
-    return false
+
+    -- The second page uses a generic Rewards heading and puts the selected
+    -- quest title in the speaker slot (for example, "Defeat 8 Pirates").
+    -- Match that title against quest tasks, without accepting the quest.
+    return titleText
+        and string.lower(titleText) == "rewards"
+        and matchesQuestDialogueTaskTitle(speakerText, quests)
+        or false
 end
 
 local function readFirstSeaQuestHud(self, guideData)
@@ -434,7 +470,7 @@ local function readFirstSeaQuestHud(self, guideData)
             return "unknown", nil, "PlayerGui.Main is unavailable"
         end
         if main:IsA("ScreenGui") and not main.Enabled then
-            if hasVisibleQuestGiverDialogue(playerGui, guideData) then
+            if hasVisibleQuestGiverDialogue(playerGui, guideData, self.Quests) then
                 return "none", nil,
                     "visible Quest Giver dialogue; StartQuest still requires active-state confirmation"
             end
@@ -518,7 +554,11 @@ function QuestService:IsQuestGiverDialogueOpen()
             return false
         end
         local guideData = self.Guide and self.Guide.Data
-        return hasVisibleQuestGiverDialogue(compatibility:GetPlayerGui(), guideData)
+        return hasVisibleQuestGiverDialogue(
+            compatibility:GetPlayerGui(),
+            guideData,
+            self.Quests
+        )
     end)
     return ok and isOpen == true
 end

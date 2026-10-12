@@ -208,6 +208,16 @@ hud_reader = QUEST_SERVICE[hud_start:hud_end]
 dialogue_start = QUEST_SERVICE.index("local function hasVisibleQuestGiverDialogue")
 dialogue_end = QUEST_SERVICE.index("\nlocal function readFirstSeaQuestHud", dialogue_start)
 dialogue_detector = QUEST_SERVICE[dialogue_start:dialogue_end]
+quest_dialogue_match_start = QUEST_SERVICE.index(
+    "local function matchesQuestDialogueTaskTitle"
+)
+quest_dialogue_match_end = QUEST_SERVICE.index(
+    "\nlocal function hasVisibleQuestGiverDialogue",
+    quest_dialogue_match_start,
+)
+quest_dialogue_matcher = QUEST_SERVICE[
+    quest_dialogue_match_start:quest_dialogue_match_end
+]
 require(
     'playerGui:FindFirstChild("DialogueGui")' in dialogue_detector
     and 'FindFirstChild("dialogueTitleFrame", true)' in dialogue_detector
@@ -215,8 +225,16 @@ require(
     and 'speakerLabel = titleFrame:FindFirstChild("name")' in dialogue_detector
     and 'npcEntry.NPCName' in dialogue_detector
     and 'guideData.NPCList' in dialogue_detector
+    and 'string.lower(titleText) == "rewards"' in dialogue_detector
+    and 'matchesQuestDialogueTaskTitle(speakerText, quests)' in dialogue_detector
     and 'string.lower(titleText) == "quest giver"' in dialogue_detector,
-    "dialogue detection must recognize the generic role title or dynamically matched catalog NPC name",
+    "dialogue detection must recognize the role title, catalog NPC name, or Rewards page",
+)
+require(
+    'questData.Task' in quest_dialogue_matcher
+    and 'local expectedTitle = "Defeat "' in quest_dialogue_matcher
+    and 'normalizeQuestTargetName(expectedTitle) == normalizedTitle' in quest_dialogue_matcher,
+    "the Rewards page must match its selected quest title against live quest-task data",
 )
 require(
     'if current:IsA("ScreenGui") and not current.Enabled then\n            return false'
@@ -228,7 +246,8 @@ disabled_start = hud_reader.index("if main:IsA(\"ScreenGui\") and not main.Enabl
 disabled_end = hud_reader.index('\n        local questFrame = main:FindFirstChild("Quest")', disabled_start)
 disabled_branch = hud_reader[disabled_start:disabled_end]
 require(
-    'if hasVisibleQuestGiverDialogue(playerGui, guideData) then' in disabled_branch
+    'if hasVisibleQuestGiverDialogue(playerGui, guideData, self.Quests) then'
+    in disabled_branch
     and 'return "none", nil,' in disabled_branch
     and 'StartQuest still requires active-state confirmation' in disabled_branch
     and 'no visible Quest Giver dialogue was found' in disabled_branch
