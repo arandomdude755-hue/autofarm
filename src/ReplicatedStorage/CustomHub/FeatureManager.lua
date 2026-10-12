@@ -28,6 +28,20 @@ function FeatureManager:Initialize()
 end
 
 function FeatureManager:Dispatch(actionId, payload)
+    if actionId == "settings.uiSize.select" then
+        local layout = self.Context.Config and self.Context.Config.Layout
+        local scales = layout and layout.UiSizeScales
+        if type(scales) ~= "table"
+            or type(payload) ~= "string"
+            or type(scales[payload]) ~= "number" then
+            self.State:SetStatus("UI size setting is unavailable.", "error")
+            return false, "Unsupported UI size"
+        end
+        self.State:SetUiSize(payload)
+        self.State:SetStatus("UI size: " .. payload .. ".", "success")
+        return true
+    end
+
     if actionId == "settings.compact" then
         self.State:SetCompact(payload == true)
         self.State:SetStatus(

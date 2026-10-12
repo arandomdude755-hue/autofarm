@@ -9,6 +9,7 @@ function State.new(defaults)
     self._values = {
         selectedTab = defaults.SelectedTab,
         compact = defaults.Compact,
+        uiSize = defaults.UiSize,
         status = "Hub UI ready; Main Farm is available but disabled.",
         statusKind = "info",
         featureEnabled = {},
@@ -24,6 +25,7 @@ function State:GetSnapshot()
     return {
         selectedTab = self._values.selectedTab,
         compact = self._values.compact,
+        uiSize = self._values.uiSize,
         status = self._values.status,
         statusKind = self._values.statusKind,
         featureEnabled = featureEnabled,
@@ -80,6 +82,11 @@ function State:SetCompact(enabled)
     self:_Notify()
 end
 
+function State:SetUiSize(size)
+    self._values.uiSize = size
+    self:_Notify()
+end
+
 function State:SetFeatureEnabled(actionId, enabled)
     self._values.featureEnabled[actionId] = enabled == true
     self:_Notify()
@@ -88,6 +95,7 @@ end
 function State:ResetPresentation()
     self._values.selectedTab = self._defaults.SelectedTab
     self._values.compact = self._defaults.Compact
+    self._values.uiSize = self._defaults.UiSize
     self._values.status = "UI presentation settings reset; feature states are unchanged."
     self._values.statusKind = "success"
     self:_Notify()

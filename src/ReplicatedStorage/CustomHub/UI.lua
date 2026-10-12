@@ -61,7 +61,8 @@ local function clampDragPosition(origin, delta, viewport, size)
     )
 end
 
-local function clampWindowDragPosition(origin, delta, viewport, size)
+local function clampWindowDragPosition(origin, delta, viewport, size, headerHeight)
+    local headerExtent = headerHeight or HEADER_HEIGHT
     local visibleGripWidth = math.min(
         WINDOW_VISIBLE_GRIP_WIDTH,
         size.X,
@@ -69,7 +70,7 @@ local function clampWindowDragPosition(origin, delta, viewport, size)
     )
     local visibleHeaderHeight = math.min(
         WINDOW_VISIBLE_GRIP_HEIGHT,
-        HEADER_HEIGHT,
+        headerExtent,
         viewport.Y / 2
     )
     local halfX = size.X / 2
@@ -81,7 +82,7 @@ local function clampWindowDragPosition(origin, delta, viewport, size)
         visibleGripWidth - halfX,
         viewport.X - visibleGripWidth + halfX
     )
-    local minCenterY = visibleHeaderHeight - HEADER_HEIGHT + halfY
+    local minCenterY = visibleHeaderHeight - headerExtent + halfY
     local centerY = math.clamp(
         startCenterY + delta.Y,
         minCenterY,
@@ -127,6 +128,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         RestoreButton = nil,
         RestoreHalo = nil,
         RestorePing = nil,
+        RootScale = nil,
         SizeConstraint = nil,
         IsMinimized = false,
         RestoreDrag = nil,
@@ -308,10 +310,20 @@ function UI:_ApplySize(snapshot)
         math.max(1, viewport.Y - verticalInset)
     )
     local minHeight = math.min(landscape and 370 or 320, maxHeight)
-    local pageHeight = self.ContentLayout and self.ContentLayout.AbsoluteContentSize.Y or 0
+    local sizeScale = layout.UiSizeScales and layout.UiSizeScales[snapshot.uiSize]
+    if type(sizeScale) ~= "number" or sizeScale <= 0 then
+        return false, "Invalid UI size"
+    end
+    local currentScale = self.RootScale and self.RootScale.Scale or 1
+    local pageHeight = self.ContentLayout
+        and self.ContentLayout.AbsoluteContentSize.Y / currentScale
+        or 0
     local desiredHeight = HEADER_HEIGHT + layout.PageHeaderHeight + pageHeight + FOOTER_HEIGHT + 14
     local width = math.min(viewport.X * widthScale, maxWidth, math.max(1, viewport.X - 16))
     local height = math.clamp(desiredHeight, minHeight, maxHeight)
+    if self.RootScale then
+        self.RootScale.Scale = sizeScale
+    end
     if self.SizeConstraint then
         self.SizeConstraint.MinSize = Vector2.new(math.min(280, width), minHeight)
         self.SizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
@@ -391,7 +403,8 @@ function UI:_ClampWindow()
         self.Root.Position,
         Vector2.zero,
         viewport,
-        self.Root.AbsoluteSize
+        self.Root.AbsoluteSize,
+        HEADER_HEIGHT * (self.RootScale and self.RootScale.Scale or 1)
     )
 end
 
@@ -401,7 +414,7 @@ function UI:_UpdateShellLayout()
     end
 
     local layout = self.Config.Layout
-    local rootWidth = self.Root.AbsoluteSize.X
+    local rootWidth = self.Root.Size.X.Offset
     local maxSidebarWidth = math.max(
         72,
         math.min(layout.SidebarMaxWidth, rootWidth - layout.MainPaneMinWidth)
@@ -494,7 +507,9 @@ function UI:_Refresh(snapshot)
 
     for _, entry in ipairs(self.SelectorEntries) do
         local farmSettings = self.Config.FarmSettings or {}
-        local selectedValue = farmSettings[entry.Setting]
+        local selectedValue = entry.Setting == "UiSize"
+            and snapshot.uiSize
+            or farmSettings[entry.Setting]
         for _, option in ipairs(entry.Options) do
             local selected = option.Value == selectedValue
             option.Button.BackgroundColor3 = selected and theme.Accent or theme.TabBar
@@ -535,11 +550,12 @@ end
 
 function UI:_SyncControlGridHeight()
     if self.ControlsContainer and self.ControlGridLayout then
+        local scale = self.RootScale and self.RootScale.Scale or 1
         self.ControlsContainer.Size = UDim2.new(
             1,
             -2,
             0,
-            self.ControlGridLayout.AbsoluteContentSize.Y
+            self.ControlGridLayout.AbsoluteContentSize.Y / scale
         )
     end
 end
@@ -616,7 +632,7 @@ function UI:_ApplySearchFilter()
     local layout = self.Config.Layout
     local query = normalizeSearchText(self.SearchBox.Text)
     self.SearchQuery = query
-    local top = 0
+    local top = layout.SidebarNavInsetTop
     local firstMatch
     for _, tabName in ipairs(self.Config.Tabs) do
         local button = self.TabButtons[tabName]
@@ -899,6 +915,9 @@ function UI:Mount()
         BackgroundColor3 = theme.Background,
         BorderSizePixel = 0,
     }, self.Gui)
+    self.RootScale = create("UIScale", {
+        Scale = 1,
+    }, self.Root)
     addCorner(self.Root, 4)
     self.SizeConstraint = create("UISizeConstraint", {
         MinSize = layout.MinSize,
@@ -1309,7 +1328,7 @@ function UI:Mount()
         BorderSizePixel = 0,
     }, self.PageHeader)
 
-    local navTop = 0
+    local navTop = layout.SidebarNavInsetTop
     for _, tabName in ipairs(self.Config.Tabs) do
         local button = create("TextButton", {
             Name = "Tab_" .. tabName,
@@ -1440,7 +1459,13 @@ function UI:Mount()
     }, self.Content)
     self._contentSizeConnection = self.ContentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if self.Scroll and self.ContentLayout then
-            self.Scroll.CanvasSize = UDim2.new(0, 0, 0, self.ContentLayout.AbsoluteContentSize.Y + 4)
+            local scale = self.RootScale and self.RootScale.Scale or 1
+            self.Scroll.CanvasSize = UDim2.new(
+                0,
+                0,
+                0,
+                self.ContentLayout.AbsoluteContentSize.Y / scale + 4
+            )
         end
         self:_ApplySize(self.State:GetSnapshot())
     end)
@@ -1500,6 +1525,7 @@ function UI:Destroy()
     self.RestoreButton = nil
     self.RestoreHalo = nil
     self.RestorePing = nil
+    self.RootScale = nil
     self.SizeConstraint = nil
     self.IsMinimized = false
     self.RestoreDrag = nil

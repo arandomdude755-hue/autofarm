@@ -5,7 +5,8 @@ local Config = {
     Version = "UI shell",
     Defaults = {
         SelectedTab = "Main",
-        Compact = true,
+        Compact = false,
+        UiSize = "Large",
         StatusMaxCharacters = 88,
     },
     FarmSettings = {
@@ -16,12 +17,17 @@ local Config = {
         AttackNoAnimation = false,
     },
     Layout = {
-        MobileWidth = 0.98,
+        MobileWidth = 0.86,
         MobileHeight = 0.78,
         DesktopWidth = 0.72,
         DesktopHeight = 0.78,
         ExpandedWidth = 0.98,
         ExpandedHeight = 0.88,
+        UiSizeScales = {
+            Small = 0.82,
+            Medium = 0.91,
+            Large = 1,
+        },
         MinSize = Vector2.new(280, 370),
         MaxSize = Vector2.new(920, 740),
         HeaderTop = 7,
@@ -36,6 +42,7 @@ local Config = {
         SidebarSearchHeight = 30,
         SidebarSearchInset = 8,
         SidebarNavTop = 52,
+        SidebarNavInsetTop = 4,
         SidebarRowHeight = 27,
         SidebarRowGap = 2,
         PageHeaderHeight = 32,
@@ -148,6 +155,13 @@ local Config = {
         },
         Settings = {
             Controls = {
+                {
+                    Kind = "settingSelect",
+                    Label = "UI size",
+                    Action = "settings.uiSize.select",
+                    Setting = "UiSize",
+                    Options = { "Small", "Medium", "Large" },
+                },
                 {
                     Kind = "settingToggle",
                     Label = "Compact layout",

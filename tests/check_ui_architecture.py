@@ -10,6 +10,8 @@ UI_MODULE_PATH = "src/ReplicatedStorage/CustomHub/UI.lua"
 UI_MODULE = (ROOT / UI_MODULE_PATH).read_text(encoding="utf-8")
 CONFIG_PATH = "src/ReplicatedStorage/CustomHub/Config.lua"
 CONFIG = (ROOT / CONFIG_PATH).read_text(encoding="utf-8")
+STATE = (ROOT / "src/ReplicatedStorage/CustomHub/State.lua").read_text(encoding="utf-8")
+MANAGER = (ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua").read_text(encoding="utf-8")
 DOCS = (ROOT / "docs/BNN_SOURCE_INVENTORY.md").read_text(encoding="utf-8")
 
 
@@ -66,7 +68,7 @@ require(
     and "WINDOW_VISIBLE_GRIP_HEIGHT = 24" in UI_MODULE
     and "visibleGripWidth - halfX" in window_drag_helper
     and "viewport.X - visibleGripWidth + halfX" in window_drag_helper
-    and "visibleHeaderHeight - HEADER_HEIGHT + halfY" in window_drag_helper
+    and "visibleHeaderHeight - headerExtent + halfY" in window_drag_helper
     and "viewport.Y - visibleHeaderHeight + halfY" in window_drag_helper,
     "window dragging must allow partial off-screen movement while keeping a header grip visible",
 )
@@ -82,13 +84,38 @@ require(
 )
 
 require("RowHeight = 40" in CONFIG, "production control rows should stay compact")
-require("MobileWidth = 0.98" in CONFIG
+require("MobileWidth = 0.86" in CONFIG
         and "ExpandedWidth = 0.98" in CONFIG
         and "MaxSize = Vector2.new(920, 740)" in CONFIG
         and "SidebarMaxWidth = 224" in CONFIG,
         "landscape panel sizing should match the reference footprint")
 require("landscape and 370 or 320" in UI_MODULE,
         "landscape panel should retain the larger reference-height footprint")
+require("SidebarNavInsetTop = 4" in CONFIG
+        and "local top = layout.SidebarNavInsetTop" in UI_MODULE
+        and "local navTop = layout.SidebarNavInsetTop" in UI_MODULE,
+        "navigation rows need an inset so the selected outline is not clipped")
+settings_page = CONFIG[CONFIG.index("Settings = {"):]
+require('Label = "UI size"' in settings_page
+        and 'Action = "settings.uiSize.select"' in settings_page
+        and 'Setting = "UiSize"' in settings_page
+        and 'Options = { "Small", "Medium", "Large" }' in settings_page,
+        "Settings must expose the selectable UI size control")
+require('UiSize = "Large"' in CONFIG
+        and "Small = 0.82" in CONFIG
+        and "Medium = 0.91" in CONFIG
+        and "Large = 1" in CONFIG
+        and "self.RootScale = create(\"UIScale\"" in UI_MODULE
+        and "self.RootScale.Scale = sizeScale" in UI_MODULE,
+        "UI size options must scale the complete shell")
+require("function State:SetUiSize(size)" in STATE
+        and "uiSize = self._values.uiSize" in STATE
+        and "uiSize = self._defaults.UiSize" in STATE
+        and 'actionId == "settings.uiSize.select"' in MANAGER
+        and "self.State:SetUiSize(payload)" in MANAGER,
+        "UI size selection must update state and reset to its default")
+require("Compact = false" in CONFIG,
+        "default sizing should use the large panel while compact mode stays opt-in")
 require('Name = "PageDescription"' not in UI_MODULE
         and 'Name = "SectionHeader"' not in UI_MODULE
         and 'Name = "Detail"' not in UI_MODULE,
