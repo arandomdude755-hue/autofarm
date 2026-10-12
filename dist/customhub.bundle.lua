@@ -59,7 +59,7 @@ local farmModeProfiles = {
         QuestName = "TikiQuest3",
         QuestId = 2,
         BossName = "Tyrant of the Skies",
-        EventPhaseNotMigrated = true,
+        TikiEventPhase = true,
     },
 }
 
@@ -5400,6 +5400,7 @@ local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
 local FARM_STEP_INTERVAL = 0.1
 local NPC_SCAN_INTERVAL = 0.15
 local SPAWN_SCAN_INTERVAL = 1
+local TIKI_EVENT_SCAN_INTERVAL = 1
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
@@ -6332,6 +6333,118 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     end
 end
 
+function MainFarm:_RefreshTikiEventState(origin)
+    local now = os.clock()
+    if now < (self.NextTikiEventScanAt or 0) then
+        return self.TikiEventActive == true, self.TikiEventTarget
+    end
+    self.NextTikiEventScanAt = now + TIKI_EVENT_SCAN_INTERVAL
+    self.TikiEventActive = false
+    self.TikiEventTarget = nil
+
+    local workspace = self.Context.Compatibility.Workspace
+    local map = workspace:FindFirstChild("Map")
+    local outpost = map and map:FindFirstChild("TikiOutpost")
+    local island = outpost and outpost:FindFirstChild("IslandModel")
+    if not island then
+        return false, nil
+    end
+
+    for index = 1, 4 do
+        local eye = island:FindFirstChild("Eye" .. tostring(index), true)
+        if not eye or not eye:IsA("BasePart") or eye.Transparency ~= 0 then
+            return false, nil
+        end
+    end
+
+    self.TikiEventActive = true
+    local arena = island:FindFirstChild("EagleBossArena", true)
+    if not arena then
+        return true, nil
+    end
+
+    local nearestTarget = nil
+    local nearestDistance = math.huge
+    for _, eventObject in ipairs(arena:GetChildren()) do
+        if eventObject.Name == "Tree"
+            and eventObject:GetAttribute("AlreadyDestroyedClient") ~= true
+        then
+            local pivotOk, pivot = pcall(function()
+                if eventObject:IsA("Model") then
+                    return eventObject:GetPivot()
+                elseif eventObject:IsA("BasePart") then
+                    return eventObject.CFrame
+                end
+                return nil
+            end)
+            if pivotOk and typeof(pivot) == "CFrame" then
+                local distance = (pivot.Position - origin).Magnitude
+                if distance < nearestDistance then
+                    nearestTarget = eventObject
+                    nearestDistance = distance
+                end
+            end
+        end
+    end
+
+    self.TikiEventTarget = nearestTarget
+    return true, nearestTarget
+end
+
+function MainFarm:_StepTikiEventPhase(root, session)
+    local eventActive, eventTarget = self:_RefreshTikiEventState(root.Position)
+    if not eventActive then
+        return false
+    end
+
+    if self.Target then
+        self:_ClearTarget()
+    end
+    if eventTarget and (
+        eventTarget.Parent == nil
+        or eventTarget:GetAttribute("AlreadyDestroyedClient") == true
+    ) then
+        self.NextTikiEventScanAt = 0
+        self.TikiEventTarget = nil
+        eventTarget = nil
+    end
+
+    if not eventTarget then
+        self:_HoldPosition(session)
+        self:_SetStatus(
+            "Tiki event phase active; waiting for an available event object",
+            "info"
+        )
+        return true
+    end
+
+    local pivotOk, pivot = pcall(function()
+        if eventTarget:IsA("Model") then
+            return eventTarget:GetPivot()
+        elseif eventTarget:IsA("BasePart") then
+            return eventTarget.CFrame
+        end
+        return nil
+    end)
+    if not pivotOk or typeof(pivot) ~= "CFrame" then
+        self:_HoldPosition(session)
+        self:_SetStatus("Tiki event object has no usable position; waiting safely", "warning")
+        return true
+    end
+
+    if (pivot.Position - root.Position).Magnitude > 10 then
+        self:_MoveTo(pivot * CFrame.new(0, 0, 10), session, 2.5, true)
+        self:_SetStatus("Approaching Tiki event object; automated skill use is disabled", "info")
+    else
+        self:_HoldPosition(session)
+        self:_SetStatus(
+            "Tiki event object reached; activate it manually with your chosen combat method",
+            "warning"
+        )
+    end
+    return true
+end
+
 function MainFarm:_StepBossEventMode(
     session,
     root,
@@ -6445,6 +6558,13 @@ function MainFarm:_StepBossEventMode(
         targetIsBoss = self.TargetIsBoss == true
     end
 
+    if target and targetIsBoss then
+        self:_EngageModeTarget(target, targetIsBoss, root, session)
+        return
+    end
+    if profile.TikiEventPhase == true and self:_StepTikiEventPhase(root, session) then
+        return
+    end
     if target then
         self:_EngageModeTarget(target, targetIsBoss, root, session)
         return
@@ -6541,15 +6661,12 @@ function MainFarm:_StepBossEventMode(
     end
 
     self:_HoldPosition(session)
-    local limitation = profile.EventPhaseNotMigrated
-        and "; the BNN-specific Eye/Tree activation phase is not migrated"
-        or ""
     local bossText = profile.BossName
         and (" or live " .. profile.BossName)
         or ""
     self:_SetStatus(
         "No live quest-family target" .. bossText
-            .. " or supported spawn marker is available" .. limitation,
+            .. " or supported spawn marker is available",
         "warning"
     )
 end
@@ -7118,6 +7235,9 @@ function MainFarm:Initialize(context)
     self.SpawnRetryAt = nil
     self.NextSpawnSearchAt = 0
     self.NextEnemySearchAt = 0
+    self.NextTikiEventScanAt = 0
+    self.TikiEventActive = false
+    self.TikiEventTarget = nil
 
     local player = context.Compatibility.Player
     if player then
@@ -7135,6 +7255,9 @@ function MainFarm:Initialize(context)
             self.TargetName = nil
             self.Character = nil
             self.QuestDialogueRecovery = nil
+            self.NextTikiEventScanAt = 0
+            self.TikiEventActive = false
+            self.TikiEventTarget = nil
             self:_ResetSpawnSearch(nil)
             self:_SetStatus("Character changed; farm session will reacquire after respawn", "warning")
         end)
@@ -7185,6 +7308,9 @@ function MainFarm:Start()
     self.PendingQuestTargetName = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
+    self.NextTikiEventScanAt = 0
+    self.TikiEventActive = false
+    self.TikiEventTarget = nil
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
@@ -7212,6 +7338,9 @@ function MainFarm:Stop()
     self.Target = nil
     self.TargetName = nil
     self.TargetIsBoss = nil
+    self.NextTikiEventScanAt = 0
+    self.TikiEventActive = false
+    self.TikiEventTarget = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
     self.PendingQuestTargetName = nil

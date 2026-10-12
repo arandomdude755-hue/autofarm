@@ -30,7 +30,7 @@ local farmModeProfiles = {
         QuestName = "TikiQuest3",
         QuestId = 2,
         BossName = "Tyrant of the Skies",
-        EventPhaseNotMigrated = true,
+        TikiEventPhase = true,
     },
 }
 

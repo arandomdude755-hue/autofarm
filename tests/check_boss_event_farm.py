@@ -58,12 +58,13 @@ require(
     "Cake Prince boss skipping must be a functional setting rather than a placeholder",
 )
 require(
-    "EventPhaseNotMigrated = true" in CONFIG
+    "TikiEventPhase = true" in CONFIG
+    and "EventPhaseNotMigrated" not in CONFIG
     and "Hop Find Katakuri" not in CONFIG
     and "SpecialHop" not in MAIN_FARM
     and "__ServerBrowser" not in MAIN_FARM
     and "AutoAllSkill" not in MAIN_FARM,
-    "Unverified hopping and BNN-only Tyrant automation must remain unavailable",
+    "Unverified server hopping and broad skill automation must remain unavailable",
 )
 
 targets = function_body(
@@ -130,6 +131,44 @@ require(
     and "self.EnemyService:MarkSpawnIgnored" in mode_step,
     "Mode targets must use existing spawn availability and retry handling",
 )
+require(
+    mode_step.index("if target and targetIsBoss then")
+    < mode_step.index("self:_StepTikiEventPhase(root, session)")
+    < mode_step.index("if target then"),
+    "The Tiki event phase must prioritize its objects after a live boss but before regular quest mobs",
+)
+event_refresh = function_body(
+    MAIN_FARM,
+    "function MainFarm:_RefreshTikiEventState",
+    "\nfunction MainFarm:_StepTikiEventPhase",
+)
+require(
+    "TIKI_EVENT_SCAN_INTERVAL" in MAIN_FARM
+    and "for index = 1, 4 do" in event_refresh
+    and 'FindFirstChild("Eye" .. tostring(index), true)' in event_refresh
+    and "eye.Transparency ~= 0" in event_refresh
+    and 'FindFirstChild("EagleBossArena", true)' in event_refresh
+    and 'eventObject.Name == "Tree"' in event_refresh
+    and 'GetAttribute("AlreadyDestroyedClient") ~= true' in event_refresh
+    and "arena:GetChildren()" in event_refresh
+    and "GetDescendants" not in event_refresh,
+    "Tiki event discovery must use the four visible eyes and bounded direct arena children",
+)
+event_step = function_body(
+    MAIN_FARM,
+    "function MainFarm:_StepTikiEventPhase",
+    "\nfunction MainFarm:_StepBossEventMode",
+)
+require(
+    "self:_MoveTo(" in event_step
+    and "self:_HoldPosition(session)" in event_step
+    and "activate it manually" in event_step
+    and "AutoAllSkill" not in event_step
+    and "SpamGunSkullGuitar" not in event_step
+    and "InvokeServer" not in event_step
+    and "VirtualInputManager" not in event_step,
+    "Safe Tiki targeting must move to the event object without invoking skills or remotes",
+)
 mode_spawn = function_body(
     MAIN_FARM,
     "function MainFarm:_FindModeSpawn",
@@ -163,4 +202,5 @@ require(
 print("PASS: Bone, Cake Prince, and Tiki modes are configured with sea and level gates")
 print("PASS: quest target names and quest giver data come from live quest catalogs")
 print("PASS: special modes use validated quest acceptance and existing spawn availability")
-print("PASS: server hopping and BNN-only Tyrant event actions remain unavailable")
+print("PASS: Tiki event objects are detected and approached without automated skill or remote actions")
+print("PASS: unverified server hopping remains unavailable")
