@@ -85,6 +85,8 @@ local Config = {
         AuraDistanceMin = 0,
         AuraDistanceMax = 1000,
         AuraDistanceStep = 1,
+        BringMobs = false,
+        AutoBuso = false,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
     },
@@ -239,13 +241,6 @@ local Config = {
                     Label = "Copy status report",
                     Action = "farm.status.copy",
                 },
-                {
-                    Kind = "settingDropdown",
-                    Label = "Weapon category",
-                    Action = "farm.weaponCategory.select",
-                    Setting = "WeaponCategory",
-                    Options = weaponCategories,
-                },
             },
         },
         Player = {
@@ -267,6 +262,7 @@ local Config = {
             },
         },
         Settings = {
+            SingleColumn = true,
             Controls = {
                 {
                     Kind = "settingDropdown",
@@ -284,6 +280,29 @@ local Config = {
                     Kind = "button",
                     Label = "Reset UI settings",
                     Action = "settings.reset",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Farm settings",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Farm weapon",
+                    Action = "farm.weaponCategory.select",
+                    Setting = "WeaponCategory",
+                    Options = weaponCategories,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Bring mobs",
+                    Action = "farm.settings.bringMobs",
+                    Setting = "BringMobs",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto turn on Buso",
+                    Action = "farm.settings.autoBuso",
+                    Setting = "AutoBuso",
                 },
             },
         },
@@ -418,6 +437,7 @@ Compatibility.__index = Compatibility
 function Compatibility.new()
     return setmetatable({
         Player = Players.LocalPlayer,
+        Players = Players,
         ReplicatedStorage = ReplicatedStorage,
         Workspace = Workspace,
         RunService = RunService,
@@ -646,7 +666,7 @@ function FeatureManager:Dispatch(actionId, payload)
 
         farmSettings.WeaponCategory = selectedCategory
         self.State:SetStatus(
-            "Weapon category: " .. tostring(farmSettings.WeaponCategory),
+            "Farm weapon: " .. tostring(farmSettings.WeaponCategory),
             "success"
         )
         return true
@@ -851,6 +871,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         ControlGridLayout = nil,
         ActiveControls = nil,
         ActiveTab = nil,
+        ActivePage = nil,
         SearchQuery = "",
         _contentSizeConnection = nil,
         ViewportConnection = nil,
@@ -1302,12 +1323,15 @@ function UI:_UpdateControlGridLayout()
         viewport = Vector2.new(390, 844)
     end
     local landscape = viewport.X > viewport.Y
-    local columnCount = landscape
-        and self.ControlsContainer.AbsoluteSize.X >= 620
-        and self.ActiveControls
-        and #self.ActiveControls > 1
-        and 2
-        or 1
+    local columnCount = 1
+    if not (self.ActivePage and self.ActivePage.SingleColumn) then
+        columnCount = landscape
+            and self.ControlsContainer.AbsoluteSize.X >= 620
+            and self.ActiveControls
+            and #self.ActiveControls > 1
+            and 2
+            or 1
+    end
     local rowHeight = self.Config.Layout.RowHeight
     self.ControlGridLayout.FillDirectionMaxCells = columnCount
     self.ControlGridLayout.CellSize = columnCount == 2
@@ -1340,8 +1364,11 @@ function UI:_ApplyControlSearchHighlight()
     local theme = self.Config.Theme
     local query = self.SearchQuery
     for _, control in ipairs(self.ActiveControls) do
+        local nodeName = control.Kind == "sectionHeader"
+            and ("Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"))
+            or ("Action_" .. control.Action:gsub("[^%w]", "_"))
         local row = self.ControlsContainer:FindFirstChild(
-            "Action_" .. control.Action:gsub("[^%w]", "_")
+            nodeName
         )
         if row then
             local matched = query ~= ""
@@ -1469,17 +1496,22 @@ function UI:_OpenDropdown(entry)
     local anchorPosition = anchor.AbsolutePosition
     local anchorSize = anchor.AbsoluteSize
     local left = (anchorPosition.X - rootPosition.X) / scale
-    local top = (anchorPosition.Y - rootPosition.Y) / scale
-        + anchorSize.Y / scale
-        + 4
+    local anchorTop = (anchorPosition.Y - rootPosition.Y) / scale
+    local anchorHeight = anchorSize.Y / scale
+    local belowTop = anchorTop + anchorHeight + 4
     local menuWidth = anchorSize.X / scale
     local rootHeight = rootSize.Y / scale
-    local availableHeight = math.max(0, rootHeight - top - 8)
+    local belowAvailable = math.max(0, rootHeight - belowTop - 8)
+    local aboveAvailable = math.max(0, anchorTop - 8)
+    local openBelow = belowAvailable >= totalHeight
+        or belowAvailable >= aboveAvailable
+    local availableHeight = openBelow and belowAvailable or aboveAvailable
     local menuHeight = math.min(totalHeight, availableHeight)
     if menuHeight < 1 then
-        self.State:SetStatus("There is not enough room below this selector to open it.", "error")
+        self.State:SetStatus("There is not enough room to open this selector.", "error")
         return false
     end
+    local top = openBelow and belowTop or math.max(8, anchorTop - menuHeight - 4)
 
     local active = {
         Entry = entry,
@@ -1655,6 +1687,36 @@ end
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
+    if control.Kind == "sectionHeader" then
+        local row = create("Frame", {
+            Name = "Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"),
+            Size = UDim2.new(1, 0, 0, layout.RowHeight),
+            BackgroundColor3 = theme.Control,
+            BorderSizePixel = 0,
+            LayoutOrder = #self.ControlsContainer:GetChildren(),
+        }, self.ControlsContainer)
+        addCorner(row, 4)
+        create("Frame", {
+            Name = "Accent",
+            Position = UDim2.new(0, layout.RowInset, 0.5, -7),
+            Size = UDim2.fromOffset(3, 14),
+            BackgroundColor3 = theme.Accent,
+            BorderSizePixel = 0,
+        }, row)
+        create("TextLabel", {
+            Name = "Title",
+            Position = UDim2.new(0, layout.RowInset + 12, 0, 0),
+            Size = UDim2.new(1, -(layout.RowInset * 2 + 12), 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = control.Label,
+            TextColor3 = theme.Text,
+            TextSize = theme.TextSizes.Control,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, row)
+        return row
+    end
+
     local hasToggle = control.Kind == "featureToggle"
         or control.Kind == "settingToggle"
     local isSelector = control.Kind == "settingSelect"
@@ -2007,6 +2069,7 @@ function UI:_RenderTab(tabName)
     self:_ClearPage()
     local theme = self.Config.Theme
     local layout = self.Config.Layout
+    self.ActivePage = page
     self.ActiveControls = page.Controls
     self.ControlsContainer = create("Frame", {
         Name = "ControlGrid",
@@ -2037,8 +2100,11 @@ function UI:_RenderTab(tabName)
     )
     for index, control in ipairs(page.Controls) do
         self:_AddControl(control)
+        local nodeName = control.Kind == "sectionHeader"
+            and ("Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"))
+            or ("Action_" .. control.Action:gsub("[^%w]", "_"))
         local row = self.ControlsContainer:FindFirstChild(
-            "Action_" .. control.Action:gsub("[^%w]", "_")
+            nodeName
         )
         if row then
             row.LayoutOrder = index
@@ -3610,6 +3676,10 @@ EnemyService.__index = EnemyService
 local HIDDEN_SPAWN_REFRESH_INTERVAL = 5
 local HIDDEN_SPAWN_RETRY_INTERVAL = 10
 local HIDDEN_SPAWN_SCAN_CHUNK_SIZE = 64
+local BRING_MOB_COOLDOWN = 0.75
+local BRING_MOB_MAX_DISTANCE = 200
+local BRING_MOB_PLAYER_RANGE = 50
+local BRING_MOB_OTHER_PLAYER_RANGE = 300
 
 local function disconnect(connection)
     if connection then
@@ -3760,6 +3830,8 @@ function EnemyService.new(compatibility)
         SpawnMarkers = setmetatable({}, { __mode = "k" }),
         SpawnMarkersByName = {},
         SpawnMarkerNames = setmetatable({}, { __mode = "k" }),
+        BringMobNextAt = 0,
+        BringMobTarget = nil,
     }, EnemyService)
 end
 
@@ -4246,7 +4318,95 @@ function EnemyService:ClearTracking()
     self.SpawnMarkersByName = {}
     self.SpawnMarkerNames = setmetatable({}, { __mode = "k" })
     self.HiddenSpawnCache = nil
+    self.BringMobNextAt = 0
+    self.BringMobTarget = nil
     table.clear(self.PreparedTargets)
+end
+
+function EnemyService:_HasNearbyOtherPlayer(position)
+    local players = self.Compatibility and self.Compatibility.Players
+    local localPlayer = self.Compatibility and self.Compatibility.Player
+    if not players or type(players.GetPlayers) ~= "function" then
+        return false
+    end
+
+    for _, player in ipairs(players:GetPlayers()) do
+        if player ~= localPlayer then
+            local character = player.Character
+            local otherRoot = character and character:FindFirstChild("HumanoidRootPart")
+            if otherRoot and otherRoot:IsA("BasePart")
+                and (otherRoot.Position - position).Magnitude <= BRING_MOB_OTHER_PLAYER_RANGE
+            then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function EnemyService:BringMatchingMob(target, playerRoot)
+    if not self:IsAlive(target) or not playerRoot or not self.EnemyContainer then
+        return 0
+    end
+
+    local targetRoot = target:FindFirstChild("HumanoidRootPart")
+    if not targetRoot or not targetRoot:IsA("BasePart")
+        or (targetRoot.Position - playerRoot.Position).Magnitude > BRING_MOB_PLAYER_RANGE
+    then
+        return 0
+    end
+
+    local now = os.clock()
+    if self.BringMobTarget == target and now < self.BringMobNextAt then
+        return 0
+    end
+    self.BringMobTarget = target
+    self.BringMobNextAt = now + BRING_MOB_COOLDOWN
+
+    local normalizedName = normalizeEnemyName(target.Name)
+    if not normalizedName then
+        return 0
+    end
+    local bucket = self.EnemyModelsByName[normalizedName] or {}
+    local candidate = nil
+    local candidateDistance = math.huge
+    for enemy in pairs(bucket) do
+        if enemy ~= target
+            and enemy.Name == target.Name
+            and isDescendantOf(enemy, self.EnemyContainer)
+            and not enemy:FindFirstChild("Ignored")
+            and self:IsAlive(enemy)
+        then
+            local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+            if enemyRoot and enemyRoot:IsA("BasePart") and not enemyRoot.Anchored then
+                local distance = (enemyRoot.Position - targetRoot.Position).Magnitude
+                -- This nearby-player check follows the reference hubs' conservative
+                -- guard; it is not a guarantee of client network ownership.
+                if distance > 8
+                    and distance <= BRING_MOB_MAX_DISTANCE
+                    and not self:_HasNearbyOtherPlayer(enemyRoot.Position)
+                    and distance < candidateDistance
+                then
+                    candidate = enemy
+                    candidateDistance = distance
+                end
+            end
+        end
+    end
+
+    -- Keep the gather size small: the selected target plus at most one match.
+    if not candidate then
+        return 0
+    end
+
+    local candidateRoot = candidate:FindFirstChild("HumanoidRootPart")
+    if not candidateRoot then
+        return 0
+    end
+    local moved = pcall(function()
+        candidateRoot.CFrame = targetRoot.CFrame * CFrame.new(3, 0, 0)
+    end)
+    return moved and 1 or 0
 end
 
 function EnemyService:PrepareTarget(model, playerRoot)
@@ -5247,6 +5407,7 @@ local MAX_EMPTY_SPAWN_CYCLES = 2
 local MainFarm = {
     Running = false,
     Session = 0,
+    AutoBusoGeneration = 0,
     Context = nil,
 }
 
@@ -5957,6 +6118,15 @@ function MainFarm:_RequestQuest(candidate, session)
     end
 end
 
+function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    if not farmSettings or farmSettings.BringMobs ~= true or targetIsBoss == true then
+        return 0
+    end
+    return self.EnemyService:BringMatchingMob(target, playerRoot)
+end
+
 function MainFarm:_StepAura(session, root)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local radius = tonumber(farmSettings.AuraDistance) or 300
@@ -6002,6 +6172,7 @@ function MainFarm:_StepAura(session, root)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    self:_BringMobsIfEnabled(target, root, false)
     local weaponCategory = farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
@@ -6119,6 +6290,7 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    self:_BringMobsIfEnabled(target, root, targetIsBoss)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
@@ -6773,6 +6945,7 @@ function MainFarm:_Step(session)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    self:_BringMobsIfEnabled(target, root, false)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
@@ -6833,7 +7006,83 @@ function MainFarm:_Run(session)
     end
 end
 
+function MainFarm:_HasActiveBuso(character)
+    if not character then
+        return false
+    end
+    if character:FindFirstChild("HasBuso") then
+        return true
+    end
+    for _, child in ipairs(character:GetChildren()) do
+        if string.find(child.Name, "_BusoLayer", 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+function MainFarm:_SetAutoBuso(enabled, updateStatus)
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    if not farmSettings or type(enabled) ~= "boolean" then
+        self:_SetStatus("Auto Buso setting is unavailable or invalid", "error")
+        return false
+    end
+
+    farmSettings.AutoBuso = enabled
+    self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
+    local generation = self.AutoBusoGeneration
+    if not enabled then
+        if updateStatus ~= false then
+            self:_SetStatus("Auto Buso disabled", "info")
+        end
+        return true
+    end
+
+    if updateStatus ~= false then
+        self:_SetStatus("Auto Buso enabled; it will not purchase Haki", "success")
+    end
+    local runContext = self.Context
+    task.spawn(function()
+        while self.AutoBusoGeneration == generation
+            and self.Context == runContext
+            and farmSettings.AutoBuso == true
+        do
+            local compatibility = runContext.Compatibility
+            local player = compatibility and compatibility.Player
+            local character = player and player.Character
+            if character and not self:_HasActiveBuso(character) then
+                local commF, remoteError = compatibility:GetCommF()
+                if self.Context ~= runContext or self.AutoBusoGeneration ~= generation then
+                    break
+                end
+                if not commF then
+                    self:_SetStatus("Auto Buso waiting: " .. tostring(remoteError), "warning")
+                    task.wait(2)
+                else
+                    local invoked, invokeError = pcall(function()
+                        return commF:InvokeServer("Buso")
+                    end)
+                    if not invoked
+                        and self.Context == runContext
+                        and self.AutoBusoGeneration == generation
+                    then
+                        self:_SetStatus(
+                            "Auto Buso request failed: " .. tostring(invokeError),
+                            "warning"
+                        )
+                    end
+                    task.wait(2)
+                end
+            end
+            task.wait(1)
+        end
+    end)
+    return true
+end
+
 function MainFarm:Initialize(context)
+    self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
     self.Context = context
     self.Running = false
     self.Session += 1
@@ -6900,6 +7149,10 @@ function MainFarm:Initialize(context)
             self:_ClearTarget()
             self:_ResetSpawnSearch(nil)
         end)
+    end
+    local farmSettings = context.Config and context.Config.FarmSettings
+    if farmSettings and farmSettings.AutoBuso == true then
+        self:_SetAutoBuso(true, false)
     end
     return true
 end
@@ -6983,6 +7236,21 @@ function MainFarm:Handle(actionId, payload)
         return self:CopyStatusReport()
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    if actionId == "farm.settings.bringMobs" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Bring mobs setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.BringMobs = payload
+        self:_SetStatus(
+            "Bring mobs " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.settings.autoBuso" then
+        return self:_SetAutoBuso(payload)
+    end
     if actionId == "farm.autoModeQuest" then
         if not farmSettings or type(payload) ~= "boolean" then
             self:_SetStatus("Auto quest setting is unavailable or invalid", "error")
@@ -7075,6 +7343,7 @@ end
 
 function MainFarm:Cleanup()
     self:Stop()
+    self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
     if self.CharacterAddedConnection then
         self.CharacterAddedConnection:Disconnect()
         self.CharacterAddedConnection = nil

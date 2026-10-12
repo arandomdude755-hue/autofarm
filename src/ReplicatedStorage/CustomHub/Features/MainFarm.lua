@@ -24,6 +24,7 @@ local MAX_EMPTY_SPAWN_CYCLES = 2
 local MainFarm = {
     Running = false,
     Session = 0,
+    AutoBusoGeneration = 0,
     Context = nil,
 }
 
@@ -734,6 +735,15 @@ function MainFarm:_RequestQuest(candidate, session)
     end
 end
 
+function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    if not farmSettings or farmSettings.BringMobs ~= true or targetIsBoss == true then
+        return 0
+    end
+    return self.EnemyService:BringMatchingMob(target, playerRoot)
+end
+
 function MainFarm:_StepAura(session, root)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local radius = tonumber(farmSettings.AuraDistance) or 300
@@ -779,6 +789,7 @@ function MainFarm:_StepAura(session, root)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    self:_BringMobsIfEnabled(target, root, false)
     local weaponCategory = farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
@@ -896,6 +907,7 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    self:_BringMobsIfEnabled(target, root, targetIsBoss)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
@@ -1550,6 +1562,7 @@ function MainFarm:_Step(session)
     end
 
     self.EnemyService:PrepareTarget(target, root)
+    self:_BringMobsIfEnabled(target, root, false)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
@@ -1610,7 +1623,83 @@ function MainFarm:_Run(session)
     end
 end
 
+function MainFarm:_HasActiveBuso(character)
+    if not character then
+        return false
+    end
+    if character:FindFirstChild("HasBuso") then
+        return true
+    end
+    for _, child in ipairs(character:GetChildren()) do
+        if string.find(child.Name, "_BusoLayer", 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+function MainFarm:_SetAutoBuso(enabled, updateStatus)
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    if not farmSettings or type(enabled) ~= "boolean" then
+        self:_SetStatus("Auto Buso setting is unavailable or invalid", "error")
+        return false
+    end
+
+    farmSettings.AutoBuso = enabled
+    self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
+    local generation = self.AutoBusoGeneration
+    if not enabled then
+        if updateStatus ~= false then
+            self:_SetStatus("Auto Buso disabled", "info")
+        end
+        return true
+    end
+
+    if updateStatus ~= false then
+        self:_SetStatus("Auto Buso enabled; it will not purchase Haki", "success")
+    end
+    local runContext = self.Context
+    task.spawn(function()
+        while self.AutoBusoGeneration == generation
+            and self.Context == runContext
+            and farmSettings.AutoBuso == true
+        do
+            local compatibility = runContext.Compatibility
+            local player = compatibility and compatibility.Player
+            local character = player and player.Character
+            if character and not self:_HasActiveBuso(character) then
+                local commF, remoteError = compatibility:GetCommF()
+                if self.Context ~= runContext or self.AutoBusoGeneration ~= generation then
+                    break
+                end
+                if not commF then
+                    self:_SetStatus("Auto Buso waiting: " .. tostring(remoteError), "warning")
+                    task.wait(2)
+                else
+                    local invoked, invokeError = pcall(function()
+                        return commF:InvokeServer("Buso")
+                    end)
+                    if not invoked
+                        and self.Context == runContext
+                        and self.AutoBusoGeneration == generation
+                    then
+                        self:_SetStatus(
+                            "Auto Buso request failed: " .. tostring(invokeError),
+                            "warning"
+                        )
+                    end
+                    task.wait(2)
+                end
+            end
+            task.wait(1)
+        end
+    end)
+    return true
+end
+
 function MainFarm:Initialize(context)
+    self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
     self.Context = context
     self.Running = false
     self.Session += 1
@@ -1677,6 +1766,10 @@ function MainFarm:Initialize(context)
             self:_ClearTarget()
             self:_ResetSpawnSearch(nil)
         end)
+    end
+    local farmSettings = context.Config and context.Config.FarmSettings
+    if farmSettings and farmSettings.AutoBuso == true then
+        self:_SetAutoBuso(true, false)
     end
     return true
 end
@@ -1760,6 +1853,21 @@ function MainFarm:Handle(actionId, payload)
         return self:CopyStatusReport()
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    if actionId == "farm.settings.bringMobs" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Bring mobs setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.BringMobs = payload
+        self:_SetStatus(
+            "Bring mobs " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.settings.autoBuso" then
+        return self:_SetAutoBuso(payload)
+    end
     if actionId == "farm.autoModeQuest" then
         if not farmSettings or type(payload) ~= "boolean" then
             self:_SetStatus("Auto quest setting is unavailable or invalid", "error")
@@ -1852,6 +1960,7 @@ end
 
 function MainFarm:Cleanup()
     self:Stop()
+    self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
     if self.CharacterAddedConnection then
         self.CharacterAddedConnection:Disconnect()
         self.CharacterAddedConnection = nil

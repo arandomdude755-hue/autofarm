@@ -56,6 +56,8 @@ local Config = {
         AuraDistanceMin = 0,
         AuraDistanceMax = 1000,
         AuraDistanceStep = 1,
+        BringMobs = false,
+        AutoBuso = false,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
     },
@@ -210,13 +212,6 @@ local Config = {
                     Label = "Copy status report",
                     Action = "farm.status.copy",
                 },
-                {
-                    Kind = "settingDropdown",
-                    Label = "Weapon category",
-                    Action = "farm.weaponCategory.select",
-                    Setting = "WeaponCategory",
-                    Options = weaponCategories,
-                },
             },
         },
         Player = {
@@ -238,6 +233,7 @@ local Config = {
             },
         },
         Settings = {
+            SingleColumn = true,
             Controls = {
                 {
                     Kind = "settingDropdown",
@@ -255,6 +251,29 @@ local Config = {
                     Kind = "button",
                     Label = "Reset UI settings",
                     Action = "settings.reset",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Farm settings",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Farm weapon",
+                    Action = "farm.weaponCategory.select",
+                    Setting = "WeaponCategory",
+                    Options = weaponCategories,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Bring mobs",
+                    Action = "farm.settings.bringMobs",
+                    Setting = "BringMobs",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto turn on Buso",
+                    Action = "farm.settings.autoBuso",
+                    Setting = "AutoBuso",
                 },
             },
         },

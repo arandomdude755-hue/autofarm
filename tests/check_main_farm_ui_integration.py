@@ -9,6 +9,7 @@ UI = (CUSTOM_HUB / "UI.lua").read_text(encoding="utf-8")
 HUB = (CUSTOM_HUB / "init.lua").read_text(encoding="utf-8")
 MANAGER = (CUSTOM_HUB / "FeatureManager.lua").read_text(encoding="utf-8")
 MAIN_FARM = (CUSTOM_HUB / "Features/MainFarm.lua").read_text(encoding="utf-8")
+ENEMY = (CUSTOM_HUB / "Features/Farm/EnemyService.lua").read_text(encoding="utf-8")
 MOVEMENT = (CUSTOM_HUB / "Features/Farm/MovementService.lua").read_text(encoding="utf-8")
 
 
@@ -57,11 +58,25 @@ require(
     and 'Action = "farm.status.copy"' in farm_config,
     "Farm page must expose a button for copying the complete status report",
 )
-require('Kind = "settingDropdown"' in farm_config
-        and 'Action = "farm.weaponCategory.select"' in farm_config
-        and 'Setting = "WeaponCategory"' in farm_config
-        and "Options = weaponCategories" in farm_config,
-        "Farm page must expose weapon categories through a dropdown")
+settings_config = CONFIG[CONFIG.index("Settings = {"):]
+require('Action = "farm.weaponCategory.select"' not in farm_config
+        and 'Kind = "sectionHeader"' in settings_config
+        and 'Label = "Farm settings"' in settings_config
+        and 'Kind = "settingDropdown"' in settings_config
+        and 'Label = "Farm weapon"' in settings_config
+        and 'Action = "farm.weaponCategory.select"' in settings_config
+        and 'Setting = "WeaponCategory"' in settings_config
+        and "Options = weaponCategories" in settings_config,
+        "Farm weapon must be inside the dedicated Farm settings subsection")
+require('Label = "Bring mobs"' in settings_config
+        and 'Action = "farm.settings.bringMobs"' in settings_config
+        and 'Setting = "BringMobs"' in settings_config
+        and "BringMobs = false" in CONFIG
+        and 'Label = "Auto turn on Buso"' in settings_config
+        and 'Action = "farm.settings.autoBuso"' in settings_config
+        and 'Setting = "AutoBuso"' in settings_config
+        and "AutoBuso = false" in CONFIG,
+        "Farm settings must expose opt-in Bring mobs and Auto Buso controls")
 require('local weaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG
         and "WeaponCategories = weaponCategories" in CONFIG,
         "Weapon selector must use the supported category choices")
@@ -91,8 +106,8 @@ dispatch = function_body(MANAGER, "function FeatureManager:Dispatch", "\nfunctio
 require('actionId == "farm.weaponCategory.select"' in dispatch
         and "category == payload" in dispatch
         and "farmSettings.WeaponCategory = selectedCategory" in dispatch
-        and '"Weapon category: " .. tostring(farmSettings.WeaponCategory)' in dispatch,
-        "Direct category selection must update the config read by MainFarm")
+        and '"Farm weapon: " .. tostring(farmSettings.WeaponCategory)' in dispatch,
+        "Farm weapon selection must update the config read by MainFarm")
 require('Name = "Option_" .. tostring(value)' in UI
         and "self.Dispatch,\n                        control.Action,\n                        value" in UI,
         "Each weapon option must dispatch its selected value immediately")
@@ -156,6 +171,41 @@ require('actionId == "farm.mode.select"' in handle
         and 'actionId == "farm.auraDistance.set"' in handle
         and 'farmSettings.AuraDistance = math.min(selectedDistance, maximum)' in handle,
         "MainFarm must validate and apply the selected mode and Aura radius settings")
+require('actionId == "farm.settings.bringMobs"' in handle
+        and "farmSettings.BringMobs = payload" in handle
+        and 'actionId == "farm.settings.autoBuso"' in handle
+        and "self:_SetAutoBuso(payload)" in handle,
+        "MainFarm must handle both new farm settings")
+auto_buso = function_body(
+    MAIN_FARM,
+    "function MainFarm:_SetAutoBuso",
+    "\nfunction MainFarm:Initialize",
+)
+require('commF:InvokeServer("Buso")' in auto_buso
+        and "self:_HasActiveBuso(character)" in auto_buso
+        and "self.AutoBusoGeneration == generation" in auto_buso
+        and "self.Context == runContext" in auto_buso
+        and "task.wait(2)" in auto_buso
+        and "BuyHaki" not in auto_buso,
+        "Auto Buso must be throttled, stop with cleanup, and never purchase Haki")
+bring_mobs = function_body(
+    ENEMY,
+    "function EnemyService:BringMatchingMob",
+    "\nfunction EnemyService:PrepareTarget",
+)
+require("local normalizedName = normalizeEnemyName(target.Name)" in bring_mobs
+        and "self.EnemyModelsByName[normalizedName]" in bring_mobs
+        and "enemy.Name == target.Name" in bring_mobs
+        and "isDescendantOf(enemy, self.EnemyContainer)" in bring_mobs
+        and "self:IsAlive(enemy)" in bring_mobs
+        and "BRING_MOB_PLAYER_RANGE" in bring_mobs
+        and "BRING_MOB_MAX_DISTANCE" in bring_mobs
+        and "BRING_MOB_COOLDOWN" in bring_mobs
+        and "CFrame.new(3, 0, 0)" in bring_mobs
+        and "GetDescendants" not in bring_mobs,
+        "Bring mobs must use the live exact-name index with distance and rate limits")
+require(MAIN_FARM.count("self:_BringMobsIfEnabled(target, root") >= 3,
+        "Bring mobs must be available across standard, Aura, and non-boss farm modes")
 collision = function_body(
     MOVEMENT,
     "function MovementService:SetFarmCollisionSuppression(enabled)",

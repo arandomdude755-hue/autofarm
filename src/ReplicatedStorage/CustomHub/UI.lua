@@ -158,6 +158,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         ControlGridLayout = nil,
         ActiveControls = nil,
         ActiveTab = nil,
+        ActivePage = nil,
         SearchQuery = "",
         _contentSizeConnection = nil,
         ViewportConnection = nil,
@@ -609,12 +610,15 @@ function UI:_UpdateControlGridLayout()
         viewport = Vector2.new(390, 844)
     end
     local landscape = viewport.X > viewport.Y
-    local columnCount = landscape
-        and self.ControlsContainer.AbsoluteSize.X >= 620
-        and self.ActiveControls
-        and #self.ActiveControls > 1
-        and 2
-        or 1
+    local columnCount = 1
+    if not (self.ActivePage and self.ActivePage.SingleColumn) then
+        columnCount = landscape
+            and self.ControlsContainer.AbsoluteSize.X >= 620
+            and self.ActiveControls
+            and #self.ActiveControls > 1
+            and 2
+            or 1
+    end
     local rowHeight = self.Config.Layout.RowHeight
     self.ControlGridLayout.FillDirectionMaxCells = columnCount
     self.ControlGridLayout.CellSize = columnCount == 2
@@ -647,8 +651,11 @@ function UI:_ApplyControlSearchHighlight()
     local theme = self.Config.Theme
     local query = self.SearchQuery
     for _, control in ipairs(self.ActiveControls) do
+        local nodeName = control.Kind == "sectionHeader"
+            and ("Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"))
+            or ("Action_" .. control.Action:gsub("[^%w]", "_"))
         local row = self.ControlsContainer:FindFirstChild(
-            "Action_" .. control.Action:gsub("[^%w]", "_")
+            nodeName
         )
         if row then
             local matched = query ~= ""
@@ -776,17 +783,22 @@ function UI:_OpenDropdown(entry)
     local anchorPosition = anchor.AbsolutePosition
     local anchorSize = anchor.AbsoluteSize
     local left = (anchorPosition.X - rootPosition.X) / scale
-    local top = (anchorPosition.Y - rootPosition.Y) / scale
-        + anchorSize.Y / scale
-        + 4
+    local anchorTop = (anchorPosition.Y - rootPosition.Y) / scale
+    local anchorHeight = anchorSize.Y / scale
+    local belowTop = anchorTop + anchorHeight + 4
     local menuWidth = anchorSize.X / scale
     local rootHeight = rootSize.Y / scale
-    local availableHeight = math.max(0, rootHeight - top - 8)
+    local belowAvailable = math.max(0, rootHeight - belowTop - 8)
+    local aboveAvailable = math.max(0, anchorTop - 8)
+    local openBelow = belowAvailable >= totalHeight
+        or belowAvailable >= aboveAvailable
+    local availableHeight = openBelow and belowAvailable or aboveAvailable
     local menuHeight = math.min(totalHeight, availableHeight)
     if menuHeight < 1 then
-        self.State:SetStatus("There is not enough room below this selector to open it.", "error")
+        self.State:SetStatus("There is not enough room to open this selector.", "error")
         return false
     end
+    local top = openBelow and belowTop or math.max(8, anchorTop - menuHeight - 4)
 
     local active = {
         Entry = entry,
@@ -962,6 +974,36 @@ end
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
+    if control.Kind == "sectionHeader" then
+        local row = create("Frame", {
+            Name = "Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"),
+            Size = UDim2.new(1, 0, 0, layout.RowHeight),
+            BackgroundColor3 = theme.Control,
+            BorderSizePixel = 0,
+            LayoutOrder = #self.ControlsContainer:GetChildren(),
+        }, self.ControlsContainer)
+        addCorner(row, 4)
+        create("Frame", {
+            Name = "Accent",
+            Position = UDim2.new(0, layout.RowInset, 0.5, -7),
+            Size = UDim2.fromOffset(3, 14),
+            BackgroundColor3 = theme.Accent,
+            BorderSizePixel = 0,
+        }, row)
+        create("TextLabel", {
+            Name = "Title",
+            Position = UDim2.new(0, layout.RowInset + 12, 0, 0),
+            Size = UDim2.new(1, -(layout.RowInset * 2 + 12), 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = control.Label,
+            TextColor3 = theme.Text,
+            TextSize = theme.TextSizes.Control,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, row)
+        return row
+    end
+
     local hasToggle = control.Kind == "featureToggle"
         or control.Kind == "settingToggle"
     local isSelector = control.Kind == "settingSelect"
@@ -1314,6 +1356,7 @@ function UI:_RenderTab(tabName)
     self:_ClearPage()
     local theme = self.Config.Theme
     local layout = self.Config.Layout
+    self.ActivePage = page
     self.ActiveControls = page.Controls
     self.ControlsContainer = create("Frame", {
         Name = "ControlGrid",
@@ -1344,8 +1387,11 @@ function UI:_RenderTab(tabName)
     )
     for index, control in ipairs(page.Controls) do
         self:_AddControl(control)
+        local nodeName = control.Kind == "sectionHeader"
+            and ("Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"))
+            or ("Action_" .. control.Action:gsub("[^%w]", "_"))
         local row = self.ControlsContainer:FindFirstChild(
-            "Action_" .. control.Action:gsub("[^%w]", "_")
+            nodeName
         )
         if row then
             row.LayoutOrder = index

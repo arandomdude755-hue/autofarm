@@ -2,3 +2,4 @@
 - [Git branch roles](git-branch-roles.md) — keep `main` as the main hub version and `dev` as the test version.
 - [BNN migration boundaries](bnn-migration-boundaries.md) — migrate working features with project settings; do not copy executor-only persistence or expose inactive controls.
 - [Farm frame pacing](farm-frame-pacing.md) — Keep collision suppression event-driven; full character descendant scans on Heartbeat cause client frame drops.
+- [Farm settings terminology](farm-settings-terminology.md) — “Auto turn on aura” means Buso/Haki activation, separate from Aura Farm.

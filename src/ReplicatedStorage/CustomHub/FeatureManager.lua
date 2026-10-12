@@ -75,7 +75,7 @@ function FeatureManager:Dispatch(actionId, payload)
 
         farmSettings.WeaponCategory = selectedCategory
         self.State:SetStatus(
-            "Weapon category: " .. tostring(farmSettings.WeaponCategory),
+            "Farm weapon: " .. tostring(farmSettings.WeaponCategory),
             "success"
         )
         return true

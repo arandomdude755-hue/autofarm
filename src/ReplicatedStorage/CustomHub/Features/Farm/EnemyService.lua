@@ -4,6 +4,10 @@ EnemyService.__index = EnemyService
 local HIDDEN_SPAWN_REFRESH_INTERVAL = 5
 local HIDDEN_SPAWN_RETRY_INTERVAL = 10
 local HIDDEN_SPAWN_SCAN_CHUNK_SIZE = 64
+local BRING_MOB_COOLDOWN = 0.75
+local BRING_MOB_MAX_DISTANCE = 200
+local BRING_MOB_PLAYER_RANGE = 50
+local BRING_MOB_OTHER_PLAYER_RANGE = 300
 
 local function disconnect(connection)
     if connection then
@@ -154,6 +158,8 @@ function EnemyService.new(compatibility)
         SpawnMarkers = setmetatable({}, { __mode = "k" }),
         SpawnMarkersByName = {},
         SpawnMarkerNames = setmetatable({}, { __mode = "k" }),
+        BringMobNextAt = 0,
+        BringMobTarget = nil,
     }, EnemyService)
 end
 
@@ -640,7 +646,95 @@ function EnemyService:ClearTracking()
     self.SpawnMarkersByName = {}
     self.SpawnMarkerNames = setmetatable({}, { __mode = "k" })
     self.HiddenSpawnCache = nil
+    self.BringMobNextAt = 0
+    self.BringMobTarget = nil
     table.clear(self.PreparedTargets)
+end
+
+function EnemyService:_HasNearbyOtherPlayer(position)
+    local players = self.Compatibility and self.Compatibility.Players
+    local localPlayer = self.Compatibility and self.Compatibility.Player
+    if not players or type(players.GetPlayers) ~= "function" then
+        return false
+    end
+
+    for _, player in ipairs(players:GetPlayers()) do
+        if player ~= localPlayer then
+            local character = player.Character
+            local otherRoot = character and character:FindFirstChild("HumanoidRootPart")
+            if otherRoot and otherRoot:IsA("BasePart")
+                and (otherRoot.Position - position).Magnitude <= BRING_MOB_OTHER_PLAYER_RANGE
+            then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function EnemyService:BringMatchingMob(target, playerRoot)
+    if not self:IsAlive(target) or not playerRoot or not self.EnemyContainer then
+        return 0
+    end
+
+    local targetRoot = target:FindFirstChild("HumanoidRootPart")
+    if not targetRoot or not targetRoot:IsA("BasePart")
+        or (targetRoot.Position - playerRoot.Position).Magnitude > BRING_MOB_PLAYER_RANGE
+    then
+        return 0
+    end
+
+    local now = os.clock()
+    if self.BringMobTarget == target and now < self.BringMobNextAt then
+        return 0
+    end
+    self.BringMobTarget = target
+    self.BringMobNextAt = now + BRING_MOB_COOLDOWN
+
+    local normalizedName = normalizeEnemyName(target.Name)
+    if not normalizedName then
+        return 0
+    end
+    local bucket = self.EnemyModelsByName[normalizedName] or {}
+    local candidate = nil
+    local candidateDistance = math.huge
+    for enemy in pairs(bucket) do
+        if enemy ~= target
+            and enemy.Name == target.Name
+            and isDescendantOf(enemy, self.EnemyContainer)
+            and not enemy:FindFirstChild("Ignored")
+            and self:IsAlive(enemy)
+        then
+            local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+            if enemyRoot and enemyRoot:IsA("BasePart") and not enemyRoot.Anchored then
+                local distance = (enemyRoot.Position - targetRoot.Position).Magnitude
+                -- This nearby-player check follows the reference hubs' conservative
+                -- guard; it is not a guarantee of client network ownership.
+                if distance > 8
+                    and distance <= BRING_MOB_MAX_DISTANCE
+                    and not self:_HasNearbyOtherPlayer(enemyRoot.Position)
+                    and distance < candidateDistance
+                then
+                    candidate = enemy
+                    candidateDistance = distance
+                end
+            end
+        end
+    end
+
+    -- Keep the gather size small: the selected target plus at most one match.
+    if not candidate then
+        return 0
+    end
+
+    local candidateRoot = candidate:FindFirstChild("HumanoidRootPart")
+    if not candidateRoot then
+        return 0
+    end
+    local moved = pcall(function()
+        candidateRoot.CFrame = targetRoot.CFrame * CFrame.new(3, 0, 0)
+    end)
+    return moved and 1 or 0
 end
 
 function EnemyService:PrepareTarget(model, playerRoot)

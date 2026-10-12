@@ -11,6 +11,7 @@ Compatibility.__index = Compatibility
 function Compatibility.new()
     return setmetatable({
         Player = Players.LocalPlayer,
+        Players = Players,
         ReplicatedStorage = ReplicatedStorage,
         Workspace = Workspace,
         RunService = RunService,

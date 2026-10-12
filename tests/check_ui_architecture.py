@@ -106,6 +106,13 @@ require('Label = "UI size"' in settings_page
         and 'Setting = "UiSize"' in settings_page
         and 'Options = { "Small", "Medium", "Large" }' in settings_page,
         "Settings must expose UI size through the shared dropdown")
+require('SingleColumn = true' in settings_page
+        and 'Kind = "sectionHeader"' in settings_page
+        and 'Label = "Farm settings"' in settings_page
+        and 'Label = "Farm weapon"' in settings_page
+        and 'Label = "Bring mobs"' in settings_page
+        and 'Label = "Auto turn on Buso"' in settings_page,
+        "Settings must group farm controls under a full-width Farm settings subsection")
 require('UiSize = "Large"' in CONFIG
         and "Small = 0.82" in CONFIG
         and "Medium = 0.91" in CONFIG
@@ -129,7 +136,12 @@ require("local anchor = entry.Row or entry.Button" in UI_MODULE
         and "local left = (anchorPosition.X - rootPosition.X) / scale" in UI_MODULE
         and "local menuWidth = anchorSize.X / scale" in UI_MODULE
         and "local rootHeight = rootSize.Y / scale" in UI_MODULE
-        and "local availableHeight = math.max(0, rootHeight - top - 8)" in UI_MODULE
+        and "local belowAvailable = math.max(0, rootHeight - belowTop - 8)" in UI_MODULE
+        and "local aboveAvailable = math.max(0, anchorTop - 8)" in UI_MODULE
+        and "local openBelow = belowAvailable >= totalHeight" in UI_MODULE
+        and "or belowAvailable >= aboveAvailable" in UI_MODULE
+        and "math.max(8, anchorTop - menuHeight - 4)" in UI_MODULE
+        and "local availableHeight = openBelow and belowAvailable or aboveAvailable" in UI_MODULE
         and 'local row = create((isSelector or isSlider) and "Frame" or "TextButton"' in UI_MODULE
         and "Button = row" in UI_MODULE
         and "}, self.Root)" in UI_MODULE
