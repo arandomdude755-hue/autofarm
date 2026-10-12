@@ -745,7 +745,11 @@ function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
     if not farmSettings or farmSettings.BringMobs ~= true or targetIsBoss == true then
         return 0
     end
-    return self.EnemyService:BringMatchingMob(target, playerRoot)
+    return self.EnemyService:BringMatchingMob(
+        target,
+        playerRoot,
+        farmSettings.BringMobCount
+    )
 end
 
 function MainFarm:_StepAura(session, root)
@@ -2196,6 +2200,32 @@ function MainFarm:Handle(actionId, payload)
         farmSettings.BringMobs = payload
         self:_SetStatus(
             "Bring mobs " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.bringMobCount.set" then
+        if not farmSettings then
+            self:_SetStatus("Farm settings are unavailable", "error")
+            return false
+        end
+        local minimum = tonumber(farmSettings.BringMobCountMin) or 2
+        local maximum = tonumber(farmSettings.BringMobCountMax) or 6
+        local step = tonumber(farmSettings.BringMobCountStep) or 1
+        if type(payload) ~= "number"
+            or payload ~= payload
+            or math.abs(payload) == math.huge
+            or payload < minimum
+            or payload > maximum
+            or step <= 0
+        then
+            self:_SetStatus("Invalid Bring mob count", "error")
+            return false
+        end
+        local selectedCount = minimum + math.floor((payload - minimum) / step + 0.5) * step
+        farmSettings.BringMobCount = math.min(selectedCount, maximum)
+        self:_SetStatus(
+            "Bring mob count: " .. tostring(farmSettings.BringMobCount),
             "success"
         )
         return true

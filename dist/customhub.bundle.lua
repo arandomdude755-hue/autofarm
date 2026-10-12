@@ -106,6 +106,10 @@ local Config = {
         AuraDistanceMax = 1000,
         AuraDistanceStep = 1,
         BringMobs = false,
+        BringMobCount = 2,
+        BringMobCountMin = 2,
+        BringMobCountMax = 6,
+        BringMobCountStep = 1,
         AutoBuso = false,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
@@ -317,6 +321,16 @@ local Config = {
                     Label = "Bring mobs",
                     Action = "farm.settings.bringMobs",
                     Setting = "BringMobs",
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Bring mob count",
+                    Action = "farm.bringMobCount.set",
+                    Setting = "BringMobCount",
+                    Min = 2,
+                    Max = 6,
+                    Step = 1,
+                    Unit = "mobs",
                 },
                 {
                     Kind = "settingToggle",
@@ -3774,6 +3788,9 @@ local BRING_MOB_COOLDOWN = 0.75
 local BRING_MOB_MAX_DISTANCE = 200
 local BRING_MOB_PLAYER_RANGE = 50
 local BRING_MOB_OTHER_PLAYER_RANGE = 300
+local BRING_MOB_MIN_COUNT = 2
+local BRING_MOB_MAX_COUNT = 6
+local BRING_MOB_MAX_MOVES_PER_CALL = 2
 
 local function disconnect(connection)
     if connection then
@@ -4438,10 +4455,19 @@ function EnemyService:_HasNearbyOtherPlayer(position)
     return false
 end
 
-function EnemyService:BringMatchingMob(target, playerRoot)
+function EnemyService:BringMatchingMob(target, playerRoot, requestedCount)
     if not self:IsAlive(target) or not playerRoot or not self.EnemyContainer then
         return 0
     end
+    local desiredCount = tonumber(requestedCount) or BRING_MOB_MIN_COUNT
+    if desiredCount ~= desiredCount or math.abs(desiredCount) == math.huge then
+        desiredCount = BRING_MOB_MIN_COUNT
+    end
+    desiredCount = math.clamp(
+        math.floor(desiredCount + 0.5),
+        BRING_MOB_MIN_COUNT,
+        BRING_MOB_MAX_COUNT
+    )
 
     local targetRoot = target:FindFirstChild("HumanoidRootPart")
     if not targetRoot or not targetRoot:IsA("BasePart")
@@ -4462,8 +4488,9 @@ function EnemyService:BringMatchingMob(target, playerRoot)
         return 0
     end
     local bucket = self.EnemyModelsByName[normalizedName] or {}
-    local candidate = nil
-    local candidateDistance = math.huge
+    local nearbyCount = 1
+    local candidates = {}
+    local candidateLimit = desiredCount - 1
     for enemy in pairs(bucket) do
         if enemy ~= target
             and enemy.Name == target.Name
@@ -4476,31 +4503,50 @@ function EnemyService:BringMatchingMob(target, playerRoot)
                 local distance = (enemyRoot.Position - targetRoot.Position).Magnitude
                 -- This nearby-player check follows the reference hubs' conservative
                 -- guard; it is not a guarantee of client network ownership.
-                if distance > 8
-                    and distance <= BRING_MOB_MAX_DISTANCE
+                if distance <= 8 then
+                    nearbyCount += 1
+                elseif distance <= BRING_MOB_MAX_DISTANCE
                     and not self:_HasNearbyOtherPlayer(enemyRoot.Position)
-                    and distance < candidateDistance
                 then
-                    candidate = enemy
-                    candidateDistance = distance
+                    local candidate = { Model = enemy, Distance = distance }
+                    local insertAt = #candidates + 1
+                    while insertAt > 1
+                        and candidates[insertAt - 1].Distance > distance
+                    do
+                        insertAt -= 1
+                    end
+                    table.insert(candidates, insertAt, candidate)
+                    if #candidates > candidateLimit then
+                        table.remove(candidates)
+                    end
                 end
             end
         end
     end
 
-    -- Keep the gather size small: the selected target plus at most one match.
-    if not candidate then
+    if nearbyCount >= desiredCount or #candidates == 0 then
         return 0
     end
 
-    local candidateRoot = candidate:FindFirstChild("HumanoidRootPart")
-    if not candidateRoot then
-        return 0
+    -- Honor larger requested groups gradually so one farm tick never moves many NPCs.
+    local movesRemaining = math.min(
+        desiredCount - nearbyCount,
+        BRING_MOB_MAX_MOVES_PER_CALL,
+        #candidates
+    )
+    local movedCount = 0
+    for index = 1, movesRemaining do
+        local candidateRoot = candidates[index].Model:FindFirstChild("HumanoidRootPart")
+        if candidateRoot and candidateRoot:IsA("BasePart") and not candidateRoot.Anchored then
+            local moved = pcall(function()
+                candidateRoot.CFrame = targetRoot.CFrame * CFrame.new(3 + (index - 1) * 2, 0, 0)
+            end)
+            if moved then
+                movedCount += 1
+            end
+        end
     end
-    local moved = pcall(function()
-        candidateRoot.CFrame = targetRoot.CFrame * CFrame.new(3, 0, 0)
-    end)
-    return moved and 1 or 0
+    return movedCount
 end
 
 function EnemyService:PrepareTarget(model, playerRoot)
@@ -6457,7 +6503,11 @@ function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
     if not farmSettings or farmSettings.BringMobs ~= true or targetIsBoss == true then
         return 0
     end
-    return self.EnemyService:BringMatchingMob(target, playerRoot)
+    return self.EnemyService:BringMatchingMob(
+        target,
+        playerRoot,
+        farmSettings.BringMobCount
+    )
 end
 
 function MainFarm:_StepAura(session, root)
@@ -7908,6 +7958,32 @@ function MainFarm:Handle(actionId, payload)
         farmSettings.BringMobs = payload
         self:_SetStatus(
             "Bring mobs " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.bringMobCount.set" then
+        if not farmSettings then
+            self:_SetStatus("Farm settings are unavailable", "error")
+            return false
+        end
+        local minimum = tonumber(farmSettings.BringMobCountMin) or 2
+        local maximum = tonumber(farmSettings.BringMobCountMax) or 6
+        local step = tonumber(farmSettings.BringMobCountStep) or 1
+        if type(payload) ~= "number"
+            or payload ~= payload
+            or math.abs(payload) == math.huge
+            or payload < minimum
+            or payload > maximum
+            or step <= 0
+        then
+            self:_SetStatus("Invalid Bring mob count", "error")
+            return false
+        end
+        local selectedCount = minimum + math.floor((payload - minimum) / step + 0.5) * step
+        farmSettings.BringMobCount = math.min(selectedCount, maximum)
+        self:_SetStatus(
+            "Bring mob count: " .. tostring(farmSettings.BringMobCount),
             "success"
         )
         return true

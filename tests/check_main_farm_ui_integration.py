@@ -72,6 +72,12 @@ require('Label = "Bring mobs"' in settings_config
         and 'Action = "farm.settings.bringMobs"' in settings_config
         and 'Setting = "BringMobs"' in settings_config
         and "BringMobs = false" in CONFIG
+        and 'Label = "Bring mob count"' in settings_config
+        and 'Action = "farm.bringMobCount.set"' in settings_config
+        and 'Setting = "BringMobCount"' in settings_config
+        and 'BringMobCount = 2' in CONFIG
+        and 'Min = 2' in settings_config
+        and 'Max = 6' in settings_config
         and 'Label = "Auto turn on Buso"' in settings_config
         and 'Action = "farm.settings.autoBuso"' in settings_config
         and 'Setting = "AutoBuso"' in settings_config
@@ -173,6 +179,8 @@ require('actionId == "farm.mode.select"' in handle
         "MainFarm must validate and apply the selected mode and Aura radius settings")
 require('actionId == "farm.settings.bringMobs"' in handle
         and "farmSettings.BringMobs = payload" in handle
+        and 'actionId == "farm.bringMobCount.set"' in handle
+        and "farmSettings.BringMobCount = math.min(selectedCount, maximum)" in handle
         and 'actionId == "farm.settings.autoBuso"' in handle
         and "self:_SetAutoBuso(payload)" in handle,
         "MainFarm must handle both new farm settings")
@@ -194,6 +202,10 @@ bring_mobs = function_body(
     "\nfunction EnemyService:PrepareTarget",
 )
 require("local normalizedName = normalizeEnemyName(target.Name)" in bring_mobs
+        and "requestedCount" in bring_mobs
+        and "BRING_MOB_MIN_COUNT" in bring_mobs
+        and "BRING_MOB_MAX_COUNT" in bring_mobs
+        and "local nearbyCount = 1" in bring_mobs
         and "self.EnemyModelsByName[normalizedName]" in bring_mobs
         and "enemy.Name == target.Name" in bring_mobs
         and "isDescendantOf(enemy, self.EnemyContainer)" in bring_mobs
@@ -201,9 +213,10 @@ require("local normalizedName = normalizeEnemyName(target.Name)" in bring_mobs
         and "BRING_MOB_PLAYER_RANGE" in bring_mobs
         and "BRING_MOB_MAX_DISTANCE" in bring_mobs
         and "BRING_MOB_COOLDOWN" in bring_mobs
-        and "CFrame.new(3, 0, 0)" in bring_mobs
+        and "BRING_MOB_MAX_MOVES_PER_CALL" in bring_mobs
+        and "CFrame.new(3 + (index - 1) * 2, 0, 0)" in bring_mobs
         and "GetDescendants" not in bring_mobs,
-        "Bring mobs must use the live exact-name index with distance and rate limits")
+        "Bring mobs must use the configured 2-6 group cap, live exact-name index, distance/rate limits, and per-tick movement bound")
 require(MAIN_FARM.count("self:_BringMobsIfEnabled(target, root") >= 3,
         "Bring mobs must be available across standard, Aura, and non-boss farm modes")
 collision = function_body(

@@ -77,6 +77,10 @@ local Config = {
         AuraDistanceMax = 1000,
         AuraDistanceStep = 1,
         BringMobs = false,
+        BringMobCount = 2,
+        BringMobCountMin = 2,
+        BringMobCountMax = 6,
+        BringMobCountStep = 1,
         AutoBuso = false,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
@@ -288,6 +292,16 @@ local Config = {
                     Label = "Bring mobs",
                     Action = "farm.settings.bringMobs",
                     Setting = "BringMobs",
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Bring mob count",
+                    Action = "farm.bringMobCount.set",
+                    Setting = "BringMobCount",
+                    Min = 2,
+                    Max = 6,
+                    Step = 1,
+                    Unit = "mobs",
                 },
                 {
                     Kind = "settingToggle",

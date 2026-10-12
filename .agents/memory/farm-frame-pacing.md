@@ -9,6 +9,8 @@ After that full-character scan was removed, in-game testing reported the overall
 
 Further testing isolated the remaining hitch to target acquisition: farming was smooth when a target was already available, but dropped frames while deciding which NPC to target. Name-target lookups and spawn-marker lookups should use normalized-name buckets rather than scanning every indexed model or marker per search.
 
+Bring Mob Count is a total group size including the selected target. When a larger count is selected, fill the group gradually and cap each call to a small number of NPC moves rather than issuing a burst of transforms.
+
 The player tested the name-index optimization and reported that the hitch persisted. A separate unparented-instance fallback still enumerates a broad runtime list when normal NPC/spawn lookup has no result; move that fallback off the farm step and chunk it. Do not treat this change as confirmed until retested in-game.
 
 Farm travel should pass through terrain and walls using direct movement with collision disabled; do not route around obstacles. When no target is available, hold the current airborne position and resume movement when a target or spawn destination is found.
@@ -17,4 +19,4 @@ If event-only collision suppression still leaves some walls blocking, use a low-
 
 **Why:** repeated full-character hierarchy scans, collision writes at frame frequency, global target/spawn candidate scans, and unparented-instance enumeration can all stall the client; the user also reported some walls still blocked under event-only collision suppression. Restoring many corpse parts can add physics work on each kill. Source checks cannot distinguish which path dominates on the player’s device.
 
-**How to apply:** when changing Main Farm movement, collision handling, or target acquisition, keep travel direct and noclip rather than pathfinding, preserve airborne position during search gaps, use property events plus only a low-frequency sweep of indexed parts when needed, avoid full-tree per-frame work, preserve collision restoration across stop/respawn, skip property writes for dead targets, use indexed candidate subsets, keep broad fallback discovery off the farm step, and verify performance with an in-game test.
+**How to apply:** when changing Main Farm movement, collision handling, target acquisition, or mob gathering, keep travel direct and noclip rather than pathfinding, preserve airborne position during search gaps, use property events plus only a low-frequency sweep of indexed parts when needed, avoid full-tree per-frame work, preserve collision restoration across stop/respawn, skip property writes for dead targets, use indexed candidate subsets, bound per-call mob transforms, keep broad fallback discovery off the farm step, and verify performance with an in-game test.
