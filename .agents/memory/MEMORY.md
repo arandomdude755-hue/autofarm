@@ -1,1 +1,1 @@
-- [Quest-giver runtime failure](quest-giver-runtime-failure.md) — the first First Sea target match works; dialogue opening can still fail to start or detect a quest.
+- [Quest-giver runtime failure](quest-giver-runtime-failure.md) — dismiss visible quest dialogue by leaving range, then revalidate quest state before retrying.

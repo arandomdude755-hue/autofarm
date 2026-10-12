@@ -3520,6 +3520,11 @@ local MAX_SPAWN_DIAGNOSTIC_REPORT_LENGTH = 1400
 local QUEST_CONFIRMATION_TIMEOUT = 8
 local QUEST_START_RETRY_INTERVAL = 2
 local MAX_QUEST_START_ATTEMPTS = 3
+local QUEST_DIALOGUE_RETREAT_DISTANCE = 32
+local QUEST_DIALOGUE_RETREAT_INCREMENT = 24
+local QUEST_DIALOGUE_MAX_RETREAT_DISTANCE = 80
+local QUEST_DIALOGUE_MOVE_RETRY_INTERVAL = 0.5
+local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
 local NPC_SCAN_INTERVAL = 0.35
 local SPAWN_SCAN_INTERVAL = 0.5
 local SPAWN_LOAD_GRACE = 1
@@ -3549,6 +3554,14 @@ end
 
 local function questKey(candidate)
     return tostring(candidate.QuestName) .. ":" .. tostring(candidate.Id)
+end
+
+local function horizontalUnitVector(vector)
+    local horizontal = Vector3.new(vector.X, 0, vector.Z)
+    if horizontal.Magnitude <= 0.01 then
+        return nil
+    end
+    return horizontal.Unit
 end
 
 local function boundedReason(value)
@@ -3936,6 +3949,108 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession)
     })
 end
 
+function MainFarm:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)
+    local key = questKey(candidate)
+    local recovery = self.QuestDialogueRecovery
+    if recovery and recovery.CandidateKey ~= key then
+        self.QuestDialogueRecovery = nil
+        self.MovementService:Cancel()
+        recovery = nil
+    end
+
+    local dialogueOpen = self.QuestService:IsQuestGiverDialogueOpen()
+    if not dialogueOpen then
+        if recovery then
+            self.QuestDialogueRecovery = nil
+            self.QuestDeferredForDialogue = true
+            self.PendingQuestReachedAt = os.clock() - 2
+        end
+        return false
+    end
+
+    if not recovery then
+        local direction = horizontalUnitVector(root.Position - giverCFrame.Position)
+        if not direction then
+            direction = horizontalUnitVector(-root.CFrame.LookVector)
+                or Vector3.new(1, 0, 0)
+        end
+        recovery = {
+            CandidateKey = key,
+            Direction = direction,
+            RetreatDistance = QUEST_DIALOGUE_RETREAT_DISTANCE,
+            NextMoveAt = 0,
+            MoveFailures = 0,
+        }
+        self.QuestDialogueRecovery = recovery
+    end
+
+    self.QuestDeferredForDialogue = true
+    self.PendingQuestReachedAt = nil
+    if self.TimedOutQuestKey == key then
+        self.TimedOutQuestKey = nil
+        self.QuestTimeoutReason = nil
+        self.LastQuestAttemptKey = nil
+        self.LastQuestAttemptAt = 0
+        self.QuestStartAttemptCount = 0
+    end
+
+    if recovery.MoveFailures >= MAX_QUEST_DIALOGUE_MOVE_FAILURES then
+        self:_SetStatus(
+            "Could not move away from quest dialogue; move away manually to retry",
+            "warning"
+        )
+        return true
+    end
+
+    local offset = root.Position - giverCFrame.Position
+    local currentDistance = Vector3.new(offset.X, 0, offset.Z).Magnitude
+    if currentDistance >= recovery.RetreatDistance - 3 then
+        if recovery.RetreatDistance >= QUEST_DIALOGUE_MAX_RETREAT_DISTANCE then
+            self:_SetStatus(
+                "Quest dialogue is still open; move farther from the giver to retry",
+                "warning"
+            )
+            return true
+        end
+        recovery.RetreatDistance = math.min(
+            QUEST_DIALOGUE_MAX_RETREAT_DISTANCE,
+            recovery.RetreatDistance + QUEST_DIALOGUE_RETREAT_INCREMENT
+        )
+    end
+
+    local now = os.clock()
+    if now >= (recovery.NextMoveAt or 0) then
+        local giverPosition = giverCFrame.Position
+        local retreatPosition = Vector3.new(
+            giverPosition.X + recovery.Direction.X * recovery.RetreatDistance,
+            root.Position.Y,
+            giverPosition.Z + recovery.Direction.Z * recovery.RetreatDistance
+        )
+        local moveAccepted, moveResult = self:_MoveTo(
+            CFrame.new(retreatPosition),
+            session,
+            4,
+            true
+        )
+        recovery.NextMoveAt = now + QUEST_DIALOGUE_MOVE_RETRY_INTERVAL
+        if moveAccepted then
+            recovery.MoveFailures = 0
+        else
+            recovery.MoveFailures = recovery.MoveFailures + 1
+        end
+    end
+
+    if recovery.MoveFailures >= MAX_QUEST_DIALOGUE_MOVE_FAILURES then
+        self:_SetStatus(
+            "Could not move away from quest dialogue; move away manually to retry",
+            "warning"
+        )
+    else
+        self:_SetStatus("Quest dialogue open; moving away to dismiss it", "info")
+    end
+    return true
+end
+
 function MainFarm:_ClearTarget(preserveMovement)
     local hadTarget = self.Target ~= nil or self.TargetName ~= nil
     if hadTarget then
@@ -4149,6 +4264,11 @@ function MainFarm:_Step(session)
     self.LastQuestStateReason = readerEvidence
     if questState == "active" then
         self.QuestDeferredForDialogue = false
+        if self.QuestDialogueRecovery then
+            self.MovementService:Cancel()
+            self.QuestDialogueRecovery = nil
+            self.PendingQuestReachedAt = nil
+        end
     end
     if self.QuestDiagnosticWaitKey then
         self:_LogQuestDataSnapshot("confirmation_poll", questState, false, readerEvidence)
@@ -4188,10 +4308,9 @@ function MainFarm:_Step(session)
             self.QuestStartAttemptCount = 0
             self.QuestDeferredForDialogue = true
             self:_SetStatus(
-                "Quest dialogue open; waiting for it to close before requesting",
+                "Quest dialogue open; preparing recovery before requesting",
                 "info"
             )
-            return
         elseif not self.QuestDiagnosticWaitStartedAt then
             self.QuestDiagnosticWaitStartedAt = now
         elseif now - self.QuestDiagnosticWaitStartedAt >= QUEST_CONFIRMATION_TIMEOUT then
@@ -4254,32 +4373,31 @@ function MainFarm:_Step(session)
         local giverCFrame = typeof(giverPosition) == "CFrame"
             and giverPosition
             or CFrame.new(giverPosition)
+        if self.QuestDialogueRecovery
+            and self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)
+        then
+            return
+        end
         if (root.Position - giverCFrame.Position).Magnitude > 8 then
-            self.PendingQuestReachedAt = nil
+            if not self.QuestDeferredForDialogue then
+                self.PendingQuestReachedAt = nil
+            end
             self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8, true)
             self:_SetStatus("Approaching quest giver: " .. tostring(candidate.Name), "info")
             return
         end
         if not self.PendingQuestReachedAt then
-            self.PendingQuestReachedAt = os.clock()
-            self:_SetStatus("At quest giver; waiting before quest request", "info")
-            return
+            if self.QuestDeferredForDialogue then
+                self.PendingQuestReachedAt = os.clock() - 2
+            else
+                self.PendingQuestReachedAt = os.clock()
+                self:_SetStatus("At quest giver; waiting before quest request", "info")
+                return
+            end
         elseif os.clock() - self.PendingQuestReachedAt < 2 then
             return
         end
-        if self.QuestService:IsQuestGiverDialogueOpen() then
-            if self.TimedOutQuestKey == candidateKey then
-                self.TimedOutQuestKey = nil
-                self.QuestTimeoutReason = nil
-                self.LastQuestAttemptKey = nil
-                self.LastQuestAttemptAt = 0
-                self.QuestStartAttemptCount = 0
-            end
-            self.QuestDeferredForDialogue = true
-            self:_SetStatus(
-                "Quest dialogue open; waiting for it to close before requesting",
-                "info"
-            )
+        if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then
             return
         end
         self:_RequestQuest(candidate, session)
@@ -4516,6 +4634,7 @@ function MainFarm:_Run(session)
             if self.MovementService then
                 self.MovementService:Cancel()
             end
+            self.QuestDialogueRecovery = nil
             if self.EnemyService then
                 self.EnemyService:RestoreTargetCollision()
             end
@@ -4546,6 +4665,7 @@ function MainFarm:Initialize(context)
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.QuestDeferredForDialogue = false
+    self.QuestDialogueRecovery = nil
     self.PendingQuestTargetName = nil
     self.LastQuestStateReason = nil
     self.QuestDiagnosticWaitKey = nil
@@ -4578,6 +4698,7 @@ function MainFarm:Initialize(context)
             self.Target = nil
             self.TargetName = nil
             self.Character = nil
+            self.QuestDialogueRecovery = nil
             self:_ResetSpawnSearch(nil)
             self:_SetStatus("Character changed; farm session will reacquire after respawn", "warning")
         end)
@@ -4588,6 +4709,7 @@ function MainFarm:Initialize(context)
             if self.CombatService then
                 self.CombatService:Cancel()
             end
+            self.QuestDialogueRecovery = nil
             self:_ClearTarget()
             self:_ResetSpawnSearch(nil)
         end)
@@ -4619,6 +4741,7 @@ function MainFarm:Start()
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.QuestDeferredForDialogue = false
+    self.QuestDialogueRecovery = nil
     self.PendingQuestTargetName = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
@@ -4656,6 +4779,7 @@ function MainFarm:Stop()
     self.TimedOutQuestKey = nil
     self.QuestTimeoutReason = nil
     self.QuestDeferredForDialogue = false
+    self.QuestDialogueRecovery = nil
     self.LastQuestStateReason = nil
     self:_ResetSpawnSearch(nil)
     self.QuestDiagnosticWaitKey = nil

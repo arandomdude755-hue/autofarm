@@ -52,13 +52,46 @@ require("response is not acceptance" in request,
         "remote return values must not be treated as quest acceptance")
 require("activeTarget == self.PendingQuestTargetName" in step,
         "confirmation must match the active target selected for this request")
-request_gate_start = step.rindex("if self.QuestService:IsQuestGiverDialogueOpen() then")
+dialogue_recovery = FARM[
+    FARM.index("function MainFarm:_HandleQuestDialogueRecovery"):
+    FARM.index("function MainFarm:_ClearTarget")
+]
 request_call_start = step.index("self:_RequestQuest(candidate, session)")
 require(
-    request_gate_start < request_call_start
-    and "Quest dialogue open; waiting for it to close before requesting" in step[request_gate_start:request_call_start]
-    and "return" in step[request_gate_start:request_call_start],
-    "a visible quest-giver dialogue must defer StartQuest until the dialogue closes",
+    "self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)" in step
+    and step.rindex("self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)")
+    < request_call_start,
+    "quest requests must pass through dialogue recovery after the arrival delay",
+)
+require(
+    step.index("elseif os.clock() - self.PendingQuestReachedAt < 2 then")
+    < step.rindex("if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then")
+    < request_call_start
+    and "self:_RequestQuest" not in dialogue_recovery
+    and "RequestStart" not in dialogue_recovery,
+    "dialogue recovery must run after the initial delay and never consume a quest request itself",
+)
+require(
+    "QUEST_DIALOGUE_RETREAT_DISTANCE = 32" in FARM
+    and "QUEST_DIALOGUE_RETREAT_INCREMENT = 24" in FARM
+    and "QUEST_DIALOGUE_MAX_RETREAT_DISTANCE = 80" in FARM
+    and "horizontalUnitVector(root.Position - giverCFrame.Position)" in dialogue_recovery
+    and "CFrame.new(retreatPosition)" in dialogue_recovery
+    and "session,\n            4,\n            true" in dialogue_recovery
+    and "self.QuestService:IsQuestGiverDialogueOpen()" in dialogue_recovery,
+    "visible dialogue must trigger a horizontal, distance-bounded retreat in the retained movement session",
+)
+require(
+    "if not dialogueOpen then" in dialogue_recovery
+    and "self.QuestDialogueRecovery = nil" in dialogue_recovery
+    and "self.QuestDeferredForDialogue = true" in dialogue_recovery
+    and "self.PendingQuestReachedAt = os.clock() - 2" in dialogue_recovery,
+    "closing the dialogue must clear recovery and allow immediate quest acquisition after re-approach",
+)
+require(
+    "MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3" in FARM
+    and "recovery.MoveFailures >= MAX_QUEST_DIALOGUE_MOVE_FAILURES" in dialogue_recovery,
+    "dialogue recovery must stop safely after bounded movement failures",
 )
 pause_start = step.index("elseif self.QuestService:IsQuestGiverDialogueOpen() then")
 pause_end = step.index("elseif not self.QuestDiagnosticWaitStartedAt then", pause_start)
@@ -66,8 +99,29 @@ pause_branch = step[pause_start:pause_end]
 require(
     step.index('if questState == "active" then') < pause_start
     and "self.QuestDiagnosticWaitStartedAt = nil" in pause_branch
-    and "self.QuestStartAttemptCount = 0" in pause_branch,
-    "dialogue deferral must preserve manually accepted quests and pause timeout/retry state",
+    and "self.QuestStartAttemptCount = 0" in pause_branch
+    and "return" not in pause_branch,
+    "dialogue deferral must preserve validated acceptance and continue into the recovery flow",
+)
+require(
+    'if questState == "active" then' in step
+    and "if self.QuestDialogueRecovery then" in step
+    and "self.MovementService:Cancel()" in step[
+        step.index('if questState == "active" then'):
+        step.index("if self.QuestDiagnosticWaitKey then")
+    ]
+    and "self.QuestDialogueRecovery = nil" in step[
+        step.index('if questState == "active" then'):
+        step.index("if self.QuestDiagnosticWaitKey then")
+    ],
+    "a validated manual acceptance must cancel retreat before quest-target farming resumes",
+)
+require(
+    "if self.QuestDeferredForDialogue then\n                self.PendingQuestReachedAt = os.clock() - 2"
+    in step
+    and "if not self.QuestDeferredForDialogue then\n                self.PendingQuestReachedAt = nil"
+    in step,
+    "dialogue dismissal must retain a ready-to-request state while re-approaching the giver",
 )
 
 quest_report = FARM[
