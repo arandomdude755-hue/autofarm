@@ -34,8 +34,18 @@ require('Label = "Farm method"' in farm_config
         and 'Action = "farm.mode.select"' in farm_config
         and 'Setting = "FarmMode"' in farm_config
         and 'Options = farmModes' in farm_config
-        and 'local farmModes = { "Level Farm", "Aura Farm" }' in CONFIG,
-        "Farm page must offer only the implemented Level and Aura modes")
+        and '"Farm Bones"' in CONFIG
+        and '"Farm Cake Prince"' in CONFIG
+        and '"Farm Tyrant of the Skies"' in CONFIG,
+        "Farm page must offer the implemented level, aura, bone, cake, and Tiki modes")
+require('Label = "Auto quest for modes"' in farm_config
+        and 'Action = "farm.autoModeQuest"' in farm_config
+        and 'Setting = "AutoModeQuest"' in farm_config
+        and "AutoModeQuest = false" in CONFIG
+        and 'Label = "Ignore Cake Prince boss"' in farm_config
+        and 'Action = "farm.ignoreCakePrince"' in farm_config
+        and 'Setting = "IgnoreCakePrince"' in farm_config,
+        "Special modes must expose an opt-in auto-quest setting that defaults off")
 require('Kind = "settingSlider"' in farm_config
         and 'Label = "Aura distance"' in farm_config
         and 'Action = "farm.auraDistance.set"' in farm_config

@@ -505,7 +505,13 @@ function UI:_Refresh(snapshot)
             entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
             entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
         elseif entry.Control.Kind == "settingToggle" then
-            enabled = snapshot.compact
+            local settingName = entry.Control.Setting
+            if settingName then
+                local farmSettings = self.Config.FarmSettings or {}
+                enabled = farmSettings[settingName] == true
+            else
+                enabled = snapshot.compact
+            end
             entry.Label.Text = enabled and "On" or "Off"
             entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
             entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
@@ -703,7 +709,12 @@ function UI:_ActivateControl(control)
     if control.Kind == "featureToggle" then
         return self.Dispatch(control.Action, snapshot.featureEnabled[control.Action] ~= true)
     elseif control.Kind == "settingToggle" then
-        return self.Dispatch(control.Action, not snapshot.compact)
+        local currentValue = snapshot.compact
+        if control.Setting then
+            local farmSettings = self.Config.FarmSettings or {}
+            currentValue = farmSettings[control.Setting] == true
+        end
+        return self.Dispatch(control.Action, not currentValue)
     end
     return self.Dispatch(control.Action, true)
 end

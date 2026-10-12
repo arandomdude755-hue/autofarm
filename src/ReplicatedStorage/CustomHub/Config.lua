@@ -1,5 +1,38 @@
 local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
-local farmModes = { "Level Farm", "Aura Farm" }
+local farmModes = {
+    "Level Farm",
+    "Aura Farm",
+    "Farm Bones",
+    "Farm Cake Prince",
+    "Farm Tyrant of the Skies",
+}
+local farmModeProfiles = {
+    ["Farm Bones"] = {
+        Sea = "Second Sea",
+        MinimumLevel = 2050,
+        QuestPrefix = "HauntedQuest",
+        QuestName = "HauntedQuest2",
+        QuestId = 2,
+    },
+    ["Farm Cake Prince"] = {
+        Sea = "Third Sea",
+        MinimumLevel = 2275,
+        QuestPrefix = "CakeQuest",
+        QuestName = "CakeQuest2",
+        QuestId = 2,
+        BossName = "Cake Prince",
+        IgnoreBossSetting = "IgnoreCakePrince",
+    },
+    ["Farm Tyrant of the Skies"] = {
+        Sea = "Third Sea",
+        MinimumLevel = 2575,
+        QuestPrefix = "TikiQuest",
+        QuestName = "TikiQuest3",
+        QuestId = 2,
+        BossName = "Tyrant of the Skies",
+        EventPhaseNotMigrated = true,
+    },
+}
 
 local Config = {
     Name = "Custom Hub",
@@ -15,7 +48,10 @@ local Config = {
         WeaponCategories = weaponCategories,
         WeaponCategory = "Melee",
         FarmModes = farmModes,
+        FarmModeProfiles = farmModeProfiles,
         FarmMode = "Level Farm",
+        AutoModeQuest = false,
+        IgnoreCakePrince = false,
         AuraDistance = 300,
         AuraDistanceMin = 0,
         AuraDistanceMax = 1000,
@@ -141,6 +177,18 @@ local Config = {
                     Action = "farm.mode.select",
                     Setting = "FarmMode",
                     Options = farmModes,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto quest for modes",
+                    Action = "farm.autoModeQuest",
+                    Setting = "AutoModeQuest",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Ignore Cake Prince boss",
+                    Action = "farm.ignoreCakePrince",
+                    Setting = "IgnoreCakePrince",
                 },
                 {
                     Kind = "settingSlider",

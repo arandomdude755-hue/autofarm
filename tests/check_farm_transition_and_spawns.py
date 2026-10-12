@@ -24,7 +24,10 @@ def require(condition, message):
 request = FARM[FARM.index("function MainFarm:_RequestQuest"):FARM.index(
     "function MainFarm:_Step"
 )]
-step = FARM[FARM.index("function MainFarm:_Step"):FARM.index("function MainFarm:_Run")]
+step = FARM[
+    FARM.index("function MainFarm:_Step(session)"):
+    FARM.index("function MainFarm:_Run(session)")
+]
 move_to = MOVEMENT[MOVEMENT.index("function MovementService:MoveTo"):MOVEMENT.index(
     "\nreturn MovementService"
 )]

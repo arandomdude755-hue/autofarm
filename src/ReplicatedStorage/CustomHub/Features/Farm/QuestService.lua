@@ -671,6 +671,121 @@ function QuestService:SelectLevelQuest()
     return bestCandidate
 end
 
+function QuestService:GetQuestTargets(prefix, maximumLevel)
+    if type(prefix) ~= "string" or prefix == "" then
+        return nil, "Quest family prefix is invalid"
+    end
+    local levelLimit = tonumber(maximumLevel)
+    if not levelLimit then
+        return nil, "Player level is unavailable for quest target lookup"
+    end
+
+    local guideData = self.Guide and self.Guide.Data
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if type(npcList) ~= "table" then
+        return nil, "GuideModule.Data.NPCList is unavailable"
+    end
+
+    local targets = {}
+    local seen = {}
+    for _, npcEntry in pairs(npcList) do
+        local questName = type(npcEntry) == "table" and npcEntry.InternalQuestName or nil
+        local questGroup = type(questName) == "string"
+            and questName:sub(1, #prefix) == prefix
+            and self.Quests
+            and self.Quests[questName]
+            or nil
+        if type(questGroup) == "table" and type(npcEntry.Levels) == "table" then
+            for questId, requiredLevel in pairs(npcEntry.Levels) do
+                local levelRequired = tonumber(requiredLevel)
+                local quest = questGroup[questId] or questGroup[tostring(questId)]
+                local task = type(quest) == "table" and quest.Task or nil
+                if levelRequired and levelRequired <= levelLimit and type(task) == "table" then
+                    for targetName, count in pairs(task) do
+                        if type(targetName) == "string"
+                            and targetName ~= ""
+                            and tonumber(count)
+                            and tonumber(count) > 0
+                            and not seen[targetName]
+                        then
+                            seen[targetName] = true
+                            table.insert(targets, targetName)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(targets)
+    if #targets == 0 then
+        return nil, "No eligible targets were found in quest family " .. prefix
+    end
+    return targets
+end
+
+function QuestService:SelectQuest(questName, questId, minimumLevel)
+    if type(questName) ~= "string" or questName == "" or questId == nil then
+        return nil, "Special quest identity is invalid"
+    end
+    local level = self:GetPlayerLevel()
+    local minimum = tonumber(minimumLevel)
+    if not level or not minimum then
+        return nil, "Player level or special quest level is unavailable"
+    end
+    if level < minimum then
+        return nil, "Player level is below the selected mode's minimum"
+    end
+
+    local questGroup = self.Quests and self.Quests[questName]
+    local quest = type(questGroup) == "table"
+        and (questGroup[questId] or questGroup[tostring(questId)])
+        or nil
+    if type(quest) ~= "table" or type(quest.Task) ~= "table" then
+        return nil, "The selected quest is missing from the live quest catalog"
+    end
+    local mobName, count = next(quest.Task)
+    if type(mobName) ~= "string" or not tonumber(count) or tonumber(count) <= 0 then
+        return nil, "The selected quest has no readable target"
+    end
+
+    local guideData = self.Guide and self.Guide.Data
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if type(npcList) ~= "table" then
+        return nil, "GuideModule.Data.NPCList is unavailable"
+    end
+
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table"
+            and npcEntry.InternalQuestName == questName
+            and type(npcEntry.Levels) == "table"
+        then
+            for listedQuestId, requiredLevel in pairs(npcEntry.Levels) do
+                local npcLevel = tonumber(requiredLevel)
+                if tostring(listedQuestId) == tostring(questId)
+                    and npcLevel
+                    and npcLevel <= level
+                then
+                    local catalogLevel = tonumber(quest.LevelReq)
+                    local candidateLevel = math.max(npcLevel, catalogLevel or 0)
+                    if candidateLevel > level then
+                        return nil, "Player level does not satisfy the live quest catalog"
+                    end
+                    return {
+                        Level = candidateLevel,
+                        Name = npcEntry.NPCName,
+                        QuestName = questName,
+                        Pos = npcEntry.Position,
+                        Id = questId,
+                        Mob = mobName,
+                    }
+                end
+            end
+        end
+    end
+    return nil, "GuideModule does not expose the selected quest giver and position"
+end
+
 function QuestService:RequestStart(candidate)
     self.LastStartDiagnostic = {
         Stage = "pcall_not_reached",

@@ -49,6 +49,24 @@ local function normalizeEnemyName(name)
     return table.concat(words, " ")
 end
 
+local function normalizeTargetNames(targetNames)
+    local normalized = {}
+    if type(targetNames) == "string" then
+        local name = normalizeEnemyName(targetNames)
+        if name then
+            table.insert(normalized, name)
+        end
+    elseif type(targetNames) == "table" then
+        for _, targetName in ipairs(targetNames) do
+            local name = normalizeEnemyName(targetName)
+            if name then
+                table.insert(normalized, name)
+            end
+        end
+    end
+    return normalized
+end
+
 local function matchesEnemyName(enemyName, targetName)
     local normalizedEnemyName = normalizeEnemyName(enemyName)
     if not normalizedEnemyName then
@@ -80,8 +98,29 @@ local function isDescendantOf(instance, container)
     return ok and result == true
 end
 
-local function matchesSpawnName(spawnName, normalizedTarget)
-    return normalizedTarget ~= nil and normalizeEnemyName(spawnName) == normalizedTarget
+local function matchesSpawnName(spawnName, normalizedTargets)
+    local normalizedName = normalizeEnemyName(spawnName)
+    if not normalizedName then
+        return false
+    end
+    for _, normalizedTarget in ipairs(normalizedTargets or {}) do
+        if normalizedName == normalizedTarget then
+            return true
+        end
+    end
+    return false
+end
+
+local function matchedTargetName(spawnName, targetNames, normalizedTargets)
+    for index, normalizedTarget in ipairs(normalizedTargets) do
+        if normalizeEnemyName(spawnName) == normalizedTarget then
+            if type(targetNames) == "string" then
+                return targetNames
+            end
+            return targetNames[index]
+        end
+    end
+    return nil
 end
 
 function EnemyService.new(compatibility)
@@ -154,7 +193,7 @@ function EnemyService:_RefreshHiddenSpawnCache()
 end
 
 function EnemyService:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
-    local normalizedTarget = normalizeEnemyName(targetName)
+    local normalizedTarget = normalizeTargetNames(targetName)
     for spawnPart in pairs(self.IgnoredSpawns) do
         local readOk, isBasePart, name, parent = pcall(function()
             return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent
@@ -241,16 +280,18 @@ end
 
 function EnemyService:FindSpawn(targetName, origin)
     local diagnostic = {
-        TargetName = targetName,
+        TargetName = type(targetName) == "string" and targetName or "multiple quest targets",
         EnemySpawnsContainerFound = false,
         NormalMarkerFound = false,
         HiddenMarkerFound = false,
         HiddenDiscoveryAvailable = false,
         SelectedSource = "none",
         SelectedName = nil,
+        MatchedTarget = nil,
         SelectedDistance = nil,
     }
-    if type(targetName) ~= "string" then
+    local normalizedTarget = normalizeTargetNames(targetName)
+    if #normalizedTarget == 0 then
         return nil, false, diagnostic
     end
 
@@ -258,7 +299,6 @@ function EnemyService:FindSpawn(targetName, origin)
     local hiddenCache = self:_RefreshHiddenSpawnCache()
     diagnostic.EnemySpawnsContainerFound = enemySpawns ~= nil
     diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
-    local normalizedTarget = normalizeEnemyName(targetName)
     self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
 
     local hasMatchingSpawn = false
@@ -297,6 +337,7 @@ function EnemyService:FindSpawn(targetName, origin)
             nearest, nearestDistance = spawnPart, distance
             diagnostic.SelectedSource = source
             diagnostic.SelectedName = name
+            diagnostic.MatchedTarget = matchedTargetName(name, targetName, normalizedTarget)
             diagnostic.SelectedDistance = distance
         end
     end
@@ -323,13 +364,13 @@ function EnemyService:FindSpawn(targetName, origin)
     end
 
     if nearest then
-        return nearest, false, diagnostic
+        return nearest, false, diagnostic, diagnostic.MatchedTarget
     end
-    return nil, hasMatchingSpawn, diagnostic
+    return nil, hasMatchingSpawn, diagnostic, nil
 end
 
 function EnemyService:IsSpawnAvailable(spawnPart, targetName)
-    if not spawnPart or type(targetName) ~= "string" then
+    if not spawnPart then
         return false
     end
     local readOk, isBasePart, name, parent = pcall(function()
@@ -343,7 +384,7 @@ function EnemyService:IsSpawnAvailable(spawnPart, targetName)
         return false
     end
 
-    local normalizedTarget = normalizeEnemyName(targetName)
+    local normalizedTarget = normalizeTargetNames(targetName)
     if not matchesSpawnName(name, normalizedTarget) then
         return false
     end

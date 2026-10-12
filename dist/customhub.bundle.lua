@@ -28,7 +28,40 @@ end
 __bundleFactories["CustomHub.Config"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Config.lua
 local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
-local farmModes = { "Level Farm", "Aura Farm" }
+local farmModes = {
+    "Level Farm",
+    "Aura Farm",
+    "Farm Bones",
+    "Farm Cake Prince",
+    "Farm Tyrant of the Skies",
+}
+local farmModeProfiles = {
+    ["Farm Bones"] = {
+        Sea = "Second Sea",
+        MinimumLevel = 2050,
+        QuestPrefix = "HauntedQuest",
+        QuestName = "HauntedQuest2",
+        QuestId = 2,
+    },
+    ["Farm Cake Prince"] = {
+        Sea = "Third Sea",
+        MinimumLevel = 2275,
+        QuestPrefix = "CakeQuest",
+        QuestName = "CakeQuest2",
+        QuestId = 2,
+        BossName = "Cake Prince",
+        IgnoreBossSetting = "IgnoreCakePrince",
+    },
+    ["Farm Tyrant of the Skies"] = {
+        Sea = "Third Sea",
+        MinimumLevel = 2575,
+        QuestPrefix = "TikiQuest",
+        QuestName = "TikiQuest3",
+        QuestId = 2,
+        BossName = "Tyrant of the Skies",
+        EventPhaseNotMigrated = true,
+    },
+}
 
 local Config = {
     Name = "Custom Hub",
@@ -44,7 +77,10 @@ local Config = {
         WeaponCategories = weaponCategories,
         WeaponCategory = "Melee",
         FarmModes = farmModes,
+        FarmModeProfiles = farmModeProfiles,
         FarmMode = "Level Farm",
+        AutoModeQuest = false,
+        IgnoreCakePrince = false,
         AuraDistance = 300,
         AuraDistanceMin = 0,
         AuraDistanceMax = 1000,
@@ -170,6 +206,18 @@ local Config = {
                     Action = "farm.mode.select",
                     Setting = "FarmMode",
                     Options = farmModes,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto quest for modes",
+                    Action = "farm.autoModeQuest",
+                    Setting = "AutoModeQuest",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Ignore Cake Prince boss",
+                    Action = "farm.ignoreCakePrince",
+                    Setting = "IgnoreCakePrince",
                 },
                 {
                     Kind = "settingSlider",
@@ -506,6 +554,13 @@ function Compatibility:IsFirstSea()
     return mapName == "Sea1"
         or game.PlaceId == 2753915549
         or game.PlaceId == 85211729168715
+end
+
+function Compatibility:IsSecondSea()
+    local mapName = self.Workspace:GetAttribute("MAP")
+    return mapName == "Sea2"
+        or game.PlaceId == 4442272183
+        or game.PlaceId == 79091703265657
 end
 
 return Compatibility
@@ -1143,7 +1198,13 @@ function UI:_Refresh(snapshot)
             entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
             entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
         elseif entry.Control.Kind == "settingToggle" then
-            enabled = snapshot.compact
+            local settingName = entry.Control.Setting
+            if settingName then
+                local farmSettings = self.Config.FarmSettings or {}
+                enabled = farmSettings[settingName] == true
+            else
+                enabled = snapshot.compact
+            end
             entry.Label.Text = enabled and "On" or "Off"
             entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
             entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
@@ -1341,7 +1402,12 @@ function UI:_ActivateControl(control)
     if control.Kind == "featureToggle" then
         return self.Dispatch(control.Action, snapshot.featureEnabled[control.Action] ~= true)
     elseif control.Kind == "settingToggle" then
-        return self.Dispatch(control.Action, not snapshot.compact)
+        local currentValue = snapshot.compact
+        if control.Setting then
+            local farmSettings = self.Config.FarmSettings or {}
+            currentValue = farmSettings[control.Setting] == true
+        end
+        return self.Dispatch(control.Action, not currentValue)
     end
     return self.Dispatch(control.Action, true)
 end
@@ -3381,6 +3447,121 @@ function QuestService:SelectLevelQuest()
     return bestCandidate
 end
 
+function QuestService:GetQuestTargets(prefix, maximumLevel)
+    if type(prefix) ~= "string" or prefix == "" then
+        return nil, "Quest family prefix is invalid"
+    end
+    local levelLimit = tonumber(maximumLevel)
+    if not levelLimit then
+        return nil, "Player level is unavailable for quest target lookup"
+    end
+
+    local guideData = self.Guide and self.Guide.Data
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if type(npcList) ~= "table" then
+        return nil, "GuideModule.Data.NPCList is unavailable"
+    end
+
+    local targets = {}
+    local seen = {}
+    for _, npcEntry in pairs(npcList) do
+        local questName = type(npcEntry) == "table" and npcEntry.InternalQuestName or nil
+        local questGroup = type(questName) == "string"
+            and questName:sub(1, #prefix) == prefix
+            and self.Quests
+            and self.Quests[questName]
+            or nil
+        if type(questGroup) == "table" and type(npcEntry.Levels) == "table" then
+            for questId, requiredLevel in pairs(npcEntry.Levels) do
+                local levelRequired = tonumber(requiredLevel)
+                local quest = questGroup[questId] or questGroup[tostring(questId)]
+                local task = type(quest) == "table" and quest.Task or nil
+                if levelRequired and levelRequired <= levelLimit and type(task) == "table" then
+                    for targetName, count in pairs(task) do
+                        if type(targetName) == "string"
+                            and targetName ~= ""
+                            and tonumber(count)
+                            and tonumber(count) > 0
+                            and not seen[targetName]
+                        then
+                            seen[targetName] = true
+                            table.insert(targets, targetName)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(targets)
+    if #targets == 0 then
+        return nil, "No eligible targets were found in quest family " .. prefix
+    end
+    return targets
+end
+
+function QuestService:SelectQuest(questName, questId, minimumLevel)
+    if type(questName) ~= "string" or questName == "" or questId == nil then
+        return nil, "Special quest identity is invalid"
+    end
+    local level = self:GetPlayerLevel()
+    local minimum = tonumber(minimumLevel)
+    if not level or not minimum then
+        return nil, "Player level or special quest level is unavailable"
+    end
+    if level < minimum then
+        return nil, "Player level is below the selected mode's minimum"
+    end
+
+    local questGroup = self.Quests and self.Quests[questName]
+    local quest = type(questGroup) == "table"
+        and (questGroup[questId] or questGroup[tostring(questId)])
+        or nil
+    if type(quest) ~= "table" or type(quest.Task) ~= "table" then
+        return nil, "The selected quest is missing from the live quest catalog"
+    end
+    local mobName, count = next(quest.Task)
+    if type(mobName) ~= "string" or not tonumber(count) or tonumber(count) <= 0 then
+        return nil, "The selected quest has no readable target"
+    end
+
+    local guideData = self.Guide and self.Guide.Data
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if type(npcList) ~= "table" then
+        return nil, "GuideModule.Data.NPCList is unavailable"
+    end
+
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table"
+            and npcEntry.InternalQuestName == questName
+            and type(npcEntry.Levels) == "table"
+        then
+            for listedQuestId, requiredLevel in pairs(npcEntry.Levels) do
+                local npcLevel = tonumber(requiredLevel)
+                if tostring(listedQuestId) == tostring(questId)
+                    and npcLevel
+                    and npcLevel <= level
+                then
+                    local catalogLevel = tonumber(quest.LevelReq)
+                    local candidateLevel = math.max(npcLevel, catalogLevel or 0)
+                    if candidateLevel > level then
+                        return nil, "Player level does not satisfy the live quest catalog"
+                    end
+                    return {
+                        Level = candidateLevel,
+                        Name = npcEntry.NPCName,
+                        QuestName = questName,
+                        Pos = npcEntry.Position,
+                        Id = questId,
+                        Mob = mobName,
+                    }
+                end
+            end
+        end
+    end
+    return nil, "GuideModule does not expose the selected quest giver and position"
+end
+
 function QuestService:RequestStart(candidate)
     self.LastStartDiagnostic = {
         Stage = "pcall_not_reached",
@@ -3474,6 +3655,24 @@ local function normalizeEnemyName(name)
     return table.concat(words, " ")
 end
 
+local function normalizeTargetNames(targetNames)
+    local normalized = {}
+    if type(targetNames) == "string" then
+        local name = normalizeEnemyName(targetNames)
+        if name then
+            table.insert(normalized, name)
+        end
+    elseif type(targetNames) == "table" then
+        for _, targetName in ipairs(targetNames) do
+            local name = normalizeEnemyName(targetName)
+            if name then
+                table.insert(normalized, name)
+            end
+        end
+    end
+    return normalized
+end
+
 local function matchesEnemyName(enemyName, targetName)
     local normalizedEnemyName = normalizeEnemyName(enemyName)
     if not normalizedEnemyName then
@@ -3505,8 +3704,29 @@ local function isDescendantOf(instance, container)
     return ok and result == true
 end
 
-local function matchesSpawnName(spawnName, normalizedTarget)
-    return normalizedTarget ~= nil and normalizeEnemyName(spawnName) == normalizedTarget
+local function matchesSpawnName(spawnName, normalizedTargets)
+    local normalizedName = normalizeEnemyName(spawnName)
+    if not normalizedName then
+        return false
+    end
+    for _, normalizedTarget in ipairs(normalizedTargets or {}) do
+        if normalizedName == normalizedTarget then
+            return true
+        end
+    end
+    return false
+end
+
+local function matchedTargetName(spawnName, targetNames, normalizedTargets)
+    for index, normalizedTarget in ipairs(normalizedTargets) do
+        if normalizeEnemyName(spawnName) == normalizedTarget then
+            if type(targetNames) == "string" then
+                return targetNames
+            end
+            return targetNames[index]
+        end
+    end
+    return nil
 end
 
 function EnemyService.new(compatibility)
@@ -3579,7 +3799,7 @@ function EnemyService:_RefreshHiddenSpawnCache()
 end
 
 function EnemyService:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
-    local normalizedTarget = normalizeEnemyName(targetName)
+    local normalizedTarget = normalizeTargetNames(targetName)
     for spawnPart in pairs(self.IgnoredSpawns) do
         local readOk, isBasePart, name, parent = pcall(function()
             return spawnPart:IsA("BasePart"), spawnPart.Name, spawnPart.Parent
@@ -3666,16 +3886,18 @@ end
 
 function EnemyService:FindSpawn(targetName, origin)
     local diagnostic = {
-        TargetName = targetName,
+        TargetName = type(targetName) == "string" and targetName or "multiple quest targets",
         EnemySpawnsContainerFound = false,
         NormalMarkerFound = false,
         HiddenMarkerFound = false,
         HiddenDiscoveryAvailable = false,
         SelectedSource = "none",
         SelectedName = nil,
+        MatchedTarget = nil,
         SelectedDistance = nil,
     }
-    if type(targetName) ~= "string" then
+    local normalizedTarget = normalizeTargetNames(targetName)
+    if #normalizedTarget == 0 then
         return nil, false, diagnostic
     end
 
@@ -3683,7 +3905,6 @@ function EnemyService:FindSpawn(targetName, origin)
     local hiddenCache = self:_RefreshHiddenSpawnCache()
     diagnostic.EnemySpawnsContainerFound = enemySpawns ~= nil
     diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
-    local normalizedTarget = normalizeEnemyName(targetName)
     self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
 
     local hasMatchingSpawn = false
@@ -3722,6 +3943,7 @@ function EnemyService:FindSpawn(targetName, origin)
             nearest, nearestDistance = spawnPart, distance
             diagnostic.SelectedSource = source
             diagnostic.SelectedName = name
+            diagnostic.MatchedTarget = matchedTargetName(name, targetName, normalizedTarget)
             diagnostic.SelectedDistance = distance
         end
     end
@@ -3748,13 +3970,13 @@ function EnemyService:FindSpawn(targetName, origin)
     end
 
     if nearest then
-        return nearest, false, diagnostic
+        return nearest, false, diagnostic, diagnostic.MatchedTarget
     end
-    return nil, hasMatchingSpawn, diagnostic
+    return nil, hasMatchingSpawn, diagnostic, nil
 end
 
 function EnemyService:IsSpawnAvailable(spawnPart, targetName)
-    if not spawnPart or type(targetName) ~= "string" then
+    if not spawnPart then
         return false
     end
     local readOk, isBasePart, name, parent = pcall(function()
@@ -3768,7 +3990,7 @@ function EnemyService:IsSpawnAvailable(spawnPart, targetName)
         return false
     end
 
-    local normalizedTarget = normalizeEnemyName(targetName)
+    local normalizedTarget = normalizeTargetNames(targetName)
     if not matchesSpawnName(name, normalizedTarget) then
         return false
     end
@@ -5114,6 +5336,7 @@ function MainFarm:_ClearTarget(preserveMovement)
     end
     self.Target = nil
     self.TargetName = nil
+    self.TargetIsBoss = nil
 end
 
 function MainFarm:_ResetSpawnSearch(targetName)
@@ -5125,6 +5348,7 @@ function MainFarm:_ResetSpawnSearch(targetName)
     end
     self.SpawnSearchTarget = targetName
     self.SpawnCandidate = nil
+    self.SpawnCandidateTargetName = nil
     self.SpawnCandidateDiagnostic = nil
     self.SpawnLoading = nil
     self.SpawnRetryAt = nil
@@ -5132,6 +5356,7 @@ function MainFarm:_ResetSpawnSearch(targetName)
     self.SpawnSearchExhausted = false
     self.NextSpawnSearchAt = 0
     self.NextEnemySearchAt = 0
+    self.ModeSpawnMarkersExhausted = false
 end
 
 function MainFarm:_TimeoutQuestConfirmation(key, now)
@@ -5365,6 +5590,337 @@ function MainFarm:_StepAura(session, root)
     end
 end
 
+function MainFarm:_StepModeQuestGiver(candidate, root, session)
+    self:_ClearTarget(true)
+    local giverPosition = candidate and candidate.Pos
+    if typeof(giverPosition) ~= "Vector3" and typeof(giverPosition) ~= "CFrame" then
+        self.MovementService:Cancel()
+        self:_SetStatus("Selected mode quest giver has no usable position", "error")
+        return
+    end
+
+    local candidateKey = questKey(candidate)
+    if self.PendingQuestKey ~= candidateKey then
+        self.PendingQuestKey = candidateKey
+        self.PendingQuestReachedAt = nil
+    end
+    local giverCFrame = typeof(giverPosition) == "CFrame"
+        and giverPosition
+        or CFrame.new(giverPosition)
+    if self.QuestDialogueRecovery
+        and self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)
+    then
+        return
+    end
+    if (root.Position - giverCFrame.Position).Magnitude > 8 then
+        if not self.QuestDeferredForDialogue then
+            self.PendingQuestReachedAt = nil
+        end
+        self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8, true)
+        self:_SetStatus("Approaching mode quest giver: " .. tostring(candidate.Name), "info")
+        return
+    end
+    if not self.PendingQuestReachedAt then
+        if self.QuestDeferredForDialogue then
+            self.PendingQuestReachedAt = os.clock() - 2
+        else
+            self.PendingQuestReachedAt = os.clock()
+            self:_SetStatus("At mode quest giver; waiting before quest request", "info")
+            return
+        end
+    elseif os.clock() - self.PendingQuestReachedAt < 2 then
+        return
+    end
+    if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then
+        return
+    end
+    self:_RequestQuest(candidate, session)
+end
+
+function MainFarm:_FindModeSpawn(targetNames, origin)
+    local part, matchingMarkers, diagnostic, matchedTarget =
+        self.EnemyService:FindSpawn(targetNames, origin)
+    return part, matchedTarget, diagnostic, part ~= nil or matchingMarkers
+end
+
+function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
+    if not self.EnemyService:IsAlive(target) then
+        self:_ClearTarget()
+        self:_SetStatus("Mode target died or became invalid; reacquiring", "info")
+        return
+    end
+
+    if self.Target ~= target then
+        self:_ClearTarget(true)
+        self.Target = target
+        self.TargetName = target.Name
+        self.TargetIsBoss = targetIsBoss == true
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.NextSpawnSearchAt = 0
+        self:_SetStatus(
+            (targetIsBoss and "Live boss acquired: " or "Quest-family target acquired: ")
+                .. target.Name,
+            "success"
+        )
+    end
+
+    self.EnemyService:PrepareTarget(target, root)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
+    local combatReady, combatError = self:_EnsureCombatService()
+    if combatReady then
+        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+        if equipped then
+            local attackIssued, attackResult = self.CombatService:AttackM1(
+                target,
+                30,
+                weaponCategory,
+                farmSettings and farmSettings.AttackNoAnimation == true
+            )
+            if attackIssued then
+                self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
+            else
+                self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
+            end
+        else
+            self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
+        end
+    else
+        self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
+    end
+
+    if self.EnemyService:IsAlive(target) then
+        local targetRoot = target:FindFirstChild("HumanoidRootPart")
+        if targetRoot then
+            local targetOffset = weaponCategory == "Blox Fruit"
+                and CFrame.new(-7, 20, 0)
+                or CFrame.new(7, 20, 0)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
+            if (root.Position - targetRoot.Position).Magnitude >= 30 then
+                self:_SetStatus("Approaching mode target: " .. target.Name, "info")
+            end
+        end
+    else
+        self:_ClearTarget()
+        self:_SetStatus("Mode target died or became invalid; reacquiring", "info")
+    end
+end
+
+function MainFarm:_StepBossEventMode(
+    session,
+    root,
+    farmMode,
+    profile,
+    questState,
+    readerEvidence
+)
+    if type(profile) ~= "table" then
+        self:_ClearTarget()
+        self:_SetStatus("Unsupported farm mode: " .. tostring(farmMode), "error")
+        return
+    end
+
+    local compatibility = self.Context.Compatibility
+    local seaMethod = profile.Sea == "Second Sea" and "IsSecondSea"
+        or profile.Sea == "Third Sea" and "IsThirdSea"
+    local seaMethodAvailable = seaMethod and type(compatibility[seaMethod]) == "function"
+    local inRequiredSea = false
+    if seaMethodAvailable then
+        local ok, result = pcall(compatibility[seaMethod], compatibility)
+        inRequiredSea = ok and result == true
+    end
+    if not inRequiredSea then
+        self:_ClearTarget()
+        self:_SetStatus(
+            farmMode .. " requires " .. tostring(profile.Sea)
+                .. "; switch seas manually. Cross-sea travel is not enabled.",
+            "warning"
+        )
+        return
+    end
+
+    local level = self.QuestService:GetPlayerLevel()
+    local minimumLevel = tonumber(profile.MinimumLevel)
+    if not level or not minimumLevel then
+        self:_ClearTarget()
+        self:_SetStatus("Mode level eligibility is unavailable", "error")
+        return
+    elseif level < minimumLevel then
+        self:_ClearTarget()
+        self:_SetStatus(
+            farmMode .. " requires level " .. tostring(minimumLevel)
+                .. "; current level is " .. tostring(level),
+            "warning"
+        )
+        return
+    end
+
+    local targetNames, targetError =
+        self.QuestService:GetQuestTargets(profile.QuestPrefix, level)
+    if type(targetNames) ~= "table" or #targetNames == 0 then
+        self:_ClearTarget()
+        self:_SetStatus(
+            "Mode target lookup failed: " .. tostring(targetError),
+            "error"
+        )
+        return
+    end
+
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    if farmSettings.AutoModeQuest == true then
+        if questState == "unknown" or questState == "active-unknown" then
+            self:_ClearTarget()
+            self:_SetStatus(
+                "Auto quest is waiting for a reliable quest state: "
+                    .. boundedReason(readerEvidence),
+                "warning"
+            )
+            return
+        elseif questState == "none" then
+            local candidate, selectionError = self.QuestService:SelectQuest(
+                profile.QuestName,
+                profile.QuestId,
+                minimumLevel
+            )
+            if not candidate then
+                self:_ClearTarget()
+                self:_SetStatus(
+                    "Mode quest selection unavailable: " .. tostring(selectionError),
+                    "error"
+                )
+                return
+            end
+            self:_StepModeQuestGiver(candidate, root, session)
+            return
+        end
+    end
+
+    local searchKey = "mode:" .. farmMode
+    if self.SpawnSearchTarget ~= searchKey then
+        self:_ResetSpawnSearch(searchKey)
+    end
+
+    local now = os.clock()
+    local target = nil
+    local targetIsBoss = false
+    if now >= (self.NextEnemySearchAt or 0) then
+        local ignoreBoss = profile.IgnoreBossSetting
+            and farmSettings[profile.IgnoreBossSetting] == true
+        if profile.BossName and not ignoreBoss then
+            target = self.EnemyService:FindNearest(profile.BossName, root.Position)
+            targetIsBoss = target ~= nil
+        end
+        if not target then
+            target = self.EnemyService:FindNearest(targetNames, root.Position)
+        end
+        self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    elseif self.Target and self.EnemyService:IsAlive(self.Target) then
+        target = self.Target
+        targetIsBoss = self.TargetIsBoss == true
+    end
+
+    if target then
+        self:_EngageModeTarget(target, targetIsBoss, root, session)
+        return
+    end
+    if self.Target then
+        self:_ClearTarget()
+    end
+
+    if self.SpawnCandidate and not self.EnemyService:IsSpawnAvailable(
+        self.SpawnCandidate,
+        self.SpawnCandidateTargetName
+    ) then
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.NextSpawnSearchAt = 0
+    end
+
+    if now >= (self.NextSpawnSearchAt or 0) then
+        local spawnPart, targetName, diagnostic, matchingMarkers =
+            self:_FindModeSpawn(targetNames, root.Position)
+        self.SpawnCandidate = spawnPart
+        self.SpawnCandidateTargetName = targetName
+        self.SpawnCandidateDiagnostic = diagnostic
+        self.ModeSpawnMarkersExhausted = not spawnPart and matchingMarkers
+        self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
+    end
+
+    local spawnPart = self.SpawnCandidate
+    local spawnTargetName = self.SpawnCandidateTargetName
+    if spawnPart and spawnTargetName
+        and self.EnemyService:IsSpawnAvailable(spawnPart, spawnTargetName)
+    then
+        local destination = spawnPart.CFrame * CFrame.new(0, 60, 0)
+        self:_MoveTo(destination, session, 100, true)
+        if (spawnPart.Position - root.Position).Magnitude <= 100 then
+            if not self.SpawnLoading
+                or self.SpawnLoading.TargetName ~= spawnTargetName
+                or self.SpawnLoading.Part ~= spawnPart
+            then
+                self.SpawnLoading = {
+                    TargetName = spawnTargetName,
+                    Part = spawnPart,
+                    ArrivedAt = now,
+                }
+            elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
+                self.EnemyService:MarkSpawnIgnored(spawnPart, spawnTargetName)
+                self.SpawnLoading = nil
+                self.SpawnCandidate = nil
+                self.SpawnCandidateTargetName = nil
+                self.NextSpawnSearchAt = 0
+                self.NextEnemySearchAt = 0
+                self:_SetStatus(
+                    "No living " .. spawnTargetName
+                        .. " loaded at this marker; checking other mode targets",
+                    "warning"
+                )
+                return
+            end
+            local elapsed = self.SpawnLoading and now - self.SpawnLoading.ArrivedAt or 0
+            self:_SetStatus(
+                "Waiting for " .. spawnTargetName .. " to load at spawn ("
+                    .. tostring(math.max(0, math.ceil(SPAWN_LOAD_GRACE - elapsed)))
+                    .. "s)",
+                "info"
+            )
+        else
+            if self.SpawnLoading and self.SpawnLoading.Part ~= spawnPart then
+                self.SpawnLoading = nil
+            end
+            self:_SetStatus("Travelling to supported spawn for " .. spawnTargetName, "info")
+        end
+        return
+    end
+
+    if self.ModeSpawnMarkersExhausted then
+        self.EnemyService:ClearIgnoredSpawns()
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.ModeSpawnMarkersExhausted = false
+        self.NextSpawnSearchAt = now + SPAWN_CYCLE_RETRY_INTERVAL
+        self:_SetStatus("Mode spawn markers checked; retrying after a short pause", "warning")
+        return
+    end
+
+    self.MovementService:Cancel()
+    local limitation = profile.EventPhaseNotMigrated
+        and "; the BNN-specific Eye/Tree activation phase is not migrated"
+        or ""
+    local bossText = profile.BossName
+        and (" or live " .. profile.BossName)
+        or ""
+    self:_SetStatus(
+        "No live quest-family target" .. bossText
+            .. " or supported spawn marker is available" .. limitation,
+        "warning"
+    )
+end
+
 function MainFarm:_Step(session)
     if not self:_IsCurrent(session) then
         return
@@ -5400,7 +5956,10 @@ function MainFarm:_Step(session)
     if farmMode == "Aura Farm" then
         self:_StepAura(session, root)
         return
-    elseif farmMode ~= "Level Farm" then
+    end
+    local modeProfiles = farmSettings.FarmModeProfiles
+    local farmModeProfile = type(modeProfiles) == "table" and modeProfiles[farmMode] or nil
+    if farmMode ~= "Level Farm" and type(farmModeProfile) ~= "table" then
         self:_ClearTarget()
         self:_SetStatus("Unsupported farm mode: " .. tostring(farmMode), "error")
         return
@@ -5480,6 +6039,17 @@ function MainFarm:_Step(session)
             "Quest confirmed by " .. boundedReason(readerEvidence),
             "success"
         )
+    end
+    if farmModeProfile then
+        self:_StepBossEventMode(
+            session,
+            root,
+            farmMode,
+            farmModeProfile,
+            questState,
+            readerEvidence
+        )
+        return
     end
     if questState == "unknown" then
         self:_ClearTarget(true)
@@ -5916,6 +6486,7 @@ function MainFarm:Stop()
     end
     self.Target = nil
     self.TargetName = nil
+    self.TargetIsBoss = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
     self.PendingQuestTargetName = nil
@@ -5940,6 +6511,30 @@ function MainFarm:Handle(actionId, payload)
         return self:CopyStatusReport()
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    if actionId == "farm.autoModeQuest" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Auto quest setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.AutoModeQuest = payload
+        self:_SetStatus(
+            "Auto quest for modes " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.ignoreCakePrince" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Cake Prince boss setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.IgnoreCakePrince = payload
+        self:_SetStatus(
+            "Cake Prince boss " .. (payload and "ignored" or "enabled as a target"),
+            "success"
+        )
+        return true
+    end
     if actionId == "farm.mode.select" then
         local selectedMode = nil
         for _, mode in ipairs(farmSettings and farmSettings.FarmModes or {}) do

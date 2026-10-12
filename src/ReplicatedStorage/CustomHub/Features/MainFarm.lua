@@ -552,6 +552,7 @@ function MainFarm:_ClearTarget(preserveMovement)
     end
     self.Target = nil
     self.TargetName = nil
+    self.TargetIsBoss = nil
 end
 
 function MainFarm:_ResetSpawnSearch(targetName)
@@ -563,6 +564,7 @@ function MainFarm:_ResetSpawnSearch(targetName)
     end
     self.SpawnSearchTarget = targetName
     self.SpawnCandidate = nil
+    self.SpawnCandidateTargetName = nil
     self.SpawnCandidateDiagnostic = nil
     self.SpawnLoading = nil
     self.SpawnRetryAt = nil
@@ -570,6 +572,7 @@ function MainFarm:_ResetSpawnSearch(targetName)
     self.SpawnSearchExhausted = false
     self.NextSpawnSearchAt = 0
     self.NextEnemySearchAt = 0
+    self.ModeSpawnMarkersExhausted = false
 end
 
 function MainFarm:_TimeoutQuestConfirmation(key, now)
@@ -803,6 +806,337 @@ function MainFarm:_StepAura(session, root)
     end
 end
 
+function MainFarm:_StepModeQuestGiver(candidate, root, session)
+    self:_ClearTarget(true)
+    local giverPosition = candidate and candidate.Pos
+    if typeof(giverPosition) ~= "Vector3" and typeof(giverPosition) ~= "CFrame" then
+        self.MovementService:Cancel()
+        self:_SetStatus("Selected mode quest giver has no usable position", "error")
+        return
+    end
+
+    local candidateKey = questKey(candidate)
+    if self.PendingQuestKey ~= candidateKey then
+        self.PendingQuestKey = candidateKey
+        self.PendingQuestReachedAt = nil
+    end
+    local giverCFrame = typeof(giverPosition) == "CFrame"
+        and giverPosition
+        or CFrame.new(giverPosition)
+    if self.QuestDialogueRecovery
+        and self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)
+    then
+        return
+    end
+    if (root.Position - giverCFrame.Position).Magnitude > 8 then
+        if not self.QuestDeferredForDialogue then
+            self.PendingQuestReachedAt = nil
+        end
+        self:_MoveTo(giverCFrame * CFrame.new(0, 4, 2), session, 8, true)
+        self:_SetStatus("Approaching mode quest giver: " .. tostring(candidate.Name), "info")
+        return
+    end
+    if not self.PendingQuestReachedAt then
+        if self.QuestDeferredForDialogue then
+            self.PendingQuestReachedAt = os.clock() - 2
+        else
+            self.PendingQuestReachedAt = os.clock()
+            self:_SetStatus("At mode quest giver; waiting before quest request", "info")
+            return
+        end
+    elseif os.clock() - self.PendingQuestReachedAt < 2 then
+        return
+    end
+    if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then
+        return
+    end
+    self:_RequestQuest(candidate, session)
+end
+
+function MainFarm:_FindModeSpawn(targetNames, origin)
+    local part, matchingMarkers, diagnostic, matchedTarget =
+        self.EnemyService:FindSpawn(targetNames, origin)
+    return part, matchedTarget, diagnostic, part ~= nil or matchingMarkers
+end
+
+function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
+    if not self.EnemyService:IsAlive(target) then
+        self:_ClearTarget()
+        self:_SetStatus("Mode target died or became invalid; reacquiring", "info")
+        return
+    end
+
+    if self.Target ~= target then
+        self:_ClearTarget(true)
+        self.Target = target
+        self.TargetName = target.Name
+        self.TargetIsBoss = targetIsBoss == true
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.NextSpawnSearchAt = 0
+        self:_SetStatus(
+            (targetIsBoss and "Live boss acquired: " or "Quest-family target acquired: ")
+                .. target.Name,
+            "success"
+        )
+    end
+
+    self.EnemyService:PrepareTarget(target, root)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
+    local combatReady, combatError = self:_EnsureCombatService()
+    if combatReady then
+        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+        if equipped then
+            local attackIssued, attackResult = self.CombatService:AttackM1(
+                target,
+                30,
+                weaponCategory,
+                farmSettings and farmSettings.AttackNoAnimation == true
+            )
+            if attackIssued then
+                self:_SetStatus("M1 request issued; server damage is not yet confirmed", "info")
+            else
+                self:_SetStatus("Combat waiting: " .. tostring(attackResult), "warning")
+            end
+        else
+            self:_SetStatus("Combat waiting: " .. tostring(equipResult), "warning")
+        end
+    else
+        self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
+    end
+
+    if self.EnemyService:IsAlive(target) then
+        local targetRoot = target:FindFirstChild("HumanoidRootPart")
+        if targetRoot then
+            local targetOffset = weaponCategory == "Blox Fruit"
+                and CFrame.new(-7, 20, 0)
+                or CFrame.new(7, 20, 0)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
+            if (root.Position - targetRoot.Position).Magnitude >= 30 then
+                self:_SetStatus("Approaching mode target: " .. target.Name, "info")
+            end
+        end
+    else
+        self:_ClearTarget()
+        self:_SetStatus("Mode target died or became invalid; reacquiring", "info")
+    end
+end
+
+function MainFarm:_StepBossEventMode(
+    session,
+    root,
+    farmMode,
+    profile,
+    questState,
+    readerEvidence
+)
+    if type(profile) ~= "table" then
+        self:_ClearTarget()
+        self:_SetStatus("Unsupported farm mode: " .. tostring(farmMode), "error")
+        return
+    end
+
+    local compatibility = self.Context.Compatibility
+    local seaMethod = profile.Sea == "Second Sea" and "IsSecondSea"
+        or profile.Sea == "Third Sea" and "IsThirdSea"
+    local seaMethodAvailable = seaMethod and type(compatibility[seaMethod]) == "function"
+    local inRequiredSea = false
+    if seaMethodAvailable then
+        local ok, result = pcall(compatibility[seaMethod], compatibility)
+        inRequiredSea = ok and result == true
+    end
+    if not inRequiredSea then
+        self:_ClearTarget()
+        self:_SetStatus(
+            farmMode .. " requires " .. tostring(profile.Sea)
+                .. "; switch seas manually. Cross-sea travel is not enabled.",
+            "warning"
+        )
+        return
+    end
+
+    local level = self.QuestService:GetPlayerLevel()
+    local minimumLevel = tonumber(profile.MinimumLevel)
+    if not level or not minimumLevel then
+        self:_ClearTarget()
+        self:_SetStatus("Mode level eligibility is unavailable", "error")
+        return
+    elseif level < minimumLevel then
+        self:_ClearTarget()
+        self:_SetStatus(
+            farmMode .. " requires level " .. tostring(minimumLevel)
+                .. "; current level is " .. tostring(level),
+            "warning"
+        )
+        return
+    end
+
+    local targetNames, targetError =
+        self.QuestService:GetQuestTargets(profile.QuestPrefix, level)
+    if type(targetNames) ~= "table" or #targetNames == 0 then
+        self:_ClearTarget()
+        self:_SetStatus(
+            "Mode target lookup failed: " .. tostring(targetError),
+            "error"
+        )
+        return
+    end
+
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    if farmSettings.AutoModeQuest == true then
+        if questState == "unknown" or questState == "active-unknown" then
+            self:_ClearTarget()
+            self:_SetStatus(
+                "Auto quest is waiting for a reliable quest state: "
+                    .. boundedReason(readerEvidence),
+                "warning"
+            )
+            return
+        elseif questState == "none" then
+            local candidate, selectionError = self.QuestService:SelectQuest(
+                profile.QuestName,
+                profile.QuestId,
+                minimumLevel
+            )
+            if not candidate then
+                self:_ClearTarget()
+                self:_SetStatus(
+                    "Mode quest selection unavailable: " .. tostring(selectionError),
+                    "error"
+                )
+                return
+            end
+            self:_StepModeQuestGiver(candidate, root, session)
+            return
+        end
+    end
+
+    local searchKey = "mode:" .. farmMode
+    if self.SpawnSearchTarget ~= searchKey then
+        self:_ResetSpawnSearch(searchKey)
+    end
+
+    local now = os.clock()
+    local target = nil
+    local targetIsBoss = false
+    if now >= (self.NextEnemySearchAt or 0) then
+        local ignoreBoss = profile.IgnoreBossSetting
+            and farmSettings[profile.IgnoreBossSetting] == true
+        if profile.BossName and not ignoreBoss then
+            target = self.EnemyService:FindNearest(profile.BossName, root.Position)
+            targetIsBoss = target ~= nil
+        end
+        if not target then
+            target = self.EnemyService:FindNearest(targetNames, root.Position)
+        end
+        self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    elseif self.Target and self.EnemyService:IsAlive(self.Target) then
+        target = self.Target
+        targetIsBoss = self.TargetIsBoss == true
+    end
+
+    if target then
+        self:_EngageModeTarget(target, targetIsBoss, root, session)
+        return
+    end
+    if self.Target then
+        self:_ClearTarget()
+    end
+
+    if self.SpawnCandidate and not self.EnemyService:IsSpawnAvailable(
+        self.SpawnCandidate,
+        self.SpawnCandidateTargetName
+    ) then
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.NextSpawnSearchAt = 0
+    end
+
+    if now >= (self.NextSpawnSearchAt or 0) then
+        local spawnPart, targetName, diagnostic, matchingMarkers =
+            self:_FindModeSpawn(targetNames, root.Position)
+        self.SpawnCandidate = spawnPart
+        self.SpawnCandidateTargetName = targetName
+        self.SpawnCandidateDiagnostic = diagnostic
+        self.ModeSpawnMarkersExhausted = not spawnPart and matchingMarkers
+        self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
+    end
+
+    local spawnPart = self.SpawnCandidate
+    local spawnTargetName = self.SpawnCandidateTargetName
+    if spawnPart and spawnTargetName
+        and self.EnemyService:IsSpawnAvailable(spawnPart, spawnTargetName)
+    then
+        local destination = spawnPart.CFrame * CFrame.new(0, 60, 0)
+        self:_MoveTo(destination, session, 100, true)
+        if (spawnPart.Position - root.Position).Magnitude <= 100 then
+            if not self.SpawnLoading
+                or self.SpawnLoading.TargetName ~= spawnTargetName
+                or self.SpawnLoading.Part ~= spawnPart
+            then
+                self.SpawnLoading = {
+                    TargetName = spawnTargetName,
+                    Part = spawnPart,
+                    ArrivedAt = now,
+                }
+            elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
+                self.EnemyService:MarkSpawnIgnored(spawnPart, spawnTargetName)
+                self.SpawnLoading = nil
+                self.SpawnCandidate = nil
+                self.SpawnCandidateTargetName = nil
+                self.NextSpawnSearchAt = 0
+                self.NextEnemySearchAt = 0
+                self:_SetStatus(
+                    "No living " .. spawnTargetName
+                        .. " loaded at this marker; checking other mode targets",
+                    "warning"
+                )
+                return
+            end
+            local elapsed = self.SpawnLoading and now - self.SpawnLoading.ArrivedAt or 0
+            self:_SetStatus(
+                "Waiting for " .. spawnTargetName .. " to load at spawn ("
+                    .. tostring(math.max(0, math.ceil(SPAWN_LOAD_GRACE - elapsed)))
+                    .. "s)",
+                "info"
+            )
+        else
+            if self.SpawnLoading and self.SpawnLoading.Part ~= spawnPart then
+                self.SpawnLoading = nil
+            end
+            self:_SetStatus("Travelling to supported spawn for " .. spawnTargetName, "info")
+        end
+        return
+    end
+
+    if self.ModeSpawnMarkersExhausted then
+        self.EnemyService:ClearIgnoredSpawns()
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.ModeSpawnMarkersExhausted = false
+        self.NextSpawnSearchAt = now + SPAWN_CYCLE_RETRY_INTERVAL
+        self:_SetStatus("Mode spawn markers checked; retrying after a short pause", "warning")
+        return
+    end
+
+    self.MovementService:Cancel()
+    local limitation = profile.EventPhaseNotMigrated
+        and "; the BNN-specific Eye/Tree activation phase is not migrated"
+        or ""
+    local bossText = profile.BossName
+        and (" or live " .. profile.BossName)
+        or ""
+    self:_SetStatus(
+        "No live quest-family target" .. bossText
+            .. " or supported spawn marker is available" .. limitation,
+        "warning"
+    )
+end
+
 function MainFarm:_Step(session)
     if not self:_IsCurrent(session) then
         return
@@ -838,7 +1172,10 @@ function MainFarm:_Step(session)
     if farmMode == "Aura Farm" then
         self:_StepAura(session, root)
         return
-    elseif farmMode ~= "Level Farm" then
+    end
+    local modeProfiles = farmSettings.FarmModeProfiles
+    local farmModeProfile = type(modeProfiles) == "table" and modeProfiles[farmMode] or nil
+    if farmMode ~= "Level Farm" and type(farmModeProfile) ~= "table" then
         self:_ClearTarget()
         self:_SetStatus("Unsupported farm mode: " .. tostring(farmMode), "error")
         return
@@ -918,6 +1255,17 @@ function MainFarm:_Step(session)
             "Quest confirmed by " .. boundedReason(readerEvidence),
             "success"
         )
+    end
+    if farmModeProfile then
+        self:_StepBossEventMode(
+            session,
+            root,
+            farmMode,
+            farmModeProfile,
+            questState,
+            readerEvidence
+        )
+        return
     end
     if questState == "unknown" then
         self:_ClearTarget(true)
@@ -1354,6 +1702,7 @@ function MainFarm:Stop()
     end
     self.Target = nil
     self.TargetName = nil
+    self.TargetIsBoss = nil
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
     self.PendingQuestTargetName = nil
@@ -1378,6 +1727,30 @@ function MainFarm:Handle(actionId, payload)
         return self:CopyStatusReport()
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    if actionId == "farm.autoModeQuest" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Auto quest setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.AutoModeQuest = payload
+        self:_SetStatus(
+            "Auto quest for modes " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.ignoreCakePrince" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Cake Prince boss setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.IgnoreCakePrince = payload
+        self:_SetStatus(
+            "Cake Prince boss " .. (payload and "ignored" or "enabled as a target"),
+            "success"
+        )
+        return true
+    end
     if actionId == "farm.mode.select" then
         local selectedMode = nil
         for _, mode in ipairs(farmSettings and farmSettings.FarmModes or {}) do

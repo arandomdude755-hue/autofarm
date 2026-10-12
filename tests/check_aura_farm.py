@@ -20,7 +20,9 @@ def function_body(source, signature, next_signature):
 
 
 require(
-    'local farmModes = { "Level Farm", "Aura Farm" }' in CONFIG
+    'local farmModes = {' in CONFIG
+    and '"Level Farm"' in CONFIG
+    and '"Aura Farm"' in CONFIG
     and 'FarmMode = "Level Farm"' in CONFIG
     and "AuraDistance = 300" in CONFIG
     and "AuraDistanceMin = 0" in CONFIG
@@ -44,7 +46,7 @@ require(
 aura_step = function_body(
     MAIN_FARM,
     "function MainFarm:_StepAura",
-    "\nfunction MainFarm:_Step(session)",
+    "\nfunction MainFarm:_StepModeQuestGiver",
 )
 require(
     "self.EnemyService:FindNearestInRange(root.Position, radius)" in aura_step

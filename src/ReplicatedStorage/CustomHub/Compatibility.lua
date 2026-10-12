@@ -149,4 +149,11 @@ function Compatibility:IsFirstSea()
         or game.PlaceId == 85211729168715
 end
 
+function Compatibility:IsSecondSea()
+    local mapName = self.Workspace:GetAttribute("MAP")
+    return mapName == "Sea2"
+        or game.PlaceId == 4442272183
+        or game.PlaceId == 79091703265657
+end
+
 return Compatibility
