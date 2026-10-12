@@ -2129,25 +2129,63 @@ local function readTrackedQuestTarget(self, guideData, isFirstSea)
     return targetName
 end
 
-local function hasVisibleQuestGiverDialogue(playerGui)
+local function visibleDialogueText(label, playerGui)
+    local isTextLabel = label and (
+        label:IsA("TextLabel")
+            or label:IsA("TextButton")
+            or label:IsA("TextBox")
+    )
+    if not isTextLabel or not isVisibleGuiObjectWithin(label, playerGui)
+        or type(label.Text) ~= "string"
+    then
+        return nil
+    end
+
+    local text = label.Text:match("^%s*(.-)%s*$")
+    if text == "" or #text > 64 then
+        return nil
+    end
+    return text
+end
+
+local function hasVisibleQuestGiverDialogue(playerGui, guideData)
     local dialogueGui = playerGui and playerGui:FindFirstChild("DialogueGui")
     local titleFrame = dialogueGui
         and dialogueGui:FindFirstChild("dialogueTitleFrame", true)
-    local subtitle = titleFrame and titleFrame:FindFirstChild("subtitle")
-    local titleLabel = subtitle and subtitle:FindFirstChild("title")
-    local isTextLabel = titleLabel and (
-        titleLabel:IsA("TextLabel")
-            or titleLabel:IsA("TextButton")
-            or titleLabel:IsA("TextBox")
-    )
-    if not isTextLabel or not isVisibleGuiObjectWithin(titleLabel, playerGui)
-        or type(titleLabel.Text) ~= "string"
-    then
+    if not titleFrame or not isVisibleGuiObjectWithin(titleFrame, playerGui) then
         return false
     end
 
-    local titleText = titleLabel.Text:match("^%s*(.-)%s*$")
-    return #titleText <= 64 and string.lower(titleText) == "quest giver"
+    local subtitle = titleFrame and titleFrame:FindFirstChild("subtitle")
+    local titleLabel = subtitle and subtitle:FindFirstChild("title")
+    local titleText = visibleDialogueText(titleLabel, playerGui)
+    if titleText and string.lower(titleText) == "quest giver" then
+        return true
+    end
+
+    -- Later quest-dialogue pages can replace the generic role title with the
+    -- speaker name. Match that label against the live quest catalog instead of
+    -- hardcoding any NPC name.
+    local speakerLabel = titleFrame:FindFirstChild("name")
+    local speakerText = visibleDialogueText(speakerLabel, playerGui)
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if type(npcList) ~= "table" then
+        return false
+    end
+
+    for _, npcEntry in pairs(npcList) do
+        local npcName = type(npcEntry) == "table" and npcEntry.NPCName or nil
+        if type(npcName) == "string" then
+            npcName = npcName:match("^%s*(.-)%s*$")
+            local normalizedNpcName = string.lower(npcName)
+            if (titleText and string.lower(titleText) == normalizedNpcName)
+                or (speakerText and string.lower(speakerText) == normalizedNpcName)
+            then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local function readFirstSeaQuestHud(self, guideData)
@@ -2163,7 +2201,7 @@ local function readFirstSeaQuestHud(self, guideData)
             return "unknown", nil, "PlayerGui.Main is unavailable"
         end
         if main:IsA("ScreenGui") and not main.Enabled then
-            if hasVisibleQuestGiverDialogue(playerGui) then
+            if hasVisibleQuestGiverDialogue(playerGui, guideData) then
                 return "none", nil,
                     "visible Quest Giver dialogue; StartQuest still requires active-state confirmation"
             end
@@ -2246,7 +2284,8 @@ function QuestService:IsQuestGiverDialogueOpen()
         if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
             return false
         end
-        return hasVisibleQuestGiverDialogue(compatibility:GetPlayerGui())
+        local guideData = self.Guide and self.Guide.Data
+        return hasVisibleQuestGiverDialogue(compatibility:GetPlayerGui(), guideData)
     end)
     return ok and isOpen == true
 end

@@ -212,9 +212,11 @@ require(
     'playerGui:FindFirstChild("DialogueGui")' in dialogue_detector
     and 'FindFirstChild("dialogueTitleFrame", true)' in dialogue_detector
     and 'subtitle:FindFirstChild("title")' in dialogue_detector
-    and 'isVisibleGuiObjectWithin(titleLabel, playerGui)' in dialogue_detector
+    and 'speakerLabel = titleFrame:FindFirstChild("name")' in dialogue_detector
+    and 'npcEntry.NPCName' in dialogue_detector
+    and 'guideData.NPCList' in dialogue_detector
     and 'string.lower(titleText) == "quest giver"' in dialogue_detector,
-    "visible quest-giver dialogue detection must use the observed generic DialogueGui title",
+    "dialogue detection must recognize the generic role title or dynamically matched catalog NPC name",
 )
 require(
     'if current:IsA("ScreenGui") and not current.Enabled then\n            return false'
@@ -226,7 +228,7 @@ disabled_start = hud_reader.index("if main:IsA(\"ScreenGui\") and not main.Enabl
 disabled_end = hud_reader.index('\n        local questFrame = main:FindFirstChild("Quest")', disabled_start)
 disabled_branch = hud_reader[disabled_start:disabled_end]
 require(
-    'if hasVisibleQuestGiverDialogue(playerGui) then' in disabled_branch
+    'if hasVisibleQuestGiverDialogue(playerGui, guideData) then' in disabled_branch
     and 'return "none", nil,' in disabled_branch
     and 'StartQuest still requires active-state confirmation' in disabled_branch
     and 'no visible Quest Giver dialogue was found' in disabled_branch
