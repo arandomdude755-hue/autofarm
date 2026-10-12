@@ -126,12 +126,21 @@ require('Name = "PageDescription"' not in UI_MODULE
         and 'Name = "Detail"' not in UI_MODULE,
         "redundant page and control subheadings should not be rendered")
 require("local anchor = entry.Row or entry.Button" in UI_MODULE
-        and "local top = anchorPosition.Y + anchor.AbsoluteSize.Y + 4" in UI_MODULE
-        and "local availableHeight = math.max(0, viewport.Y - top - 8)" in UI_MODULE
-        and "top = fieldPosition.Y - menuHeight - 4" not in UI_MODULE
+        and "local left = (anchorPosition.X - rootPosition.X) / scale" in UI_MODULE
+        and "local menuWidth = anchorSize.X / scale" in UI_MODULE
+        and "local rootHeight = rootSize.Y / scale" in UI_MODULE
+        and "local availableHeight = math.max(0, rootHeight - top - 8)" in UI_MODULE
+        and "local row = create(isSelector and \"Frame\" or \"TextButton\"" in UI_MODULE
+        and "Button = row" in UI_MODULE
+        and "}, self.Root)" in UI_MODULE
+        and "}, overlay)" in UI_MODULE
+        and "Position = UDim2.fromOffset(0, (index - 1) * optionHeight)" in UI_MODULE
+        and "Size = UDim2.new(1, 0, 0, optionHeight)" in UI_MODULE
+        and "DropdownOptionHeight = 44" in CONFIG
+        and "TextSize = 13" in UI_MODULE
         and 'local selectedValue = control.Setting == "UiSize"' in UI_MODULE
         and "Row = row" in UI_MODULE,
-        "dropdowns must open below their control row and show the current UI size")
+        "dropdowns must open below their full-width selector row and show the current UI size")
 require('Name = "SectionHeader"' not in SCRIPT
         and 'Name = "Detail"' not in SCRIPT
         and "Temporary UI test row" not in SCRIPT,
