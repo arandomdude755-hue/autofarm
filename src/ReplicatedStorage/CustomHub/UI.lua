@@ -521,14 +521,12 @@ function UI:_Refresh(snapshot)
             entry.SelectedValue = selectedValue
             if entry.ValueLabel then
                 entry.ValueLabel.Text = tostring(selectedValue or "Select")
-                entry.ValueLabel.TextColor3 = theme.MutedText
+                entry.ValueLabel.TextColor3 = theme.Text
             end
-            if entry.Arrow then
-                entry.Arrow.Text = self.ActiveDropdown
-                    and self.ActiveDropdown.Entry == entry
-                    and "▲"
-                    or "▼"
-            end
+            self:_SetDropdownOpenVisual(
+                entry,
+                self.ActiveDropdown ~= nil and self.ActiveDropdown.Entry == entry
+            )
         else
             for _, option in ipairs(entry.Options) do
                 local selected = option.Value == selectedValue
@@ -710,6 +708,21 @@ function UI:_ActivateControl(control)
     return self.Dispatch(control.Action, true)
 end
 
+function UI:_SetDropdownOpenVisual(entry, isOpen)
+    local theme = self.Config.Theme
+    if entry.Arrow then
+        entry.Arrow.Text = isOpen and "▲" or "▼"
+        entry.Arrow.TextColor3 = isOpen and theme.Accent or theme.MutedText
+    end
+    if entry.ValueFrame then
+        entry.ValueFrame.BackgroundColor3 = isOpen and theme.Selected or theme.TabBar
+    end
+    if entry.ValueStroke then
+        entry.ValueStroke.Color = theme.AccentBorder
+        entry.ValueStroke.Transparency = isOpen and 0.08 or 0.42
+    end
+end
+
 function UI:_CloseDropdown()
     local dropdown = self.ActiveDropdown
     if not dropdown then
@@ -729,7 +742,7 @@ function UI:_CloseDropdown()
     end
     local entry = dropdown.Entry
     if entry and entry.Arrow and entry.Arrow.Parent then
-        entry.Arrow.Text = "▼"
+        self:_SetDropdownOpenVisual(entry, false)
     end
 end
 
@@ -770,9 +783,7 @@ function UI:_OpenDropdown(entry)
         Instances = {},
     }
     self.ActiveDropdown = active
-    if entry.Arrow then
-        entry.Arrow.Text = "▲"
-    end
+    self:_SetDropdownOpenVisual(entry, true)
 
     local overlay = create("TextButton", {
         Name = "DropdownDismissOverlay",
@@ -1121,8 +1132,8 @@ function UI:_AddControl(control)
             and self.State:GetSnapshot().uiSize
             or farmSettings[control.Setting]
             or options[1]
-        local valueLabel = create("TextLabel", {
-            Name = "DropdownValue",
+        local valueFrame = create("Frame", {
+            Name = "DropdownFace",
             AnchorPoint = Vector2.new(1, 0.5),
             Position = UDim2.new(1, -layout.RowInset, 0.5, 0),
             Size = UDim2.new(
@@ -1131,30 +1142,55 @@ function UI:_AddControl(control)
                 0,
                 layout.DropdownHeight
             ),
+            BackgroundColor3 = theme.TabBar,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+        }, row)
+        addCorner(valueFrame, 3)
+        local valueStroke = create("UIStroke", {
+            Color = theme.AccentBorder,
+            Thickness = layout.BorderThickness,
+            Transparency = 0.42,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        }, valueFrame)
+        local valueLabel = create("TextLabel", {
+            Name = "DropdownValue",
+            Position = UDim2.fromOffset(layout.DropdownValueInset, 0),
+            Size = UDim2.new(
+                1,
+                -(layout.DropdownValueInset + layout.DropdownArrowWidth + 2),
+                1,
+                0
+            ),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = tostring(selectedValue or "Select"),
-            TextColor3 = theme.MutedText,
-            TextSize = 10,
+            TextColor3 = theme.Text,
+            TextSize = 11,
             TextTruncate = Enum.TextTruncate.AtEnd,
-            TextXAlignment = Enum.TextXAlignment.Right,
-        }, row)
-        create("UIPadding", {
-            PaddingRight = UDim.new(0, 24),
-        }, valueLabel)
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, valueFrame)
+        local arrowDivider = create("Frame", {
+            Name = "DropdownArrowDivider",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -layout.DropdownArrowWidth, 0.5, 0),
+            Size = UDim2.new(0, 1, 0, 14),
+            BackgroundColor3 = theme.Border,
+            BorderSizePixel = 0,
+        }, valueFrame)
         local arrow = create("TextLabel", {
             Name = "DropdownArrow",
-            AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.new(1, -5, 0, 0),
-            Size = UDim2.new(0, 18, 1, 0),
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -layout.DropdownArrowInset, 0.5, 0),
+            Size = UDim2.new(0, layout.DropdownArrowWidth - layout.DropdownArrowInset, 1, 0),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = "▼",
             TextColor3 = theme.MutedText,
-            TextSize = 9,
+            TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Center,
             TextYAlignment = Enum.TextYAlignment.Center,
-        }, valueLabel)
+        }, valueFrame)
         local entry = {
             Kind = "dropdown",
             Setting = control.Setting,
@@ -1162,6 +1198,9 @@ function UI:_AddControl(control)
             Row = row,
             Button = row,
             ValueLabel = valueLabel,
+            ValueFrame = valueFrame,
+            ValueStroke = valueStroke,
+            ArrowDivider = arrowDivider,
             Arrow = arrow,
             Control = control,
             SelectedValue = selectedValue,

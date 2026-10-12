@@ -139,8 +139,14 @@ require("local anchor = entry.Row or entry.Button" in UI_MODULE
         and "DropdownOptionHeight = 44" in CONFIG
         and "TextSize = 13" in UI_MODULE
         and 'local selectedValue = control.Setting == "UiSize"' in UI_MODULE
-        and "Row = row" in UI_MODULE,
-        "dropdowns must open below their full-width selector row and show the current UI size")
+        and "Row = row" in UI_MODULE
+        and 'Name = "DropdownFace"' in UI_MODULE
+        and 'Name = "DropdownArrowDivider"' in UI_MODULE
+        and "DropdownArrowWidth + 2" in UI_MODULE
+        and "TextXAlignment = Enum.TextXAlignment.Left" in UI_MODULE
+        and "function UI:_SetDropdownOpenVisual(entry, isOpen)" in UI_MODULE
+        and "DropdownWidthRatio = 0.42" in CONFIG,
+        "dropdowns must open below their full-width selector row, show the current value in a clear field, and keep the arrow separate")
 require('Name = "SectionHeader"' not in SCRIPT
         and 'Name = "Detail"' not in SCRIPT
         and "Temporary UI test row" not in SCRIPT,
