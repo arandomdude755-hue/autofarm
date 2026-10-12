@@ -719,6 +719,90 @@ function MainFarm:_RequestQuest(candidate, session)
     end
 end
 
+function MainFarm:_StepAura(session, root)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    local radius = tonumber(farmSettings.AuraDistance) or 300
+    local now = os.clock()
+    local target = nil
+
+    if self.Target and self.EnemyService:IsAlive(self.Target) then
+        local targetRoot = self.Target:FindFirstChild("HumanoidRootPart")
+        if targetRoot and (targetRoot.Position - root.Position).Magnitude <= radius then
+            target = self.Target
+        else
+            self:_ClearTarget()
+        end
+    elseif self.Target or self.TargetName then
+        self:_ClearTarget()
+    end
+
+    if not target and now >= (self.NextEnemySearchAt or 0) then
+        target = self.EnemyService:FindNearestInRange(root.Position, radius)
+        self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    end
+
+    if not target then
+        self:_SetStatus(
+            "Aura Farm waiting: no living enemy within " .. tostring(radius) .. " studs",
+            "warning"
+        )
+        return
+    end
+
+    if self.Target ~= target then
+        self:_ClearTarget()
+        self.Target = target
+        self.TargetName = target.Name
+        self:_SetStatus("Aura target acquired: " .. target.Name, "success")
+    end
+
+    if not self.EnemyService:IsAlive(target) then
+        self:_ClearTarget()
+        self:_SetStatus("Aura target died or became invalid; reacquiring", "info")
+        return
+    end
+
+    self.EnemyService:PrepareTarget(target, root)
+    local weaponCategory = farmSettings.WeaponCategory or "Melee"
+    local combatReady, combatError = self:_EnsureCombatService()
+    if combatReady then
+        local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
+        if equipped then
+            local attackIssued, attackResult = self.CombatService:AttackM1(
+                target,
+                30,
+                weaponCategory,
+                farmSettings.AttackNoAnimation == true
+            )
+            if attackIssued then
+                self:_SetStatus("Aura M1 request issued; server damage is not yet confirmed", "info")
+            else
+                self:_SetStatus("Aura combat waiting: " .. tostring(attackResult), "warning")
+            end
+        else
+            self:_SetStatus("Aura combat waiting: " .. tostring(equipResult), "warning")
+        end
+    else
+        self:_SetStatus("Combat dependencies unavailable: " .. tostring(combatError), "error")
+    end
+
+    if self.EnemyService:IsAlive(target) then
+        local targetRoot = target:FindFirstChild("HumanoidRootPart")
+        if targetRoot then
+            local targetOffset = weaponCategory == "Blox Fruit"
+                and CFrame.new(-7, 20, 0)
+                or CFrame.new(7, 20, 0)
+            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
+            if (root.Position - targetRoot.Position).Magnitude >= 30 then
+                self:_SetStatus("Approaching aura target: " .. target.Name, "info")
+            end
+        end
+    else
+        self:_ClearTarget()
+        self:_SetStatus("Aura target died or became invalid; reacquiring", "info")
+    end
+end
+
 function MainFarm:_Step(session)
     if not self:_IsCurrent(session) then
         return
@@ -747,6 +831,17 @@ function MainFarm:_Step(session)
         self.TargetName = nil
         self:_ResetSpawnSearch(nil)
         self:_SetStatus("Character ready; reacquiring farm state", "info")
+    end
+
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    local farmMode = farmSettings.FarmMode or "Level Farm"
+    if farmMode == "Aura Farm" then
+        self:_StepAura(session, root)
+        return
+    elseif farmMode ~= "Level Farm" then
+        self:_ClearTarget()
+        self:_SetStatus("Unsupported farm mode: " .. tostring(farmMode), "error")
+        return
     end
 
     local questState, activeTarget, readerEvidence = self.QuestService:GetActiveQuestState()
@@ -1281,6 +1376,61 @@ end
 function MainFarm:Handle(actionId, payload)
     if actionId == "farm.status.copy" then
         return self:CopyStatusReport()
+    end
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    if actionId == "farm.mode.select" then
+        local selectedMode = nil
+        for _, mode in ipairs(farmSettings and farmSettings.FarmModes or {}) do
+            if mode == payload then
+                selectedMode = mode
+                break
+            end
+        end
+        if not selectedMode then
+            self:_SetStatus("Unsupported farm method: " .. tostring(payload), "error")
+            return false
+        end
+
+        local restart = self.Running
+        if restart then
+            self:Stop()
+        end
+        farmSettings.FarmMode = selectedMode
+        self:_SetStatus("Farm method: " .. selectedMode, "success")
+        if restart then
+            local started, startError = self:Start()
+            if not started then
+                self:_SetStatus("Could not restart farm: " .. tostring(startError), "error")
+                return false
+            end
+        end
+        return true
+    end
+    if actionId == "farm.auraDistance.set" then
+        if not farmSettings then
+            self:_SetStatus("Farm settings are unavailable", "error")
+            return false
+        end
+        local minimum = tonumber(farmSettings and farmSettings.AuraDistanceMin) or 0
+        local maximum = tonumber(farmSettings and farmSettings.AuraDistanceMax) or 1000
+        local step = tonumber(farmSettings and farmSettings.AuraDistanceStep) or 1
+        if type(payload) ~= "number"
+            or payload ~= payload
+            or math.abs(payload) == math.huge
+            or payload < minimum
+            or payload > maximum
+            or step <= 0
+        then
+            self:_SetStatus("Invalid Aura Farm distance", "error")
+            return false
+        end
+        local selectedDistance = minimum + math.floor((payload - minimum) / step + 0.5) * step
+        farmSettings.AuraDistance = math.min(selectedDistance, maximum)
+        self:_SetStatus(
+            "Aura distance: " .. tostring(farmSettings.AuraDistance) .. " studs",
+            "success"
+        )
+        return true
     end
     if actionId ~= "farm.main" then
         return false

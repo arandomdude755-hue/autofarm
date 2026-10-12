@@ -210,6 +210,35 @@ function EnemyService:FindNearest(targetName, origin)
     return nearest, nearestDistance
 end
 
+function EnemyService:FindNearestInRange(origin, maxDistance)
+    if typeof(origin) ~= "Vector3" then
+        return nil
+    end
+    local radius = tonumber(maxDistance)
+    if not radius or radius < 0 or radius ~= radius or math.abs(radius) == math.huge then
+        return nil
+    end
+
+    local enemies = self.Workspace:FindFirstChild("Enemies")
+    if not enemies then
+        enemies = self.Workspace:FindFirstChild("Enemies", true)
+    end
+    if not enemies then
+        return nil
+    end
+
+    local nearest, nearestDistance = nil, radius
+    for _, enemy in ipairs(enemies:GetDescendants()) do
+        if enemy:IsA("Model") and self:IsAlive(enemy) then
+            local distance = (enemy.HumanoidRootPart.Position - origin).Magnitude
+            if distance <= nearestDistance then
+                nearest, nearestDistance = enemy, distance
+            end
+        end
+    end
+    return nearest, nearestDistance
+end
+
 function EnemyService:FindSpawn(targetName, origin)
     local diagnostic = {
         TargetName = targetName,

@@ -141,6 +141,8 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         TabMarkers = {},
         ToggleLabels = {},
         SelectorEntries = {},
+        SliderEntries = {},
+        ActiveSlider = nil,
         ActiveDropdown = nil,
         ActiveTweens = {},
         TweenCompletedConnections = {},
@@ -541,6 +543,14 @@ function UI:_Refresh(snapshot)
         end
     end
 
+    for _, entry in ipairs(self.SliderEntries) do
+        if not self.ActiveSlider or self.ActiveSlider.Entry ~= entry then
+            local farmSettings = self.Config.FarmSettings or {}
+            local value = tonumber(farmSettings[entry.Setting]) or entry.Control.Min
+            self:_UpdateSliderVisual(entry, value)
+        end
+    end
+
     self:_ApplySize(snapshot)
     if self.ActiveTab ~= snapshot.selectedTab then
         if self.Config.Pages[snapshot.selectedTab] then
@@ -554,9 +564,14 @@ end
 
 function UI:_ClearPage()
     self:_CloseDropdown()
+    if self.ActiveSlider then
+        self:_CommitActiveSlider()
+    end
     disconnectAll(self.PageConnections)
     self.ToggleLabels = {}
     self.SelectorEntries = {}
+    self.SliderEntries = {}
+    self.ActiveSlider = nil
     self.ControlsContainer = nil
     self.ControlGridLayout = nil
     self.ActiveControls = nil
@@ -859,6 +874,69 @@ function UI:_ToggleDropdown(entry)
     self:_OpenDropdown(entry)
 end
 
+function UI:_UpdateSliderVisual(entry, value)
+    local minimum = tonumber(entry.Control.Min) or 0
+    local maximum = tonumber(entry.Control.Max) or minimum
+    local step = tonumber(entry.Control.Step) or 1
+    if step <= 0 then
+        step = 1
+    end
+    value = math.clamp(tonumber(value) or minimum, minimum, maximum)
+    value = minimum + math.floor((value - minimum) / step + 0.5) * step
+    value = math.min(value, maximum)
+
+    local range = maximum - minimum
+    local ratio = range > 0 and (value - minimum) / range or 0
+    entry.CurrentValue = value
+    entry.PendingValue = value
+    if entry.ValueLabel then
+        local unit = entry.Control.Unit
+        entry.ValueLabel.Text = tostring(value) .. (unit and (" " .. unit) or "")
+    end
+    if entry.Fill then
+        entry.Fill.Size = UDim2.new(ratio, 0, 1, 0)
+    end
+    if entry.Thumb then
+        entry.Thumb.Position = UDim2.new(ratio, 0, 0.5, 0)
+    end
+end
+
+function UI:_UpdateSliderFromX(entry, positionX)
+    if not entry.Track or not entry.Track.Parent then
+        return
+    end
+    local trackPosition = entry.Track.AbsolutePosition
+    local trackWidth = entry.Track.AbsoluteSize.X
+    if trackWidth <= 0 then
+        return
+    end
+
+    local minimum = tonumber(entry.Control.Min) or 0
+    local maximum = tonumber(entry.Control.Max) or minimum
+    local ratio = math.clamp((positionX - trackPosition.X) / trackWidth, 0, 1)
+    self:_UpdateSliderVisual(entry, minimum + (maximum - minimum) * ratio)
+end
+
+function UI:_CommitActiveSlider()
+    local active = self.ActiveSlider
+    self.ActiveSlider = nil
+    if not active or active.Entry.PendingValue == nil then
+        return
+    end
+
+    local entry = active.Entry
+    local ok, result, actionError = pcall(
+        self.Dispatch,
+        entry.Control.Action,
+        entry.PendingValue
+    )
+    if not ok then
+        self.State:SetStatus("UI action error: " .. tostring(result), "error")
+    elseif result == false and actionError then
+        self.State:SetStatus(tostring(actionError), "error")
+    end
+end
+
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
@@ -866,8 +944,9 @@ function UI:_AddControl(control)
         or control.Kind == "settingToggle"
     local isSelector = control.Kind == "settingSelect"
     local isDropdown = control.Kind == "settingDropdown"
+    local isSlider = control.Kind == "settingSlider"
     local reservedTitleSpace = hasToggle and (layout.ToggleValueWidth + layout.ToggleGap) or 0
-    local row = create(isSelector and "Frame" or "TextButton", {
+    local row = create((isSelector or isSlider) and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
         Size = UDim2.new(1, 0, 0, layout.RowHeight),
         BackgroundColor3 = theme.Control,
@@ -891,8 +970,12 @@ function UI:_AddControl(control)
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, row)
 
-    local titleTop = isSelector and layout.SelectorTitleTop or layout.RowTitleTop
-    local titleHeight = isSelector and layout.SelectorTitleHeight or layout.RowTitleHeight
+    local titleTop = isSelector and layout.SelectorTitleTop
+        or isSlider and layout.RowTitleTop
+        or layout.RowTitleTop
+    local titleHeight = isSelector and layout.SelectorTitleHeight
+        or isSlider and layout.SliderTitleHeight
+        or layout.RowTitleHeight
     local titleSize
     if isSelector then
         titleSize = UDim2.new(0, layout.SelectorTitleWidth, 0, titleHeight)
@@ -900,6 +983,13 @@ function UI:_AddControl(control)
         titleSize = UDim2.new(
             1 - layout.DropdownWidthRatio,
             -(layout.RowInset * 2 + layout.DropdownTitleGap),
+            0,
+            titleHeight
+        )
+    elseif isSlider then
+        titleSize = UDim2.new(
+            1,
+            -(layout.RowInset * 2 + layout.SliderValueWidth + layout.ToggleGap),
             0,
             titleHeight
         )
@@ -1082,6 +1172,74 @@ function UI:_AddControl(control)
             if not ok then
                 self.State:SetStatus("UI action error: " .. tostring(actionError), "error")
             end
+        end)
+    elseif isSlider then
+        rowStroke.Transparency = 0.15
+        local farmSettings = self.Config.FarmSettings or {}
+        local minimum = tonumber(control.Min) or 0
+        local maximum = tonumber(control.Max) or minimum
+        local initialValue = tonumber(farmSettings[control.Setting]) or minimum
+        local valueLabel = create("TextLabel", {
+            Name = "SliderValue",
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -layout.RowInset, 0, 2),
+            Size = UDim2.fromOffset(layout.SliderValueWidth, layout.SliderTitleHeight - 2),
+            BackgroundTransparency = 1,
+            Font = theme.MonoFont,
+            Text = tostring(initialValue) .. (control.Unit and (" " .. control.Unit) or ""),
+            TextColor3 = theme.MutedText,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+        local track = create("Frame", {
+            Name = "SliderTrack",
+            Position = UDim2.new(0, layout.RowInset, 0, layout.SliderTrackTop),
+            Size = UDim2.new(1, -layout.RowInset * 2, 0, layout.SliderTrackHeight),
+            BackgroundColor3 = theme.TabBar,
+            BorderSizePixel = 0,
+            Active = true,
+        }, row)
+        addCorner(track, 4)
+        local fill = create("Frame", {
+            Name = "SliderFill",
+            Size = UDim2.new(0, 0, 1, 0),
+            BackgroundColor3 = theme.Accent,
+            BorderSizePixel = 0,
+        }, track)
+        addCorner(fill, 4)
+        local thumb = create("Frame", {
+            Name = "SliderThumb",
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.fromOffset(10, 10),
+            BackgroundColor3 = theme.Text,
+            BorderSizePixel = 0,
+        }, track)
+        addCorner(thumb, 6)
+        local entry = {
+            Kind = "slider",
+            Setting = control.Setting,
+            Track = track,
+            Fill = fill,
+            Thumb = thumb,
+            ValueLabel = valueLabel,
+            Control = control,
+            PendingValue = initialValue,
+        }
+        self:_UpdateSliderVisual(entry, initialValue)
+        table.insert(self.SliderEntries, entry)
+        self:_Connect(self.PageConnections, track.InputBegan, function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch
+            then
+                return
+            end
+            self.ActiveSlider = {
+                Entry = entry,
+                Input = input.UserInputType == Enum.UserInputType.Touch and input or nil,
+            }
+            self:_UpdateSliderFromX(entry, input.Position.X)
         end)
     else
         self:_Connect(self.PageConnections, row.Activated, function()
@@ -1398,6 +1556,14 @@ function UI:Mount()
         end
     end)
     self:_Connect(self.PersistentConnections, UserInputService.InputChanged, function(input)
+        local activeSlider = self.ActiveSlider
+        if activeSlider
+            and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input == activeSlider.Input)
+        then
+            self:_UpdateSliderFromX(activeSlider.Entry, input.Position.X)
+        end
+
         local drag = self.RestoreDrag
         if drag and self.RestoreButton and self.RestoreButton.Parent
             and (input.UserInputType == Enum.UserInputType.MouseMovement or input == drag.Input) then
@@ -1435,6 +1601,14 @@ function UI:Mount()
         end
     end)
     self:_Connect(self.PersistentConnections, UserInputService.InputEnded, function(input)
+        local activeSlider = self.ActiveSlider
+        if activeSlider and (
+            input.UserInputType == Enum.UserInputType.MouseButton1
+                or input == activeSlider.Input
+        ) then
+            self:_CommitActiveSlider()
+        end
+
         local drag = self.RestoreDrag
         if drag and (
             input.UserInputType == Enum.UserInputType.MouseButton1
@@ -1759,6 +1933,9 @@ end
 
 function UI:Destroy()
     self:_CloseDropdown()
+    if self.ActiveSlider then
+        self:_CommitActiveSlider()
+    end
     if self.StateConnection then
         self.StateConnection:Disconnect()
         self.StateConnection = nil
@@ -1799,6 +1976,8 @@ function UI:Destroy()
     self.TabMarkers = {}
     self.ToggleLabels = {}
     self.SelectorEntries = {}
+    self.SliderEntries = {}
+    self.ActiveSlider = nil
     self.ActiveDropdown = nil
     self.PressedButtonScale = nil
     self.PressedButtonInput = nil

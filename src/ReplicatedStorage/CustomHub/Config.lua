@@ -1,4 +1,5 @@
 local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
+local farmModes = { "Level Farm", "Aura Farm" }
 
 local Config = {
     Name = "Custom Hub",
@@ -13,6 +14,12 @@ local Config = {
         -- Mirrors BNN's `Settings["Select Weapon"] or "Melee"` default.
         WeaponCategories = weaponCategories,
         WeaponCategory = "Melee",
+        FarmModes = farmModes,
+        FarmMode = "Level Farm",
+        AuraDistance = 300,
+        AuraDistanceMin = 0,
+        AuraDistanceMax = 1000,
+        AuraDistanceStep = 1,
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
     },
@@ -67,6 +74,10 @@ local Config = {
         DropdownTitleGap = 8,
         DropdownHeight = 26,
         DropdownOptionHeight = 44,
+        SliderTitleHeight = 22,
+        SliderTrackTop = 27,
+        SliderTrackHeight = 6,
+        SliderValueWidth = 72,
         ToggleValueTop = 9,
         ToggleValueWidth = 52,
         ToggleValueHeight = 20,
@@ -122,8 +133,25 @@ local Config = {
         Farm = {
             Controls = {
                 {
+                    Kind = "settingDropdown",
+                    Label = "Farm method",
+                    Action = "farm.mode.select",
+                    Setting = "FarmMode",
+                    Options = farmModes,
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Aura distance",
+                    Action = "farm.auraDistance.set",
+                    Setting = "AuraDistance",
+                    Min = 0,
+                    Max = 1000,
+                    Step = 1,
+                    Unit = "studs",
+                },
+                {
                     Kind = "featureToggle",
-                    Label = "Auto Farm Level",
+                    Label = "Start Farm",
                     Action = "farm.main",
                 },
                 {

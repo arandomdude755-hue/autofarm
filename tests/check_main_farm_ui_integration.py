@@ -26,10 +26,21 @@ def function_body(source, signature, next_signature):
 farm_config = CONFIG[CONFIG.index("Farm = {"):CONFIG.index("Player = {")]
 require('Kind = "featureToggle"' in farm_config,
         "Farm page must expose Main Farm as an actual feature toggle")
-require('Label = "Auto Farm Level"' in farm_config,
-        "Farm toggle must be labelled Auto Farm Level")
+require('Label = "Start Farm"' in farm_config,
+        "Farm toggle must be labelled Start Farm for the selected method")
 require('Action = "farm.main"' in farm_config,
         "Farm toggle must use MainFarm's registered action")
+require('Label = "Farm method"' in farm_config
+        and 'Action = "farm.mode.select"' in farm_config
+        and 'Setting = "FarmMode"' in farm_config
+        and 'Options = farmModes' in farm_config
+        and 'local farmModes = { "Level Farm", "Aura Farm" }' in CONFIG,
+        "Farm page must offer only the implemented Level and Aura modes")
+require('Kind = "settingSlider"' in farm_config
+        and 'Label = "Aura distance"' in farm_config
+        and 'Action = "farm.auraDistance.set"' in farm_config
+        and 'Setting = "AuraDistance"' in farm_config,
+        "Farm page must expose Aura Farm's radius setting")
 require(
     'Kind = "button"' in farm_config
     and 'Label = "Copy status report"' in farm_config
@@ -81,6 +92,12 @@ require('Name = "DropdownValue"' in UI
         and "pcall(self.Dispatch, entry.Control.Action, value)" in UI
         and 'Kind = "dropdown"' in UI,
         "Weapon category dropdown must open choices and dispatch the selected category")
+require('control.Kind == "settingSlider"' in UI
+        and 'function UI:_UpdateSliderFromX(entry, positionX)' in UI
+        and 'self:_UpdateSliderFromX(activeSlider.Entry, input.Position.X)' in UI
+        and 'entry.PendingValue' in UI
+        and 'track.InputBegan' in UI,
+        "Aura distance slider must support touch/mouse drag and dispatch its selected value")
 dropdown_open = function_body(UI, "function UI:_OpenDropdown(entry)", "\nfunction UI:_ToggleDropdown")
 dropdown_close = function_body(UI, "function UI:_CloseDropdown()", "\nfunction UI:_OpenDropdown")
 clear_page = function_body(UI, "function UI:_ClearPage()", "\nfunction UI:_SyncControlGridHeight")
@@ -124,6 +141,11 @@ require("self.Running = false" in stop
         "Stopping MainFarm must invalidate its worker and run existing cleanup")
 require('SetFeatureEnabled("farm.main", true)' in start,
         "MainFarm start must update the UI's enabled-state source")
+require('actionId == "farm.mode.select"' in handle
+        and 'farmSettings.FarmMode = selectedMode' in handle
+        and 'actionId == "farm.auraDistance.set"' in handle
+        and 'farmSettings.AuraDistance = math.min(selectedDistance, maximum)' in handle,
+        "MainFarm must validate and apply the selected mode and Aura radius settings")
 collision = function_body(
     MOVEMENT,
     "function MovementService:SetFarmCollisionSuppression(enabled)",
@@ -144,6 +166,15 @@ require("farmSettings.WeaponCategory" in MAIN_FARM
 require("self.QuestService:GetActiveQuestState()" in MAIN_FARM
         and "self.QuestService:SelectLevelQuest()" in MAIN_FARM,
         "MainFarm must use the existing quest state and quest selection service")
+level_step = function_body(
+    MAIN_FARM,
+    "function MainFarm:_Step(session)",
+    "\nfunction MainFarm:_Run(session)",
+)
+require('if farmMode == "Aura Farm" then' in level_step
+        and level_step.index('if farmMode == "Aura Farm" then')
+        < level_step.index("self.QuestService:GetActiveQuestState()"),
+        "Aura Farm must route before quest reading and leave Level Farm's quest path intact")
 
 print("PASS: Farm UI activation dispatches to the existing MainFarm feature")
 print("PASS: toggle state reflects MainFarm start/stop and repeated enable is guarded")

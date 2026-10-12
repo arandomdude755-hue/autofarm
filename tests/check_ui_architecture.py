@@ -130,7 +130,7 @@ require("local anchor = entry.Row or entry.Button" in UI_MODULE
         and "local menuWidth = anchorSize.X / scale" in UI_MODULE
         and "local rootHeight = rootSize.Y / scale" in UI_MODULE
         and "local availableHeight = math.max(0, rootHeight - top - 8)" in UI_MODULE
-        and "local row = create(isSelector and \"Frame\" or \"TextButton\"" in UI_MODULE
+        and 'local row = create((isSelector or isSlider) and "Frame" or "TextButton"' in UI_MODULE
         and "Button = row" in UI_MODULE
         and "}, self.Root)" in UI_MODULE
         and "}, overlay)" in UI_MODULE
