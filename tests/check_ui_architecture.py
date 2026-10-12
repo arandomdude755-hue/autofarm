@@ -101,10 +101,11 @@ require("SidebarNavInsetTop = 4" in CONFIG
         "navigation rows need top and side insets so selected outlines are not clipped")
 settings_page = CONFIG[CONFIG.index("Settings = {"):]
 require('Label = "UI size"' in settings_page
+        and 'Kind = "settingDropdown"' in settings_page
         and 'Action = "settings.uiSize.select"' in settings_page
         and 'Setting = "UiSize"' in settings_page
         and 'Options = { "Small", "Medium", "Large" }' in settings_page,
-        "Settings must expose the selectable UI size control")
+        "Settings must expose UI size through the shared dropdown")
 require('UiSize = "Large"' in CONFIG
         and "Small = 0.82" in CONFIG
         and "Medium = 0.91" in CONFIG
@@ -124,10 +125,13 @@ require('Name = "PageDescription"' not in UI_MODULE
         and 'Name = "SectionHeader"' not in UI_MODULE
         and 'Name = "Detail"' not in UI_MODULE,
         "redundant page and control subheadings should not be rendered")
-require("SelectorOptionsTop = 6" in CONFIG
-        and "SelectorOptionsHeight = 28" in CONFIG
-        and "SelectorTitleWidth = 120" in CONFIG,
-        "compact selector options are not aligned inside the control row")
+require("local anchor = entry.Row or entry.Button" in UI_MODULE
+        and "local top = anchorPosition.Y + anchor.AbsoluteSize.Y + 4" in UI_MODULE
+        and "local availableHeight = math.max(0, viewport.Y - top - 8)" in UI_MODULE
+        and "top = fieldPosition.Y - menuHeight - 4" not in UI_MODULE
+        and 'local selectedValue = control.Setting == "UiSize"' in UI_MODULE
+        and "Row = row" in UI_MODULE,
+        "dropdowns must open below their control row and show the current UI size")
 require('Name = "SectionHeader"' not in SCRIPT
         and 'Name = "Detail"' not in SCRIPT
         and "Temporary UI test row" not in SCRIPT,

@@ -161,7 +161,7 @@ local Config = {
         Settings = {
             Controls = {
                 {
-                    Kind = "settingSelect",
+                    Kind = "settingDropdown",
                     Label = "UI size",
                     Action = "settings.uiSize.select",
                     Setting = "UiSize",

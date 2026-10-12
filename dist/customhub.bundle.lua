@@ -190,7 +190,7 @@ local Config = {
         Settings = {
             Controls = {
                 {
-                    Kind = "settingSelect",
+                    Kind = "settingDropdown",
                     Label = "UI size",
                     Action = "settings.uiSize.select",
                     Setting = "UiSize",
@@ -1347,14 +1347,17 @@ function UI:_OpenDropdown(entry)
     local scale = self.RootScale and self.RootScale.Scale or 1
     local optionHeight = math.max(22, layout.DropdownOptionHeight * scale)
     local totalHeight = optionHeight * #options
-    local menuHeight = math.min(totalHeight, math.max(1, viewport.Y - 16))
+    local anchor = entry.Row or entry.Button
+    local anchorPosition = anchor.AbsolutePosition
+    local top = anchorPosition.Y + anchor.AbsoluteSize.Y + 4
+    local availableHeight = math.max(0, viewport.Y - top - 8)
+    local menuHeight = math.min(totalHeight, availableHeight)
+    if menuHeight < 1 then
+        self.State:SetStatus("There is not enough room below this selector to open it.", "error")
+        return false
+    end
     local menuWidth = math.min(entry.Button.AbsoluteSize.X, math.max(1, viewport.X - 16))
     local fieldPosition = entry.Button.AbsolutePosition
-    local top = fieldPosition.Y + entry.Button.AbsoluteSize.Y + 4
-    if top + menuHeight > viewport.Y - 8 then
-        top = fieldPosition.Y - menuHeight - 4
-    end
-    top = math.clamp(top, 8, math.max(8, viewport.Y - menuHeight - 8))
     local left = math.clamp(
         fieldPosition.X,
         8,
@@ -1619,7 +1622,10 @@ function UI:_AddControl(control)
         rowStroke.Transparency = 0.15
         local options = control.Options or {}
         local farmSettings = self.Config.FarmSettings or {}
-        local selectedValue = farmSettings[control.Setting] or options[1]
+        local selectedValue = control.Setting == "UiSize"
+            and self.State:GetSnapshot().uiSize
+            or farmSettings[control.Setting]
+            or options[1]
         local dropdownButton = create("TextButton", {
             Name = "DropdownValue",
             AnchorPoint = Vector2.new(1, 0.5),
@@ -1668,6 +1674,7 @@ function UI:_AddControl(control)
             Kind = "dropdown",
             Setting = control.Setting,
             Options = options,
+            Row = row,
             Button = dropdownButton,
             Arrow = arrow,
             Control = control,
