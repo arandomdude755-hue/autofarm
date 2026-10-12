@@ -185,7 +185,9 @@ require(
 require(
     'FindFirstChild("Enemies", true)' in ENEMY
     and "enemies:GetDescendants()" in ENEMY
-    and "matchesEnemyName(enemy.Name, targetName)" in ENEMY,
+    and "EnemyModelsByName[normalizedName]" in ENEMY
+    and "normalizeEnemyName(instance.Name)" in ENEMY
+    and "singularizeEnemyWord" in ENEMY,
     "live enemy lookup must handle nested models and generic level/plural name variants",
 )
 require(

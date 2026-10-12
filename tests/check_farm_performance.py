@@ -45,14 +45,18 @@ spawn_index = function_body(
 require(
     "DescendantAdded:Connect" in enemy_index
     and "DescendantRemoving:Connect" in enemy_index
+    and "_IndexEnemyModel(instance)" in enemy_index
+    and "_UnindexEnemyModel(instance)" in enemy_index
     and "GetDescendants()" in enemy_index,
-    "enemy model discovery must seed once and maintain its index from hierarchy events",
+    "enemy model discovery must seed once and maintain its name indexes from hierarchy events",
 )
 require(
     "DescendantAdded:Connect" in spawn_index
     and "DescendantRemoving:Connect" in spawn_index
+    and "_IndexSpawnMarker(instance)" in spawn_index
+    and "_UnindexSpawnMarker(instance)" in spawn_index
     and "GetDescendants()" in spawn_index,
-    "spawn marker discovery must seed once and maintain its index from hierarchy events",
+    "spawn marker discovery must seed once and maintain its name indexes from hierarchy events",
 )
 
 find_nearest = function_body(ENEMY, "function EnemyService:FindNearest(", "\nfunction EnemyService:FindNearestInRange")
@@ -64,9 +68,11 @@ find_in_range = function_body(
 require(
     "_GetEnemyModelIndex()" in find_nearest
     and "GetDescendants()" not in find_nearest
+    and "EnemyModelsByName[normalizedName]" in find_nearest
+    and "for enemy in pairs(enemyModels)" not in find_nearest
     and "_GetEnemyModelIndex()" in find_in_range
     and "GetDescendants()" not in find_in_range,
-    "repeated target searches must reuse the event-maintained enemy index",
+    "quest-target searches must use normalized-name buckets instead of scanning every loaded model",
 )
 
 prepare_target = function_body(
@@ -111,6 +117,11 @@ require(
     and "hiddenCache.ByName[normalizedName]" in find_spawn,
     "expensive hidden-instance enumeration must be fallback-only, infrequent, and name-indexed",
 )
+require(
+    "SpawnMarkersByName[normalizedName]" in find_spawn
+    and "for spawnPart in pairs(spawnMarkers)" not in find_spawn,
+    "normal spawn lookup must inspect only marker buckets matching the active quest target",
+)
 
 attack = function_body(
     COMBAT,
@@ -126,6 +137,13 @@ require(
     "function EnemyService:ClearTracking()" in ENEMY
     and "self.EnemyService:ClearTracking()" in MAIN,
     "event-based indexes must disconnect when Main Farm stops",
+)
+clear_tracking = function_body(ENEMY, "function EnemyService:ClearTracking()", "\nfunction EnemyService:PrepareTarget")
+require(
+    "self.EnemyNameConnections" in clear_tracking
+    and "EnemyModelsByName = {}" in clear_tracking
+    and "SpawnMarkersByName = {}" in clear_tracking,
+    "name-index connections and buckets must be released when Main Farm stops",
 )
 
 farm_collision = function_body(
@@ -143,7 +161,7 @@ require(
 )
 
 print("PASS: bounded farm cadence and throttled discovery intervals")
-print("PASS: event-maintained enemy/spawn indexes and one-time collision preparation")
+print("PASS: event-maintained name indexes and one-time collision preparation")
 print("PASS: hidden-instance fallback is lazy, indexed, and rate-limited")
 print("PASS: combat hit scans are skipped during attack cooldowns")
 print("PASS: player collision suppression uses character/part events instead of a Heartbeat full scan")

@@ -3681,27 +3681,6 @@ local function normalizeTargetNames(targetNames)
     return normalized
 end
 
-local function matchesEnemyName(enemyName, targetName)
-    local normalizedEnemyName = normalizeEnemyName(enemyName)
-    if not normalizedEnemyName then
-        return false
-    end
-
-    if type(targetName) == "string" then
-        return normalizedEnemyName == normalizeEnemyName(targetName)
-    end
-    if type(targetName) == "table" then
-        for _, candidateName in ipairs(targetName) do
-            if type(candidateName) == "string"
-                and normalizedEnemyName == normalizeEnemyName(candidateName)
-            then
-                return true
-            end
-        end
-    end
-    return false
-end
-
 local function isDescendantOf(instance, container)
     if not instance or not container then
         return false
@@ -3737,6 +3716,34 @@ local function matchedTargetName(spawnName, targetNames, normalizedTargets)
     return nil
 end
 
+local function addNameIndexEntry(index, namesByInstance, instance)
+    local normalizedName = normalizeEnemyName(instance.Name)
+    if not normalizedName then
+        namesByInstance[instance] = nil
+        return
+    end
+
+    local bucket = index[normalizedName]
+    if not bucket then
+        bucket = setmetatable({}, { __mode = "k" })
+        index[normalizedName] = bucket
+    end
+    bucket[instance] = true
+    namesByInstance[instance] = normalizedName
+end
+
+local function removeNameIndexEntry(index, namesByInstance, instance)
+    local normalizedName = namesByInstance[instance]
+    local bucket = normalizedName and index[normalizedName]
+    if bucket then
+        bucket[instance] = nil
+        if next(bucket) == nil then
+            index[normalizedName] = nil
+        end
+    end
+    namesByInstance[instance] = nil
+end
+
 function EnemyService.new(compatibility)
     return setmetatable({
         Compatibility = compatibility,
@@ -3746,7 +3753,12 @@ function EnemyService.new(compatibility)
         HiddenSpawnCache = nil,
         PreparedTargets = setmetatable({}, { __mode = "k" }),
         EnemyModels = setmetatable({}, { __mode = "k" }),
+        EnemyModelsByName = {},
+        EnemyModelNames = setmetatable({}, { __mode = "k" }),
+        EnemyNameConnections = setmetatable({}, { __mode = "k" }),
         SpawnMarkers = setmetatable({}, { __mode = "k" }),
+        SpawnMarkersByName = {},
+        SpawnMarkerNames = setmetatable({}, { __mode = "k" }),
     }, EnemyService)
 end
 
@@ -3780,30 +3792,61 @@ function EnemyService:_GetEnemyModelIndex()
 
     disconnect(self.EnemyAddedConnection)
     disconnect(self.EnemyRemovingConnection)
+    for _, connection in pairs(self.EnemyNameConnections) do
+        disconnect(connection)
+    end
     self.EnemyAddedConnection = nil
     self.EnemyRemovingConnection = nil
     self.EnemyContainer = enemies
     self.EnemyModels = setmetatable({}, { __mode = "k" })
+    self.EnemyModelsByName = {}
+    self.EnemyModelNames = setmetatable({}, { __mode = "k" })
+    self.EnemyNameConnections = setmetatable({}, { __mode = "k" })
     if not enemies then
         return self.EnemyModels, nil
     end
 
     for _, instance in ipairs(enemies:GetDescendants()) do
-        if instance:IsA("Model") then
-            self.EnemyModels[instance] = true
-        end
+        self:_IndexEnemyModel(instance)
     end
     self.EnemyAddedConnection = enemies.DescendantAdded:Connect(function(instance)
-        if instance:IsA("Model") then
-            self.EnemyModels[instance] = true
-        end
+        self:_IndexEnemyModel(instance)
     end)
     self.EnemyRemovingConnection = enemies.DescendantRemoving:Connect(function(instance)
-        if instance:IsA("Model") then
-            self.EnemyModels[instance] = nil
-        end
+        self:_UnindexEnemyModel(instance)
     end)
     return self.EnemyModels, enemies
+end
+
+function EnemyService:_IndexEnemyModel(model)
+    if not model:IsA("Model") then
+        return
+    end
+
+    self.EnemyModels[model] = true
+    removeNameIndexEntry(self.EnemyModelsByName, self.EnemyModelNames, model)
+    addNameIndexEntry(self.EnemyModelsByName, self.EnemyModelNames, model)
+    if self.EnemyNameConnections[model] then
+        return
+    end
+
+    self.EnemyNameConnections[model] = model:GetPropertyChangedSignal("Name"):Connect(function()
+        if not self.EnemyModels[model] then
+            return
+        end
+        removeNameIndexEntry(self.EnemyModelsByName, self.EnemyModelNames, model)
+        addNameIndexEntry(self.EnemyModelsByName, self.EnemyModelNames, model)
+    end)
+end
+
+function EnemyService:_UnindexEnemyModel(model)
+    if not model:IsA("Model") then
+        return
+    end
+    self.EnemyModels[model] = nil
+    removeNameIndexEntry(self.EnemyModelsByName, self.EnemyModelNames, model)
+    disconnect(self.EnemyNameConnections[model])
+    self.EnemyNameConnections[model] = nil
 end
 
 function EnemyService:_GetSpawnMarkerIndex()
@@ -3818,26 +3861,39 @@ function EnemyService:_GetSpawnMarkerIndex()
     self.SpawnRemovingConnection = nil
     self.SpawnContainer = enemySpawns
     self.SpawnMarkers = setmetatable({}, { __mode = "k" })
+    self.SpawnMarkersByName = {}
+    self.SpawnMarkerNames = setmetatable({}, { __mode = "k" })
     if not enemySpawns then
         return self.SpawnMarkers, nil
     end
 
     for _, instance in ipairs(enemySpawns:GetDescendants()) do
-        if instance:IsA("BasePart") then
-            self.SpawnMarkers[instance] = true
-        end
+        self:_IndexSpawnMarker(instance)
     end
     self.SpawnAddedConnection = enemySpawns.DescendantAdded:Connect(function(instance)
-        if instance:IsA("BasePart") then
-            self.SpawnMarkers[instance] = true
-        end
+        self:_IndexSpawnMarker(instance)
     end)
     self.SpawnRemovingConnection = enemySpawns.DescendantRemoving:Connect(function(instance)
-        if instance:IsA("BasePart") then
-            self.SpawnMarkers[instance] = nil
-        end
+        self:_UnindexSpawnMarker(instance)
     end)
     return self.SpawnMarkers, enemySpawns
+end
+
+function EnemyService:_IndexSpawnMarker(spawnPart)
+    if not spawnPart:IsA("BasePart") then
+        return
+    end
+    self.SpawnMarkers[spawnPart] = true
+    removeNameIndexEntry(self.SpawnMarkersByName, self.SpawnMarkerNames, spawnPart)
+    addNameIndexEntry(self.SpawnMarkersByName, self.SpawnMarkerNames, spawnPart)
+end
+
+function EnemyService:_UnindexSpawnMarker(spawnPart)
+    if not spawnPart:IsA("BasePart") then
+        return
+    end
+    self.SpawnMarkers[spawnPart] = nil
+    removeNameIndexEntry(self.SpawnMarkersByName, self.SpawnMarkerNames, spawnPart)
 end
 
 function EnemyService:_RefreshHiddenSpawnCache()
@@ -3926,19 +3982,27 @@ end
 
 function EnemyService:FindNearest(targetName, origin)
     local enemyModels, enemies = self:_GetEnemyModelIndex()
-    if not enemies or not targetName or not origin then
+    local normalizedTargets = normalizeTargetNames(targetName)
+    if not enemies or #normalizedTargets == 0 or not origin then
         return nil
     end
 
     local nearest, nearestDistance = nil, math.huge
-    for enemy in pairs(enemyModels) do
-        if isDescendantOf(enemy, enemies)
-            and matchesEnemyName(enemy.Name, targetName)
-            and self:IsAlive(enemy)
-        then
-            local distance = (enemy.HumanoidRootPart.Position - origin).Magnitude
-            if distance < nearestDistance then
-                nearest, nearestDistance = enemy, distance
+    local seen = {}
+    for _, normalizedName in ipairs(normalizedTargets) do
+        for enemy in pairs(self.EnemyModelsByName[normalizedName] or {}) do
+            if not seen[enemy] then
+                seen[enemy] = true
+                if enemyModels[enemy] and isDescendantOf(enemy, enemies) then
+                    local root = enemy:FindFirstChild("HumanoidRootPart")
+                    local humanoid = enemy:FindFirstChildWhichIsA("Humanoid")
+                    if root and humanoid and humanoid.Health > 0 then
+                        local distance = (root.Position - origin).Magnitude
+                        if distance < nearestDistance then
+                            nearest, nearestDistance = enemy, distance
+                        end
+                    end
+                end
             end
         end
     end
@@ -3989,7 +4053,7 @@ function EnemyService:FindSpawn(targetName, origin)
         return nil, false, diagnostic
     end
 
-    local spawnMarkers, enemySpawns = self:_GetSpawnMarkerIndex()
+    local _, enemySpawns = self:_GetSpawnMarkerIndex()
     local now = os.clock()
     local hiddenCache = self.HiddenSpawnCache
     if hiddenCache and now >= hiddenCache.ExpiresAt then
@@ -4047,8 +4111,14 @@ function EnemyService:FindSpawn(targetName, origin)
     end
 
     if enemySpawns then
-        for spawnPart in pairs(spawnMarkers) do
-            considerSpawn(spawnPart, enemySpawns, nil, "EnemySpawns")
+        local seenNormal = {}
+        for _, normalizedName in ipairs(normalizedTarget) do
+            for spawnPart in pairs(self.SpawnMarkersByName[normalizedName] or {}) do
+                if not seenNormal[spawnPart] then
+                    seenNormal[spawnPart] = true
+                    considerSpawn(spawnPart, enemySpawns, nil, "EnemySpawns")
+                end
+            end
         end
     end
 
@@ -4127,6 +4197,9 @@ function EnemyService:ClearTracking()
     disconnect(self.EnemyRemovingConnection)
     disconnect(self.SpawnAddedConnection)
     disconnect(self.SpawnRemovingConnection)
+    for _, connection in pairs(self.EnemyNameConnections) do
+        disconnect(connection)
+    end
     self.EnemyAddedConnection = nil
     self.EnemyRemovingConnection = nil
     self.SpawnAddedConnection = nil
@@ -4134,7 +4207,12 @@ function EnemyService:ClearTracking()
     self.EnemyContainer = nil
     self.SpawnContainer = nil
     self.EnemyModels = setmetatable({}, { __mode = "k" })
+    self.EnemyModelsByName = {}
+    self.EnemyModelNames = setmetatable({}, { __mode = "k" })
+    self.EnemyNameConnections = setmetatable({}, { __mode = "k" })
     self.SpawnMarkers = setmetatable({}, { __mode = "k" })
+    self.SpawnMarkersByName = {}
+    self.SpawnMarkerNames = setmetatable({}, { __mode = "k" })
     self.HiddenSpawnCache = nil
     table.clear(self.PreparedTargets)
 end
