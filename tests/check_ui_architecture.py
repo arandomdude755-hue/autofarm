@@ -107,12 +107,31 @@ require('Label = "UI size"' in settings_page
         and 'Options = { "Small", "Medium", "Large" }' in settings_page,
         "Settings must expose UI size through the shared dropdown")
 require('SingleColumn = true' in settings_page
-        and 'Kind = "sectionHeader"' in settings_page
+        and 'Kind = "collapsibleHeader"' in settings_page
         and 'Label = "Farm settings"' in settings_page
         and 'Label = "Farm weapon"' in settings_page
         and 'Label = "Bring mobs"' in settings_page
         and 'Label = "Auto turn on Buso"' in settings_page,
         "Settings must group farm controls under a full-width Farm settings subsection")
+require('Label = "Combat skills"' in CONFIG
+        and 'Label = "Available skill keys"' in CONFIG
+        and 'GroupId = "farmSkillKeys"' in CONFIG
+        and 'Groups = { "farmSettings", "farmSkillKeys" }' in CONFIG
+        and 'function UI:_IsControlVisible(control)' in UI_MODULE
+        and 'function UI:_SetControlGroupExpanded(groupId, expanded)' in UI_MODULE
+        and 'function UI:_ExpandMatchingControlGroups()' in UI_MODULE
+        and 'self:_ExpandMatchingControlGroups()' in UI_MODULE
+        and 'self.ControlRows[control] = row' in UI_MODULE,
+        "Combat skill headings must be retained while skill-key controls collapse in the page flow")
+require('TabSubsections = {' in CONFIG
+        and 'Settings = {' in CONFIG
+        and '{ Label = "UI settings" }' in CONFIG
+        and '{ Label = "Farm settings", GroupId = "farmSettings" }' in CONFIG
+        and 'function UI:_LayoutNavigation(animate)' in UI_MODULE
+        and 'function UI:_SelectSubsection(tabName, subsection)' in UI_MODULE
+        and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI_MODULE
+        and 'self.NavScroll.CanvasSize = UDim2.new(' in UI_MODULE,
+        "Settings sidebar children must reflow the following tabs instead of overlaying them")
 require('UiSize = "Large"' in CONFIG
         and "Small = 0.82" in CONFIG
         and "Medium = 0.91" in CONFIG

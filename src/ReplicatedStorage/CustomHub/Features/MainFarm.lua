@@ -23,6 +23,7 @@ local TIKI_SKILL_HOLD_SECONDS = 0.5
 local FARM_SKILL_SCAN_INTERVAL = 0.4
 local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
+local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
@@ -755,11 +756,43 @@ function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
     )
 end
 
-function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettings)
+function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
+    if not target or not playerRoot then
+        return false
+    end
+    local targetRoot = target:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then
+        return false
+    end
+
+    local targetOffset = weaponCategory == "Blox Fruit"
+        and CFrame.new(-7, 20, 0)
+        or CFrame.new(7, 20, 0)
+    local attackPosition = (targetRoot.CFrame * targetOffset).Position
+    if (playerRoot.Position - attackPosition).Magnitude > FARM_SKILL_ATTACK_POSITION_TOLERANCE then
+        return false
+    end
+
+    local movement = self.MovementService and self.MovementService.Active
+    if movement and (
+        movement.Holding ~= true
+            or not movement.Goal
+            or (movement.Goal.Position - attackPosition).Magnitude > FARM_SKILL_ATTACK_POSITION_TOLERANCE
+    ) then
+        return false
+    end
+    return true
+end
+
+function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, playerRoot)
     if self.FarmSkillActive then
         return true
     end
     if not farmSettings or farmSettings.UseFarmSkills ~= true then
+        self.FarmSkillPreparing = nil
+        return false
+    end
+    if not self:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory) then
         self.FarmSkillPreparing = nil
         return false
     end
@@ -836,12 +869,18 @@ function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettin
             function()
                 local currentSettings = self.Context and self.Context.Config
                     and self.Context.Config.FarmSettings
+                local currentRoot
+                if self.Context and self.Context.Compatibility then
+                    local _, _, characterRoot = self.Context.Compatibility:GetCharacterParts()
+                    currentRoot = characterRoot
+                end
                 return self:_IsCurrent(session)
                     and self.Target == target
                     and self.EnemyService:IsAlive(target)
                     and currentSettings
                     and currentSettings.UseFarmSkills == true
                     and currentSettings[skill.Setting] == true
+                    and self:_IsAtFarmAttackPosition(target, currentRoot, weaponCategory)
             end
         )
         if self.FarmSkillGeneration == generation then
@@ -918,7 +957,7 @@ function MainFarm:_StepAura(session, root)
     local weaponCategory = farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings) then
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root) then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(
@@ -1039,7 +1078,7 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings) then
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root) then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(
@@ -1997,7 +2036,7 @@ function MainFarm:_Step(session)
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings) then
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root) then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(

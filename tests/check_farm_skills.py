@@ -93,13 +93,30 @@ require(
     "Skill use must aim only at the selected target, honor hold settings, and always release on cancellation",
 )
 
+attack_position = function_body(
+    MAIN_FARM,
+    "function MainFarm:_IsAtFarmAttackPosition",
+    "\nfunction MainFarm:_TryStartFarmSkill",
+)
+require(
+    "FARM_SKILL_ATTACK_POSITION_TOLERANCE" in attack_position
+    and 'CFrame.new(-7, 20, 0)' in attack_position
+    and 'CFrame.new(7, 20, 0)' in attack_position
+    and "movement.Holding ~= true" in attack_position
+    and "movement.Goal.Position - attackPosition" in attack_position,
+    "Farm skills must wait until movement is holding at the target's attack position",
+)
+
 farm_skill = function_body(
     MAIN_FARM,
     "function MainFarm:_TryStartFarmSkill",
     "\nfunction MainFarm:_StepAura",
 )
 require(
-    "FindReadyFarmSkill(" in farm_skill
+    "self:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)" in farm_skill
+    and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
+    and "self:_IsAtFarmAttackPosition(target, currentRoot, weaponCategory)" in farm_skill
+    and "FindReadyFarmSkill(" in farm_skill
     and "FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
@@ -113,7 +130,9 @@ require(
     "Regular skill use must be throttled, cancellable, and restore the selected Farm Weapon",
 )
 require(
-    MAIN_FARM.count("self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings)") == 3
+    MAIN_FARM.count(
+        "self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root)"
+    ) == 3
     and "FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1" in MAIN_FARM
     and "self.CombatService:Cancel()" in MAIN_FARM,
     "All regular farm combat paths must use skills safely and invalidate them on stop/respawn",

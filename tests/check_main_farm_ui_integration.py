@@ -60,7 +60,7 @@ require(
 )
 settings_config = CONFIG[CONFIG.index("Settings = {"):]
 require('Action = "farm.weaponCategory.select"' not in farm_config
-        and 'Kind = "sectionHeader"' in settings_config
+        and 'Kind = "collapsibleHeader"' in settings_config
         and 'Label = "Farm settings"' in settings_config
         and 'Kind = "settingDropdown"' in settings_config
         and 'Label = "Farm weapon"' in settings_config
@@ -68,6 +68,20 @@ require('Action = "farm.weaponCategory.select"' not in farm_config
         and 'Setting = "WeaponCategory"' in settings_config
         and "Options = weaponCategories" in settings_config,
         "Farm weapon must be inside the dedicated Farm settings subsection")
+require('TabSubsections = {' in CONFIG
+        and 'Settings = {' in CONFIG
+        and '{ Label = "UI settings" }' in CONFIG
+        and '{ Label = "Farm settings", GroupId = "farmSettings" }' in CONFIG
+        and 'Kind = "collapsibleHeader"' in CONFIG
+        and 'GroupId = "farmSkillKeys"' in CONFIG
+        and 'Groups = { "farmSettings", "farmSkillKeys" }' in CONFIG,
+        "Settings navigation and skill keys must use nested, in-flow collapsible groups")
+require('function UI:_LayoutNavigation(animate)' in UI
+        and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI
+        and 'function UI:_ToggleControlGroup(groupId)' in UI
+        and 'row.Visible = self:_IsControlVisible(control)' in UI
+        and 'self:_PlayTween(childButton, 0.14' in UI,
+        "Nested settings navigation must animate and reflow without overlapping neighboring tabs")
 require('Label = "Bring mobs"' in settings_config
         and 'Action = "farm.settings.bringMobs"' in settings_config
         and 'Setting = "BringMobs"' in settings_config

@@ -44,12 +44,14 @@ local farmSkillControls = {
     {
         Kind = "sectionHeader",
         Label = "Combat skills",
+        Groups = { "farmSettings" },
     },
     {
         Kind = "settingToggle",
         Label = "Use skills while farming",
         Action = "farm.skills.enabled",
         Setting = "UseFarmSkills",
+        Groups = { "farmSettings" },
     },
     {
         Kind = "settingSlider",
@@ -60,16 +62,20 @@ local farmSkillControls = {
         Max = 5,
         Step = 0.05,
         Unit = "sec",
+        Groups = { "farmSettings" },
     },
     {
         Kind = "settingToggle",
         Label = "Fast skill release",
         Action = "farm.skills.fastRelease",
         Setting = "FarmSkillFastRelease",
+        Groups = { "farmSettings" },
     },
     {
-        Kind = "sectionHeader",
+        Kind = "collapsibleHeader",
         Label = "Available skill keys",
+        GroupId = "farmSkillKeys",
+        Groups = { "farmSettings" },
     },
 }
 for _, category in ipairs(farmSkillCategories) do
@@ -81,6 +87,7 @@ for _, category in ipairs(farmSkillCategories) do
             Label = category.Name .. " " .. keyName,
             Action = "farm.skills." .. category.Token .. "." .. keyName,
             Setting = settingName,
+            Groups = { "farmSettings", "farmSkillKeys" },
         })
     end
 end
@@ -149,6 +156,8 @@ local Config = {
         SidebarNavInsetLeft = 5,
         SidebarRowHeight = 27,
         SidebarRowGap = 2,
+        SidebarChildRowHeight = 25,
+        SidebarChildIndent = 12,
         PageHeaderHeight = 32,
         StatusTop = 0,
         StatusHeight = 30,
@@ -218,6 +227,16 @@ local Config = {
         "Player",
         "Teleport",
         "Settings",
+    },
+    TabSubsections = {
+        Settings = {
+            { Label = "UI settings" },
+            { Label = "Farm settings", GroupId = "farmSettings" },
+        },
+    },
+    CollapsibleDefaults = {
+        farmSettings = true,
+        farmSkillKeys = true,
     },
     Pages = {
         Main = {
@@ -311,8 +330,9 @@ local Config = {
                     Action = "settings.reset",
                 },
                 {
-                    Kind = "sectionHeader",
+                    Kind = "collapsibleHeader",
                     Label = "Farm settings",
+                    GroupId = "farmSettings",
                 },
                 {
                     Kind = "settingDropdown",
@@ -320,12 +340,14 @@ local Config = {
                     Action = "farm.weaponCategory.select",
                     Setting = "WeaponCategory",
                     Options = weaponCategories,
+                    Groups = { "farmSettings" },
                 },
                 {
                     Kind = "settingToggle",
                     Label = "Bring mobs",
                     Action = "farm.settings.bringMobs",
                     Setting = "BringMobs",
+                    Groups = { "farmSettings" },
                 },
                 {
                     Kind = "settingSlider",
@@ -336,12 +358,14 @@ local Config = {
                     Max = 6,
                     Step = 1,
                     Unit = "mobs",
+                    Groups = { "farmSettings" },
                 },
                 {
                     Kind = "settingToggle",
                     Label = "Auto turn on Buso",
                     Action = "farm.settings.autoBuso",
                     Setting = "AutoBuso",
+                    Groups = { "farmSettings" },
                 },
             },
         },

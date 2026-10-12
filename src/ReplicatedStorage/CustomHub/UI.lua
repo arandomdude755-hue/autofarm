@@ -108,7 +108,7 @@ local function disconnectAll(connections)
 end
 
 function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
-    return setmetatable({
+    local self = setmetatable({
         PlayerGui = playerGui,
         State = state,
         Compatibility = compatibility,
@@ -139,6 +139,12 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         TabButtons = {},
         TabLabels = {},
         TabMarkers = {},
+        TabArrows = {},
+        TabSubsectionButtons = {},
+        TabSubsectionLabels = {},
+        ExpandedTabs = {},
+        ActiveSubsectionTab = nil,
+        ActiveSubsectionLabel = nil,
         ToggleLabels = {},
         SelectorEntries = {},
         SliderEntries = {},
@@ -157,12 +163,19 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         ControlsContainer = nil,
         ControlGridLayout = nil,
         ActiveControls = nil,
+        ControlRows = {},
+        GroupArrows = {},
+        CollapsedGroups = {},
         ActiveTab = nil,
         ActivePage = nil,
         SearchQuery = "",
         _contentSizeConnection = nil,
         ViewportConnection = nil,
     }, UI)
+    for groupId, collapsed in pairs(config.CollapsibleDefaults or {}) do
+        self.CollapsedGroups[groupId] = collapsed == true
+    end
+    return self
 end
 
 function UI:_WatchViewport(camera)
@@ -497,6 +510,23 @@ function UI:_Refresh(snapshot)
             marker.Size = selected and UDim2.fromOffset(3, 17) or UDim2.fromOffset(5, 5)
         end
     end
+    for tabName, childButtons in pairs(self.TabSubsectionButtons) do
+        for label, button in pairs(childButtons) do
+            local selected = self.ActiveSubsectionTab == tabName
+                and self.ActiveSubsectionLabel == label
+            button.BackgroundColor3 = theme.Selected
+            button.BackgroundTransparency = selected and 0 or 1
+            local textLabel = self.TabSubsectionLabels[tabName]
+                and self.TabSubsectionLabels[tabName][label]
+            if textLabel then
+                textLabel.TextColor3 = selected and theme.Accent or theme.MutedText
+            end
+            local marker = button:FindFirstChild("SubsectionMarker")
+            if marker then
+                marker.BackgroundColor3 = selected and theme.Accent or theme.MutedText
+            end
+        end
+    end
 
     for _, entry in ipairs(self.ToggleLabels) do
         local enabled
@@ -580,6 +610,8 @@ function UI:_ClearPage()
     self.ControlsContainer = nil
     self.ControlGridLayout = nil
     self.ActiveControls = nil
+    self.ControlRows = {}
+    self.GroupArrows = {}
     for _, child in ipairs(self.Content:GetChildren()) do
         if child ~= self.ContentLayout then
             self:_CancelTweensIn(child)
@@ -633,6 +665,11 @@ function UI:_TabMatchesSearch(tabName, query)
     if string.find(normalizeSearchText(displayTabName(tabName)), query, 1, true) then
         return true
     end
+    for _, subsection in ipairs((self.Config.TabSubsections or {})[tabName] or {}) do
+        if string.find(normalizeSearchText(subsection.Label), query, 1, true) then
+            return true
+        end
+    end
 
     local page = self.Config.Pages[tabName]
     for _, control in ipairs(page and page.Controls or {}) do
@@ -643,6 +680,265 @@ function UI:_TabMatchesSearch(tabName, query)
     return false
 end
 
+function UI:_ControlNodeName(control)
+    if control.Kind == "sectionHeader" then
+        return "Subsection_" .. tostring(control.Label):gsub("[^%w]", "_")
+    elseif control.Kind == "collapsibleHeader" then
+        return "GroupHeader_" .. tostring(control.GroupId):gsub("[^%w]", "_")
+    end
+    return "Action_" .. tostring(control.Action):gsub("[^%w]", "_")
+end
+
+function UI:_IsControlVisible(control)
+    for _, groupId in ipairs(control.Groups or {}) do
+        if self.CollapsedGroups[groupId] == true then
+            return false
+        end
+    end
+    return true
+end
+
+function UI:_RefreshControlGroups(animate)
+    for control, row in pairs(self.ControlRows) do
+        if row and row.Parent then
+            row.Visible = self:_IsControlVisible(control)
+        end
+    end
+
+    for groupId, arrow in pairs(self.GroupArrows) do
+        if arrow and arrow.Parent then
+            local rotation = self.CollapsedGroups[groupId] == true and 0 or 180
+            if animate then
+                self:_PlayTween(arrow, 0.14, { Rotation = rotation })
+            else
+                arrow.Rotation = rotation
+            end
+        end
+    end
+
+    self:_ApplyControlSearchHighlight()
+    local oldCanvasPosition = self.Scroll and self.Scroll.CanvasPosition
+    task.defer(function()
+        if not self.Scroll or not self.ControlsContainer then
+            return
+        end
+        self:_SyncControlGridHeight()
+        local maximumY = math.max(
+            0,
+            self.Scroll.CanvasSize.Y.Offset - self.Scroll.AbsoluteSize.Y
+        )
+        local oldX = oldCanvasPosition and oldCanvasPosition.X or 0
+        local oldY = oldCanvasPosition and oldCanvasPosition.Y or 0
+        self.Scroll.CanvasPosition = Vector2.new(oldX, math.min(oldY, maximumY))
+    end)
+end
+
+function UI:_ToggleControlGroup(groupId)
+    self.CollapsedGroups[groupId] = self.CollapsedGroups[groupId] ~= true
+    self:_RefreshControlGroups(true)
+end
+
+function UI:_SetControlGroupExpanded(groupId, expanded)
+    self.CollapsedGroups[groupId] = expanded ~= true
+    self:_RefreshControlGroups(true)
+end
+
+function UI:_ExpandMatchingControlGroups()
+    if self.SearchQuery == "" or not self.ActiveControls then
+        return
+    end
+    local changed = false
+    for _, control in ipairs(self.ActiveControls) do
+        local matches = string.find(
+            normalizeSearchText(control.Label),
+            self.SearchQuery,
+            1,
+            true
+        ) ~= nil
+        if matches then
+            if control.Kind == "collapsibleHeader"
+                and self.CollapsedGroups[control.GroupId] == true
+            then
+                self.CollapsedGroups[control.GroupId] = false
+                changed = true
+            end
+            for _, groupId in ipairs(control.Groups or {}) do
+                if self.CollapsedGroups[groupId] == true then
+                    self.CollapsedGroups[groupId] = false
+                    changed = true
+                end
+            end
+        end
+    end
+    if changed then
+        for control, row in pairs(self.ControlRows) do
+            if row and row.Parent then
+                row.Visible = self:_IsControlVisible(control)
+            end
+        end
+        for groupId, arrow in pairs(self.GroupArrows) do
+            if arrow and arrow.Parent then
+                local rotation = self.CollapsedGroups[groupId] == true and 0 or 180
+                self:_PlayTween(arrow, 0.14, { Rotation = rotation })
+            end
+        end
+        task.defer(function()
+            if self.ControlsContainer then
+                self:_SyncControlGridHeight()
+            end
+        end)
+    end
+end
+
+function UI:_ScrollToControlGroup(groupId)
+    if not self.Scroll or not self.ActiveControls then
+        return
+    end
+    for _, control in ipairs(self.ActiveControls) do
+        if control.GroupId == groupId then
+            local row = self.ControlRows[control]
+            if row and row.Visible then
+                local rowTop = row.AbsolutePosition.Y
+                    - self.Scroll.AbsolutePosition.Y
+                    + self.Scroll.CanvasPosition.Y
+                self.Scroll.CanvasPosition = Vector2.new(
+                    self.Scroll.CanvasPosition.X,
+                    math.max(0, rowTop - 4)
+                )
+            end
+            return
+        end
+    end
+end
+
+function UI:_LayoutNavigation(animate)
+    if not self.NavScroll then
+        return
+    end
+    local layout = self.Config.Layout
+    local query = self.SearchQuery or ""
+    local top = layout.SidebarNavInsetTop
+    local previousChildVisibility = {}
+    for tabName, childButtons in pairs(self.TabSubsectionButtons) do
+        previousChildVisibility[tabName] = {}
+        for label, childButton in pairs(childButtons) do
+            previousChildVisibility[tabName][label] = childButton.Visible
+            childButton.Visible = false
+        end
+    end
+
+    for _, tabName in ipairs(self.Config.Tabs) do
+        local button = self.TabButtons[tabName]
+        local subsections = (self.Config.TabSubsections or {})[tabName] or {}
+        local matches = self:_TabMatchesSearch(tabName, query)
+        local matchingSubsection = false
+        if query ~= "" then
+            for _, subsection in ipairs(subsections) do
+                if string.find(normalizeSearchText(subsection.Label), query, 1, true) then
+                    matchingSubsection = true
+                    self.ExpandedTabs[tabName] = true
+                    break
+                end
+            end
+        end
+        local visible = matches or matchingSubsection
+
+        if button then
+            local wasVisible = button.Visible
+            button.Visible = visible
+            if visible then
+                local position = UDim2.fromOffset(layout.SidebarNavInsetLeft, top)
+                if animate and not wasVisible then
+                    button.Position = UDim2.fromOffset(
+                        position.X.Offset,
+                        position.Y.Offset - 5
+                    )
+                    self:_PlayTween(button, 0.14, { Position = position })
+                elseif animate then
+                    self:_PlayTween(button, 0.14, { Position = position })
+                else
+                    button.Position = position
+                end
+            end
+        end
+
+        if visible and button then
+            top = top + layout.SidebarRowHeight + layout.SidebarRowGap
+            if self.ExpandedTabs[tabName] then
+                local parentMatches = matches
+                for _, subsection in ipairs(subsections) do
+                    local childButton = (self.TabSubsectionButtons[tabName] or {})[subsection.Label]
+                    if childButton then
+                        local childMatches = query == ""
+                            or parentMatches
+                            or string.find(
+                                normalizeSearchText(subsection.Label),
+                                query,
+                                1,
+                                true
+                            ) ~= nil
+                        if childMatches then
+                            local wasVisible = previousChildVisibility[tabName]
+                                and previousChildVisibility[tabName][subsection.Label] == true
+                            childButton.Visible = true
+                            local position = UDim2.fromOffset(
+                                layout.SidebarNavInsetLeft + layout.SidebarChildIndent,
+                                top
+                            )
+                            if animate and not wasVisible then
+                                childButton.Position = UDim2.fromOffset(
+                                    position.X.Offset,
+                                    position.Y.Offset - 5
+                                )
+                                self:_PlayTween(childButton, 0.14, { Position = position })
+                            elseif animate then
+                                self:_PlayTween(childButton, 0.14, { Position = position })
+                            else
+                                childButton.Position = position
+                            end
+                            top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap
+                        end
+                    end
+                end
+            end
+        end
+
+        local arrow = self.TabArrows[tabName]
+        if arrow then
+            local rotation = self.ExpandedTabs[tabName] and 180 or 0
+            if animate then
+                self:_PlayTween(arrow, 0.14, { Rotation = rotation })
+            else
+                arrow.Rotation = rotation
+            end
+        end
+    end
+
+    self.NavScroll.CanvasSize = UDim2.new(
+        0,
+        0,
+        0,
+        math.max(0, top - layout.SidebarRowGap)
+    )
+end
+
+function UI:_SelectSubsection(tabName, subsection)
+    self.ExpandedTabs[tabName] = true
+    self.ActiveSubsectionTab = tabName
+    self.ActiveSubsectionLabel = subsection.Label
+    self:_SelectTab(tabName)
+    self:_LayoutNavigation(true)
+    if subsection.GroupId then
+        self:_SetControlGroupExpanded(subsection.GroupId, true)
+        task.defer(function()
+            self:_ScrollToControlGroup(subsection.GroupId)
+        end)
+    elseif self.Scroll then
+        self.Scroll.CanvasPosition = Vector2.zero
+    end
+    self:_Refresh(self.State:GetSnapshot())
+end
+
 function UI:_ApplyControlSearchHighlight()
     if not self.ControlsContainer or not self.ActiveControls then
         return
@@ -651,13 +947,9 @@ function UI:_ApplyControlSearchHighlight()
     local theme = self.Config.Theme
     local query = self.SearchQuery
     for _, control in ipairs(self.ActiveControls) do
-        local nodeName = control.Kind == "sectionHeader"
-            and ("Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"))
-            or ("Action_" .. control.Action:gsub("[^%w]", "_"))
-        local row = self.ControlsContainer:FindFirstChild(
-            nodeName
-        )
+        local row = self.ControlRows[control]
         if row then
+            row.Visible = self:_IsControlVisible(control)
             local matched = query ~= ""
                 and string.find(normalizeSearchText(control.Label), query, 1, true) ~= nil
             row.BackgroundColor3 = matched and theme.Selected or theme.Control
@@ -675,31 +967,23 @@ function UI:_ApplySearchFilter()
         return
     end
 
-    local layout = self.Config.Layout
     local query = normalizeSearchText(self.SearchBox.Text)
     self.SearchQuery = query
-    local top = layout.SidebarNavInsetTop
     local firstMatch
     for _, tabName in ipairs(self.Config.Tabs) do
-        local button = self.TabButtons[tabName]
         local matches = self:_TabMatchesSearch(tabName, query)
-        if button then
-            button.Visible = matches
-            if matches then
-                button.Position = UDim2.fromOffset(layout.SidebarNavInsetLeft, top)
-                top = top + layout.SidebarRowHeight + layout.SidebarRowGap
-                firstMatch = firstMatch or tabName
-            end
+        if matches then
+            firstMatch = firstMatch or tabName
         end
     end
-    self.NavScroll.CanvasSize = UDim2.new(0, 0, 0, math.max(0, top - layout.SidebarRowGap))
+    self:_LayoutNavigation(false)
 
     local selectedTab = self.State:GetSnapshot().selectedTab
     if query ~= "" and firstMatch and not self:_TabMatchesSearch(selectedTab, query) then
         self:_SelectTab(firstMatch)
-    else
-        self:_ApplyControlSearchHighlight()
     end
+    self:_ExpandMatchingControlGroups()
+    self:_ApplyControlSearchHighlight()
 end
 
 function UI:_SelectTab(tabName)
@@ -974,14 +1258,26 @@ end
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
-    if control.Kind == "sectionHeader" then
-        local row = create("Frame", {
-            Name = "Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"),
+    if control.Kind == "sectionHeader" or control.Kind == "collapsibleHeader" then
+        local isCollapsible = control.Kind == "collapsibleHeader"
+        local row = create(isCollapsible and "TextButton" or "Frame", {
+            Name = self:_ControlNodeName(control),
             Size = UDim2.new(1, 0, 0, layout.RowHeight),
             BackgroundColor3 = theme.Control,
             BorderSizePixel = 0,
             LayoutOrder = #self.ControlsContainer:GetChildren(),
         }, self.ControlsContainer)
+        if isCollapsible then
+            row.AutoButtonColor = false
+            row.Text = ""
+            self:_AttachButtonFeedback(row, self.PageConnections, 0.985)
+            create("UIStroke", {
+                Color = theme.Border,
+                Thickness = layout.BorderThickness,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Transparency = 0.4,
+            }, row)
+        end
         addCorner(row, 4)
         create("Frame", {
             Name = "Accent",
@@ -993,7 +1289,7 @@ function UI:_AddControl(control)
         create("TextLabel", {
             Name = "Title",
             Position = UDim2.new(0, layout.RowInset + 12, 0, 0),
-            Size = UDim2.new(1, -(layout.RowInset * 2 + 12), 1, 0),
+            Size = UDim2.new(1, -(layout.RowInset * 2 + 12 + (isCollapsible and 30 or 0)), 1, 0),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = control.Label,
@@ -1001,6 +1297,24 @@ function UI:_AddControl(control)
             TextSize = theme.TextSizes.Control,
             TextXAlignment = Enum.TextXAlignment.Left,
         }, row)
+        if isCollapsible then
+            local arrow = create("TextLabel", {
+                Name = "GroupArrow",
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -layout.RowInset, 0.5, 0),
+                Size = UDim2.fromOffset(18, 18),
+                BackgroundTransparency = 1,
+                Font = theme.StrongFont,
+                Text = "▼",
+                TextColor3 = theme.MutedText,
+                TextSize = 10,
+                Rotation = self.CollapsedGroups[control.GroupId] == true and 0 or 180,
+            }, row)
+            self.GroupArrows[control.GroupId] = arrow
+            self:_Connect(self.PageConnections, row.Activated, function()
+                self:_ToggleControlGroup(control.GroupId)
+            end)
+        end
         return row
     end
 
@@ -1341,6 +1655,7 @@ function UI:_AddControl(control)
             end
         end)
     end
+    return row
 end
 
 function UI:_RenderTab(tabName)
@@ -1358,6 +1673,8 @@ function UI:_RenderTab(tabName)
     local layout = self.Config.Layout
     self.ActivePage = page
     self.ActiveControls = page.Controls
+    self.ControlRows = {}
+    self.GroupArrows = {}
     self.ControlsContainer = create("Frame", {
         Name = "ControlGrid",
         Size = UDim2.new(1, -2, 0, 0),
@@ -1386,15 +1703,11 @@ function UI:_RenderTab(tabName)
         end
     )
     for index, control in ipairs(page.Controls) do
-        self:_AddControl(control)
-        local nodeName = control.Kind == "sectionHeader"
-            and ("Subsection_" .. tostring(control.Label):gsub("[^%w]", "_"))
-            or ("Action_" .. control.Action:gsub("[^%w]", "_"))
-        local row = self.ControlsContainer:FindFirstChild(
-            nodeName
-        )
+        local row = self:_AddControl(control)
         if row then
             row.LayoutOrder = index
+            row.Visible = self:_IsControlVisible(control)
+            self.ControlRows[control] = row
         end
     end
     self:_UpdateControlGridLayout()
@@ -1860,6 +2173,7 @@ function UI:Mount()
 
     local navTop = layout.SidebarNavInsetTop
     for _, tabName in ipairs(self.Config.Tabs) do
+        local subsections = (self.Config.TabSubsections or {})[tabName] or {}
         local button = create("TextButton", {
             Name = "Tab_" .. tabName,
             Position = UDim2.fromOffset(layout.SidebarNavInsetLeft, navTop),
@@ -1890,7 +2204,7 @@ function UI:Mount()
         local label = create("TextLabel", {
             Name = "Label",
             Position = UDim2.new(0, 28, 0, 0),
-            Size = UDim2.new(1, -36, 1, 0),
+            Size = UDim2.new(1, subsections[1] and -56 or -36, 1, 0),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = displayTabName(tabName),
@@ -1903,17 +2217,90 @@ function UI:Mount()
         self.TabButtons[tabName] = button
         self.TabLabels[tabName] = label
         self.TabMarkers[tabName] = marker
+        if #subsections > 0 then
+            local arrow = create("TextLabel", {
+                Name = "ExpandArrow",
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -8, 0.5, 0),
+                Size = UDim2.fromOffset(16, 18),
+                BackgroundTransparency = 1,
+                Font = theme.StrongFont,
+                Text = "▼",
+                TextColor3 = theme.MutedText,
+                TextSize = 9,
+                Rotation = 0,
+            }, button)
+            self.TabArrows[tabName] = arrow
+            self.TabSubsectionButtons[tabName] = {}
+            self.TabSubsectionLabels[tabName] = {}
+        end
         self:_Connect(self.PersistentConnections, button.Activated, function()
-            self:_SelectTab(tabName)
+            if #subsections > 0 then
+                self.ActiveSubsectionTab = nil
+                self.ActiveSubsectionLabel = nil
+                self:_SelectTab(tabName)
+                self.ExpandedTabs[tabName] = not self.ExpandedTabs[tabName]
+                self:_LayoutNavigation(true)
+                self:_Refresh(self.State:GetSnapshot())
+            else
+                self.ActiveSubsectionTab = nil
+                self.ActiveSubsectionLabel = nil
+                self:_SelectTab(tabName)
+            end
         end)
+        for _, subsection in ipairs(subsections) do
+            local childButton = create("TextButton", {
+                Name = "Subtab_" .. tabName .. "_" .. tostring(subsection.Label):gsub("[^%w]", "_"),
+                Position = UDim2.fromOffset(
+                    layout.SidebarNavInsetLeft + layout.SidebarChildIndent,
+                    navTop + layout.SidebarRowHeight + layout.SidebarRowGap
+                ),
+                Size = UDim2.new(
+                    1,
+                    -(layout.SidebarNavInsetLeft * 2 + layout.SidebarChildIndent),
+                    0,
+                    layout.SidebarChildRowHeight
+                ),
+                BackgroundColor3 = theme.Selected,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                AutoButtonColor = false,
+                Text = "",
+                Visible = false,
+            }, self.NavScroll)
+            addCorner(childButton, 3)
+            local childMarker = create("Frame", {
+                Name = "SubsectionMarker",
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 9, 0.5, 0),
+                Size = UDim2.fromOffset(4, 4),
+                BackgroundColor3 = theme.MutedText,
+                BorderSizePixel = 0,
+            }, childButton)
+            addCorner(childMarker, 4)
+            local childLabel = create("TextLabel", {
+                Name = "Label",
+                Position = UDim2.new(0, 21, 0, 0),
+                Size = UDim2.new(1, -27, 1, 0),
+                BackgroundTransparency = 1,
+                Font = theme.Font,
+                Text = subsection.Label,
+                TextColor3 = theme.MutedText,
+                TextSize = math.max(9, theme.TextSizes.Tab - 1),
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center,
+            }, childButton)
+            self.TabSubsectionButtons[tabName][subsection.Label] = childButton
+            self.TabSubsectionLabels[tabName][subsection.Label] = childLabel
+            self:_AttachButtonFeedback(childButton, self.PersistentConnections)
+            self:_Connect(self.PersistentConnections, childButton.Activated, function()
+                self:_SelectSubsection(tabName, subsection)
+            end)
+        end
         navTop = navTop + layout.SidebarRowHeight + layout.SidebarRowGap
     end
-    self.NavScroll.CanvasSize = UDim2.new(
-        0,
-        0,
-        0,
-        math.max(0, navTop - layout.SidebarRowGap)
-    )
+    self:_LayoutNavigation(false)
 
     local statusFrame = create("Frame", {
         Name = "Status",
@@ -2070,6 +2457,18 @@ function UI:Destroy()
     self.TabButtons = {}
     self.TabLabels = {}
     self.TabMarkers = {}
+    self.TabArrows = {}
+    self.TabSubsectionButtons = {}
+    self.TabSubsectionLabels = {}
+    self.ExpandedTabs = {}
+    self.ActiveSubsectionTab = nil
+    self.ActiveSubsectionLabel = nil
+    self.TabArrows = {}
+    self.TabSubsectionButtons = {}
+    self.TabSubsectionLabels = {}
+    self.ExpandedTabs = {}
+    self.ActiveSubsectionTab = nil
+    self.ActiveSubsectionLabel = nil
     self.ToggleLabels = {}
     self.SelectorEntries = {}
     self.SliderEntries = {}
@@ -2083,6 +2482,12 @@ function UI:Destroy()
     self.ControlsContainer = nil
     self.ControlGridLayout = nil
     self.ActiveControls = nil
+    self.ControlRows = {}
+    self.GroupArrows = {}
+    self.CollapsedGroups = {}
+    self.ControlRows = {}
+    self.GroupArrows = {}
+    self.CollapsedGroups = {}
     self.ActiveTab = nil
     self.SearchQuery = ""
 end
