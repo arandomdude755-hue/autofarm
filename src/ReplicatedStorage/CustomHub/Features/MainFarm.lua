@@ -784,21 +784,102 @@ function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
     return true
 end
 
-function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, playerRoot)
+function MainFarm:_GetMasteryCategory(target, farmSettings, allowMastery)
+    if allowMastery == false
+        or not farmSettings
+        or farmSettings.FarmMastery ~= true
+    then
+        return nil
+    end
+    local category = farmSettings.MasteryCategory
+    if category ~= "Blox Fruit" and category ~= "Gun" then
+        return nil
+    end
+    local humanoid = target and target:FindFirstChildOfClass("Humanoid")
+    local health = humanoid and humanoid.Health
+    local maxHealth = humanoid and humanoid.MaxHealth
+    if type(health) ~= "number"
+        or type(maxHealth) ~= "number"
+        or maxHealth <= 0
+    then
+        return nil
+    end
+    local threshold = math.clamp(
+        tonumber(farmSettings.MasteryHealthPercent) or 40,
+        tonumber(farmSettings.MasteryHealthPercentMin) or 0,
+        tonumber(farmSettings.MasteryHealthPercentMax) or 100
+    )
+    if (health / maxHealth) * 100 <= threshold then
+        return category
+    end
+    return nil
+end
+
+function MainFarm:_TryStartFarmSkill(
+    target,
+    session,
+    weaponCategory,
+    farmSettings,
+    playerRoot,
+    allowMastery
+)
     if self.FarmSkillActive then
         return true
     end
+    local masteryEnabled = farmSettings
+        and farmSettings.FarmMastery == true
+        and allowMastery ~= false
+    local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    if masteryEnabled then
+        local configuredCategory = farmSettings.MasteryCategory
+        if configuredCategory ~= "Blox Fruit" and configuredCategory ~= "Gun" then
+            self.FarmSkillPreparing = nil
+            self:_SetStatus("Farm Mastery needs a valid Blox Fruit or Gun method", "error")
+            return true
+        end
+        if not masteryCategory then
+            self.FarmSkillPreparing = nil
+            return false
+        end
+    end
+    local skillCategory = masteryCategory or weaponCategory
+    if not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory) then
+        self.FarmSkillPreparing = nil
+        return masteryCategory ~= nil
+    end
+    local gunM1Issued, gunM1Result
+    if masteryCategory == "Gun" then
+        gunM1Issued, gunM1Result = self.CombatService:AttackGunM1(target)
+    end
     if not farmSettings or farmSettings.UseFarmSkills ~= true then
         self.FarmSkillPreparing = nil
-        return false
-    end
-    if not self:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory) then
-        self.FarmSkillPreparing = nil
+        if masteryCategory == "Gun" then
+            if gunM1Issued then
+                self:_SetStatus(
+                    "Gun M1 activation sent; enable Use skills while farming for Gun abilities",
+                    "success"
+                )
+            elseif gunM1Result ~= "Gun M1 is cooling down"
+                and gunM1Result ~= "Gun is reloading"
+            then
+                self:_SetStatus("Gun mastery M1 unavailable: " .. tostring(gunM1Result), "warning")
+            end
+            return true
+        elseif masteryCategory then
+            self:_SetStatus(
+                "Mastery waiting: enable Use skills while farming",
+                "warning"
+            )
+            return true
+        end
         return false
     end
 
     local now = os.clock()
     if now < (self.NextFarmSkillScanAt or 0) then
+        if masteryCategory then
+            return true
+        end
         return self.FarmSkillPreparing ~= nil
             and now < self.FarmSkillPreparing.Deadline
     end
@@ -813,8 +894,9 @@ function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettin
 
     local skill, skillError, preparingTool = self.CombatService:FindReadyFarmSkill(
         farmSettings,
-        weaponCategory,
-        self.FarmSkillIgnoredTools
+        skillCategory,
+        self.FarmSkillIgnoredTools,
+        masteryCategory
     )
     if preparingTool then
         local preparation = self.FarmSkillPreparing
@@ -832,7 +914,14 @@ function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettin
         end
         self.FarmSkillIgnoredTools[preparingTool.Name] = now + FARM_SKILL_UNAVAILABLE_RETRY
         self.FarmSkillPreparing = nil
-        self.CombatService:EquipWeapon(weaponCategory)
+        self.CombatService:EquipWeapon(masteryCategory or weaponCategory)
+        if masteryCategory then
+            self:_SetStatus(
+                "Mastery skill controls did not load for " .. preparingTool.Name,
+                "warning"
+            )
+            return true
+        end
         self:_SetStatus(
             "Skill controls did not load for " .. preparingTool.Name .. "; using M1",
             "warning"
@@ -843,6 +932,18 @@ function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettin
     if not skill then
         if skillError and skillError ~= "No selected skill is currently ready" then
             self:_SetStatus("Farm skills unavailable: " .. tostring(skillError), "warning")
+        end
+        if masteryCategory then
+            local waitMessage = "Mastery waiting for a ready selected "
+                .. masteryCategory
+                .. " skill"
+            if masteryCategory == "Gun" then
+                waitMessage = gunM1Issued
+                    and "Gun M1 activation sent; waiting for a selected Gun skill"
+                    or "Gun mastery waiting: " .. tostring(gunM1Result)
+            end
+            self:_SetStatus(waitMessage, "info")
+            return true
         end
         return false
     end
@@ -880,7 +981,23 @@ function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettin
                     and currentSettings
                     and currentSettings.UseFarmSkills == true
                     and currentSettings[skill.Setting] == true
-                    and self:_IsAtFarmAttackPosition(target, currentRoot, weaponCategory)
+                    and (
+                        (masteryCategory
+                            and currentSettings.FarmMastery == true
+                            and self:_GetMasteryCategory(
+                                target,
+                                currentSettings,
+                                allowMastery
+                            ) == masteryCategory)
+                        or (
+                            not masteryCategory
+                            and (
+                                currentSettings.FarmMastery ~= true
+                                or allowMastery == false
+                            )
+                        )
+                    )
+                    and self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
             end
         )
         if self.FarmSkillGeneration == generation then
@@ -902,7 +1019,17 @@ function MainFarm:_TryStartFarmSkill(target, session, weaponCategory, farmSettin
         then
             local currentSettings = self.Context and self.Context.Config
                 and self.Context.Config.FarmSettings
-            combatService:EquipWeapon(currentSettings and currentSettings.WeaponCategory or weaponCategory)
+            local restoreCategory = currentSettings
+                and currentSettings.WeaponCategory
+                or weaponCategory
+            if currentSettings and currentSettings.FarmMastery == true then
+                restoreCategory = self:_GetMasteryCategory(
+                    target,
+                    currentSettings,
+                    allowMastery
+                ) or restoreCategory
+            end
+            combatService:EquipWeapon(restoreCategory)
         end
     end)
     return true
@@ -955,9 +1082,11 @@ function MainFarm:_StepAura(session, root)
     self.EnemyService:PrepareTarget(target, root)
     self:_BringMobsIfEnabled(target, root, false)
     local weaponCategory = farmSettings.WeaponCategory or "Melee"
+    local attackCategory = self:_GetMasteryCategory(target, farmSettings, true)
+        or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root) then
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root, true) then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(
@@ -982,7 +1111,7 @@ function MainFarm:_StepAura(session, root)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            local targetOffset = weaponCategory == "Blox Fruit"
+            local targetOffset = attackCategory == "Blox Fruit"
                 and CFrame.new(-7, 20, 0)
                 or CFrame.new(7, 20, 0)
             self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
@@ -1076,9 +1205,21 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     self:_BringMobsIfEnabled(target, root, targetIsBoss)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
+    local attackCategory = self:_GetMasteryCategory(
+        target,
+        farmSettings,
+        targetIsBoss ~= true
+    ) or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root) then
+        if not self:_TryStartFarmSkill(
+            target,
+            session,
+            weaponCategory,
+            farmSettings,
+            root,
+            targetIsBoss ~= true
+        ) then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(
@@ -1103,7 +1244,7 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            local targetOffset = weaponCategory == "Blox Fruit"
+            local targetOffset = attackCategory == "Blox Fruit"
                 and CFrame.new(-7, 20, 0)
                 or CFrame.new(7, 20, 0)
             self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
@@ -2034,9 +2175,11 @@ function MainFarm:_Step(session)
     self:_BringMobsIfEnabled(target, root, false)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
+    local attackCategory = self:_GetMasteryCategory(target, farmSettings, true)
+        or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root) then
+        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root, true) then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(
@@ -2061,7 +2204,7 @@ function MainFarm:_Step(session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            local targetOffset = weaponCategory == "Blox Fruit"
+            local targetOffset = attackCategory == "Blox Fruit"
                 and CFrame.new(-7, 20, 0)
                 or CFrame.new(7, 20, 0)
             self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
@@ -2374,6 +2517,66 @@ function MainFarm:Handle(actionId, payload)
         return self:CopyStatusReport()
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
+    if actionId == "farm.mastery.enabled" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Farm Mastery setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.FarmMastery = payload
+        self:_SetStatus(
+            "Farm Mastery " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.mastery.category.select" then
+        local methods = farmSettings and farmSettings.FarmMasteryMethods
+        local selectedMethod
+        if type(methods) == "table" and type(payload) == "string" then
+            for _, method in ipairs(methods) do
+                if method == payload then
+                    selectedMethod = method
+                    break
+                end
+            end
+        end
+        if not farmSettings or not selectedMethod then
+            self:_SetStatus("Farm Mastery method is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.MasteryCategory = selectedMethod
+        self:_SetStatus("Mastery method: " .. selectedMethod, "success")
+        return true
+    end
+    if actionId == "farm.mastery.healthPercent.set" then
+        local selectedPercent = tonumber(payload)
+        local minimum = farmSettings and tonumber(farmSettings.MasteryHealthPercentMin) or 0
+        local maximum = farmSettings and tonumber(farmSettings.MasteryHealthPercentMax) or 100
+        local step = farmSettings and tonumber(farmSettings.MasteryHealthPercentStep) or 1
+        if not farmSettings
+            or not selectedPercent
+            or selectedPercent ~= selectedPercent
+            or math.abs(selectedPercent) == math.huge
+            or selectedPercent < minimum
+            or selectedPercent > maximum
+            or step <= 0
+        then
+            self:_SetStatus("Farm Mastery health threshold is invalid", "error")
+            return false
+        end
+        farmSettings.MasteryHealthPercent = math.clamp(
+            minimum + math.floor((selectedPercent - minimum) / step + 0.5) * step,
+            minimum,
+            maximum
+        )
+        self:_SetStatus(
+            "Mastery health threshold: "
+                .. tostring(farmSettings.MasteryHealthPercent)
+                .. "%",
+            "success"
+        )
+        return true
+    end
     if actionId == "farm.settings.bringMobs" then
         if not farmSettings or type(payload) ~= "boolean" then
             self:_SetStatus("Bring mobs setting is unavailable or invalid", "error")

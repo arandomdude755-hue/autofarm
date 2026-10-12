@@ -26,11 +26,17 @@ require(
     and "UseFarmSkills = false" in CONFIG
     and "FarmSkillHoldSeconds = 0.5" in CONFIG
     and "FarmSkillFastRelease = false" in CONFIG
+    and "FarmMastery = false" in CONFIG
+    and 'FarmMasteryMethods = { "Blox Fruit", "Gun" }' in CONFIG
+    and "MasteryHealthPercent = 40" in CONFIG
     and '"FarmSkill_" .. category.Token .. "_" .. keyName' in CONFIG
     and "farmSkillDefaults[settingName] = true" in CONFIG
     and 'Action = "farm.skills.enabled"' in CONFIG
     and 'Action = "farm.skills.holdSeconds.set"' in CONFIG
-    and 'Action = "farm.skills.fastRelease"' in CONFIG,
+    and 'Action = "farm.skills.fastRelease"' in CONFIG
+    and 'Action = "farm.mastery.enabled"' in CONFIG
+    and 'Action = "farm.mastery.category.select"' in CONFIG
+    and 'Action = "farm.mastery.healthPercent.set"' in CONFIG,
     "Farm skill controls must be opt-in, bounded by settings, and default selected keys consistently",
 )
 require(
@@ -58,6 +64,8 @@ require(
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
     and "ignoredTools" in ready_skill
+    and "onlyCategory" in ready_skill
+    and "category.Name == onlyCategory" in ready_skill
     and "GetDescendants" not in ready_skill,
     "Skill lookup must use the live skill UI, skip transformations and unavailable tools, and stay bounded",
 )
@@ -73,9 +81,32 @@ tiki_skill_lookup = function_body(
 )
 require(
     '"FarmSkill_" .. category.Token .. "_" .. keyName' in farm_skill_lookup
+    and "onlyCategory" in farm_skill_lookup
     and "return self:_FindReadySkill(function()" in tiki_skill_lookup
     and "farmSettings" not in tiki_skill_lookup,
     "Regular combat must honor skill selection while Tiki automatically accepts any ready skill",
+)
+
+gun_m1 = function_body(
+    COMBAT,
+    "function CombatService:AttackGunM1",
+    "\nfunction CombatService:TapSkullGuitar",
+)
+require(
+    'self:FindWeapon("Gun")' in gun_m1
+    and "self:EquipTool(tool)" in gun_m1
+    and "IsGunReloading" in gun_m1
+    and "NextGunM1At" in gun_m1
+    and "debugLibrary.getupvalues" in gun_m1
+    and "debugLibrary.getupvalue" in gun_m1
+    and "debugLibrary.setupvalue" in gun_m1
+    and "validator2:FireServer" in gun_m1
+    and 'netModule:FindFirstChild("RE/ShootGunEvent")' in gun_m1
+    and "shootGunEvent:FireServer(targetRoot.Position, { targetRoot })" in gun_m1
+    and "shootGunEvent:FireServer(target)" in gun_m1
+    and 'skullRemote:FireServer("TAP", targetRoot.Position)' in gun_m1
+    and "tool:Activate()" not in gun_m1,
+    "Gun M1 must follow the BNN validator and ShootGunEvent path with its Cannon and Skull Guitar cases",
 )
 
 use_skill = function_body(
@@ -107,15 +138,28 @@ require(
     "Farm skills must wait until movement is holding at the target's attack position",
 )
 
+mastery_category = function_body(
+    MAIN_FARM,
+    "function MainFarm:_GetMasteryCategory",
+    "\nfunction MainFarm:_TryStartFarmSkill",
+)
+require(
+    'farmSettings.FarmMastery ~= true' in mastery_category
+    and 'category ~= "Blox Fruit" and category ~= "Gun"' in mastery_category
+    and "health / maxHealth) * 100 <= threshold" in mastery_category
+    and "MasteryHealthPercent" in mastery_category,
+    "Mastery must switch categories only at or below the configured health threshold",
+)
+
 farm_skill = function_body(
     MAIN_FARM,
     "function MainFarm:_TryStartFarmSkill",
     "\nfunction MainFarm:_StepAura",
 )
 require(
-    "self:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)" in farm_skill
+    "self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
-    and "self:_IsAtFarmAttackPosition(target, currentRoot, weaponCategory)" in farm_skill
+    and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
     and "FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
@@ -126,16 +170,35 @@ require(
     and "self.Target == target" in farm_skill
     and "currentSettings.UseFarmSkills == true" in farm_skill
     and "currentSettings[skill.Setting] == true" in farm_skill
-    and "combatService:EquipWeapon(currentSettings and currentSettings.WeaponCategory or weaponCategory)" in farm_skill,
-    "Regular skill use must be throttled, cancellable, and restore the selected Farm Weapon",
+    and "currentSettings.FarmMastery == true" in farm_skill
+    and 'if masteryCategory == "Gun" then' in farm_skill
+    and "self.CombatService:AttackGunM1(target)" in farm_skill
+    and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("AttackGunM1")
+    and "masteryCategory" in farm_skill
+    and "combatService:EquipWeapon(restoreCategory)" in farm_skill
+    and "Mastery waiting: enable Use skills while farming" in farm_skill,
+    "Skill use must be throttled, cancellable, and restore the correct weapon",
 )
 require(
-    MAIN_FARM.count(
-        "self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root)"
-    ) == 3
+    MAIN_FARM.count("self:_TryStartFarmSkill(") == 3
+    and "farmSettings, root, true)" in MAIN_FARM
+    and "root,\n            targetIsBoss ~= true" in MAIN_FARM
+    and "self:_GetMasteryCategory(target, farmSettings, true)" in MAIN_FARM
     and "FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1" in MAIN_FARM
     and "self.CombatService:Cancel()" in MAIN_FARM,
-    "All regular farm combat paths must use skills safely and invalidate them on stop/respawn",
+    "All farm paths must route selected skills safely and keep bosses out of Mastery mode",
+)
+require(
+    "farmSettings.FarmMastery = payload" in MAIN_FARM
+    and "farmSettings.MasteryCategory = selectedMethod" in MAIN_FARM
+    and "farmSettings.MasteryHealthPercent =" in MAIN_FARM
+    and "not selectedMethod" in MAIN_FARM
+    and "selectedPercent < minimum" in MAIN_FARM
+    and "selectedPercent > maximum" in MAIN_FARM
+    and "debug.getupvalue" not in MAIN_FARM
+    and "debug.setupvalue" not in MAIN_FARM
+    and "getgc(" not in MAIN_FARM,
+    "Gun validator hooks must stay isolated in CombatService, not MainFarm",
 )
 
 tiki_action = function_body(
@@ -154,5 +217,6 @@ require(
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: ready skills use validated UI state, targeted aim, and cancellation-safe key release")
+print("PASS: Gun Mastery uses the BNN validator, ShootGunEvent, and weapon-specific cases")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")
