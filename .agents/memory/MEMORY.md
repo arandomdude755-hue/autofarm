@@ -1,1 +1,2 @@
 - [Quest-giver runtime failure](quest-giver-runtime-failure.md) — dismiss visible quest dialogue by leaving range, then revalidate quest state before retrying.
+- [Git branch roles](git-branch-roles.md) — keep `main` as the main hub version and `dev` as the test version.
