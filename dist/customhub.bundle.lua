@@ -1869,6 +1869,9 @@ local function isVisibleGuiObjectWithin(instance, root)
         if current:IsA("GuiObject") and not current.Visible then
             return false
         end
+        if current:IsA("ScreenGui") and not current.Enabled then
+            return false
+        end
         current = current.Parent
     end
     return current == root
@@ -2121,6 +2124,27 @@ local function readTrackedQuestTarget(self, guideData, isFirstSea)
     return targetName
 end
 
+local function hasVisibleQuestGiverDialogue(playerGui)
+    local dialogueGui = playerGui and playerGui:FindFirstChild("DialogueGui")
+    local titleFrame = dialogueGui
+        and dialogueGui:FindFirstChild("dialogueTitleFrame", true)
+    local subtitle = titleFrame and titleFrame:FindFirstChild("subtitle")
+    local titleLabel = subtitle and subtitle:FindFirstChild("title")
+    local isTextLabel = titleLabel and (
+        titleLabel:IsA("TextLabel")
+            or titleLabel:IsA("TextButton")
+            or titleLabel:IsA("TextBox")
+    )
+    if not isTextLabel or not isVisibleGuiObjectWithin(titleLabel, playerGui)
+        or type(titleLabel.Text) ~= "string"
+    then
+        return false
+    end
+
+    local titleText = titleLabel.Text:match("^%s*(.-)%s*$")
+    return #titleText <= 64 and string.lower(titleText) == "quest giver"
+end
+
 local function readFirstSeaQuestHud(self, guideData)
     local ok, state, targetName, reason = pcall(function()
         local compatibility = self.Compatibility
@@ -2134,12 +2158,12 @@ local function readFirstSeaQuestHud(self, guideData)
             return "unknown", nil, "PlayerGui.Main is unavailable"
         end
         if main:IsA("ScreenGui") and not main.Enabled then
-            local dialogueFrame = main:FindFirstChild("Dialogue")
-            if dialogueFrame and dialogueFrame:IsA("GuiObject") and dialogueFrame.Visible then
+            if hasVisibleQuestGiverDialogue(playerGui) then
                 return "none", nil,
-                    "visible Main.Dialogue; StartQuest still requires active-state confirmation"
+                    "visible Quest Giver dialogue; StartQuest still requires active-state confirmation"
             end
-            return "unknown", nil, "PlayerGui.Main ScreenGui is disabled"
+            return "unknown", nil,
+                "PlayerGui.Main ScreenGui is disabled; no visible Quest Giver dialogue was found"
         end
 
         local questFrame = main:FindFirstChild("Quest")

@@ -205,16 +205,33 @@ require(
 hud_start = QUEST_SERVICE.index("local function readFirstSeaQuestHud")
 hud_end = QUEST_SERVICE.index("\nfunction QuestService.new", hud_start)
 hud_reader = QUEST_SERVICE[hud_start:hud_end]
+dialogue_start = QUEST_SERVICE.index("local function hasVisibleQuestGiverDialogue")
+dialogue_end = QUEST_SERVICE.index("\nlocal function readFirstSeaQuestHud", dialogue_start)
+dialogue_detector = QUEST_SERVICE[dialogue_start:dialogue_end]
+require(
+    'playerGui:FindFirstChild("DialogueGui")' in dialogue_detector
+    and 'FindFirstChild("dialogueTitleFrame", true)' in dialogue_detector
+    and 'subtitle:FindFirstChild("title")' in dialogue_detector
+    and 'isVisibleGuiObjectWithin(titleLabel, playerGui)' in dialogue_detector
+    and 'string.lower(titleText) == "quest giver"' in dialogue_detector,
+    "visible quest-giver dialogue detection must use the observed generic DialogueGui title",
+)
+require(
+    'if current:IsA("ScreenGui") and not current.Enabled then\n            return false'
+    in QUEST_SERVICE,
+    "effective GUI visibility must reject descendants of disabled ScreenGuis",
+)
+
 disabled_start = hud_reader.index("if main:IsA(\"ScreenGui\") and not main.Enabled then")
 disabled_end = hud_reader.index('\n        local questFrame = main:FindFirstChild("Quest")', disabled_start)
 disabled_branch = hud_reader[disabled_start:disabled_end]
 require(
-    'local dialogueFrame = main:FindFirstChild("Dialogue")' in disabled_branch
-    and 'dialogueFrame:IsA("GuiObject") and dialogueFrame.Visible' in disabled_branch
+    'if hasVisibleQuestGiverDialogue(playerGui) then' in disabled_branch
     and 'return "none", nil,' in disabled_branch
     and 'StartQuest still requires active-state confirmation' in disabled_branch
-    and 'return "unknown", nil, "PlayerGui.Main ScreenGui is disabled"' in disabled_branch,
-    "a visible quest dialogue should allow a bounded request but must not count as quest acceptance",
+    and 'no visible Quest Giver dialogue was found' in disabled_branch
+    and 'main:FindFirstChild("Dialogue")' not in disabled_branch,
+    "only a visible quest-giver dialogue should allow a bounded request, never count as acceptance",
 )
 
 compatibility = (
