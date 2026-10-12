@@ -6,6 +6,7 @@ HUB = ROOT / "src/ReplicatedStorage/CustomHub"
 CONFIG = (HUB / "Config.lua").read_text(encoding="utf-8")
 COMBAT = (HUB / "Features/Farm/CombatService.lua").read_text(encoding="utf-8")
 MAIN_FARM = (HUB / "Features/MainFarm.lua").read_text(encoding="utf-8")
+COMPATIBILITY = (HUB / "Compatibility.lua").read_text(encoding="utf-8")
 BNN = (ROOT / "attached_assets/3nn_main.lua_(1)_1791763089635.txt").read_text(encoding="utf-8")
 
 
@@ -87,7 +88,9 @@ require(
     and 'FindFirstChild("Skills")' in ready_skill
     and 'FindFirstChild("Cooldown")' in ready_skill
     and 'title.TextColor3 == Color3.new(1, 1, 1)' in ready_skill
-    and "cooldown.Size.X.Scale == 0" in ready_skill
+    and 'UDim2.new(0, 0, 1, -1)' in ready_skill
+    and 'UDim2.new(1, 0, 1, -1)' in ready_skill
+    and "frame.Visible" in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
     and "ignoredTools" in ready_skill
@@ -96,7 +99,7 @@ require(
     and "No selected skill keys are enabled" in ready_skill
     and "All selected skill keys are on cooldown" in ready_skill
     and "GetDescendants" not in ready_skill,
-    "Skill lookup must use the live skill UI, skip transformations and unavailable tools, and stay bounded",
+    "Skill readiness must match both BNN cooldown-ready states and skip hidden/invalid skill frames",
 )
 farm_skill_lookup = function_body(
     COMBAT,
@@ -127,14 +130,35 @@ require(
     and "IsGunReloading" in gun_m1
     and "NextGunM1At" in gun_m1
     and "self:_SetTemporaryAim(target)" in gun_m1
-    and "tool:Activate()" in gun_m1
+    and "self.Compatibility:GetGunShootFunction()" in gun_m1
+    and "WorldToViewportPoint(targetRoot.Position)" in gun_m1
+    and "Enum.UserInputType.Touch" in gun_m1
+    and "SendMouseButtonEvent" in gun_m1
+    and "tool:Activate()" not in gun_m1
     and "Heartbeat:Wait()" in gun_m1
-    and gun_m1.index("tool:Activate()") < gun_m1.index("Heartbeat:Wait()")
     and gun_m1.index("Heartbeat:Wait()") < gun_m1.index("self:_RestoreTemporaryAim(aimContext)")
     and "validator2:FireServer" not in gun_m1
     and "ShootGunEvent" not in gun_m1
     and "debugLibrary" not in gun_m1,
-    "Gun M1 must use target-scoped aim and standard Tool activation",
+    "Gun M1 must invoke the validated CombatController shootGun path with screen-targeted input",
+)
+gun_shoot_lookup = function_body(
+    COMPATIBILITY,
+    "function Compatibility:GetGunShootFunction",
+    "\nfunction Compatibility:IsTouchEnabled",
+)
+mobile_signal_lookup = function_body(
+    COMPATIBILITY,
+    "function Compatibility:GetSignalConnections",
+    "\nfunction Compatibility:GetGunShootFunction",
+)
+require(
+    "upvalues[9]" in gun_shoot_lookup
+    and 'pcall(debugInfo, shootGun, "n")' in gun_shoot_lookup
+    and 'functionName ~= "shootGun"' in gun_shoot_lookup
+    and "pcall(getUpvalues, attack)" in gun_shoot_lookup
+    and "pcall(getter, signal)" in mobile_signal_lookup,
+    "Executor-specific mobile and gun helpers must be optional, guarded, and validate the game callback",
 )
 
 aim_target = function_body(
@@ -166,12 +190,17 @@ use_skill = function_body(
 require(
     "SendKeyEvent(true, keyName" in use_skill
     and "SendKeyEvent(false, keyName" in use_skill
+    and "GetSignalConnections" in use_skill
+    and "MouseButton1Down" in use_skill
+    and "MouseButton1Up" in use_skill
+    and "connection:Fire()" in use_skill
+    and "self.ActiveInputRelease = releaseInput" in use_skill
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
-    "Skill use must aim only at the selected target, honor hold settings, and always release on cancellation",
+    "Skill use must prefer mobile skill-button inputs, retain keyboard fallback, and release safely",
 )
 
 attack_position = function_body(

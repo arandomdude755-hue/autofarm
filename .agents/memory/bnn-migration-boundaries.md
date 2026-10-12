@@ -27,8 +27,8 @@ Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary a
 
 **How to apply:** for future BNN farming migrations, keep the tested Level Farm path intact, implement each mode with its related settings, and keep unimplemented modes out of the UI. Keep Tiki automation event-scoped and automatic, avoid global remote hooks, keep normal-farm skill controls independent, and resume the selected Farm Weapon after temporary equipment changes.
 
-For Gun Mastery, use the standard equipped Tool activation path with temporary target-scoped Mouse aim. Do not send the BNN validator or ShootGunEvent requests.
+For Gun Mastery, use the validated CombatController `shootGun` input path with target screen coordinates; keep the optional internal-function lookup in Compatibility and do not manually fire validator or ShootGunEvent remotes. On touch devices, use the skill GUI's down/up connections when available; preserve keyboard input as fallback. Recognize both reference-ready cooldown bar sizes.
 
-**Why:** the user tested the BNN-style gun M1 path and reported that it did not work, then requested the original Tool activation approach.
+**Why:** in-game testing showed `Tool:Activate()` could return successfully without firing a gun shot. The references use the game's internal shooting input handler, and their skill readiness logic accepts both empty-width and full-width cooldown states. Mobile references also press the on-screen skill buttons.
 
-**How to apply:** keep this path limited to the Gun Mastery phase after the character reaches attack position; retain range/reload/cooldown checks and selected skill usage, and label success as an issued activation until in-game damage is confirmed.
+**How to apply:** only invoke an upvalue after validating it is the named `shootGun` function; synthesize the target's screen input and retain existing range/reload/cooldown checks. Report input sent—not confirmed damage—until live testing proves a hit.

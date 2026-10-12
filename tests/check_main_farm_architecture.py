@@ -169,6 +169,8 @@ for path in all_lua:
     if path != compatibility_path:
         require("getnilinstances" not in text,
                 f"Optional instance API escaped Compatibility: {path.relative_to(ROOT)}")
+        require("getconnections" not in text and "getupvalues" not in text,
+                f"Optional connection/upvalue APIs escaped Compatibility: {path.relative_to(ROOT)}")
     require(all(line == line.rstrip() for line in text.splitlines()),
             f"Trailing whitespace: {path.relative_to(ROOT)}")
 
@@ -176,8 +178,12 @@ compatibility_text = compatibility_path.read_text(encoding="utf-8")
 require(
     "function Compatibility:GetUnparentedInstances()" in compatibility_text
     and "return getnilinstances" in compatibility_text
-    and "pcall(getter)" in compatibility_text,
-    "optional unparented-instance discovery must be guarded in Compatibility",
+    and "pcall(getter)" in compatibility_text
+    and "function Compatibility:GetSignalConnections(signal)" in compatibility_text
+    and "pcall(getter, signal)" in compatibility_text
+    and "function Compatibility:GetGunShootFunction()" in compatibility_text
+    and "pcall(getUpvalues, attack)" in compatibility_text,
+    "optional executor helpers must be guarded and isolated in Compatibility",
 )
 
 print("PASS: production CustomHub Rojo mapping and LocalScript entrypoint")

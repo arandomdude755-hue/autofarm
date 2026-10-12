@@ -45,6 +45,80 @@ function Compatibility:GetUnparentedInstances()
     return instances
 end
 
+function Compatibility:GetSignalConnections(signal)
+    if typeof(signal) ~= "RBXScriptSignal" then
+        return nil, "Signal is unavailable"
+    end
+
+    local getterOk, getter = pcall(function()
+        return getconnections
+    end)
+    if not getterOk or type(getter) ~= "function" then
+        return nil, "Signal connection access is unavailable"
+    end
+
+    local callOk, connections = pcall(getter, signal)
+    if not callOk or type(connections) ~= "table" then
+        return nil, "Signal connections could not be read"
+    end
+    return connections
+end
+
+function Compatibility:GetGunShootFunction()
+    local controllers = self.ReplicatedStorage:FindFirstChild("Controllers")
+    local controllerModule = controllers and controllers:FindFirstChild("CombatController")
+    if not controllerModule then
+        return nil, "CombatController is unavailable"
+    end
+
+    local requireOk, combatController = pcall(require, controllerModule)
+    local attack = requireOk and type(combatController) == "table"
+        and combatController.Attack
+    if type(attack) ~= "function" then
+        return nil, "CombatController.Attack is unavailable"
+    end
+
+    local shootGun
+    local getterOk, getUpvalues = pcall(function()
+        return getupvalues
+    end)
+    if getterOk and type(getUpvalues) == "function" then
+        local upvaluesOk, upvalues = pcall(getUpvalues, attack)
+        if upvaluesOk and type(upvalues) == "table" then
+            shootGun = upvalues[9]
+        end
+    end
+
+    if type(shootGun) ~= "function" then
+        local debugOk, debugLibrary = pcall(function()
+            return debug
+        end)
+        local getUpvalue = debugOk and debugLibrary and debugLibrary.getupvalue
+        if type(getUpvalue) == "function" then
+            local upvalueOk, _, value = pcall(getUpvalue, attack, 9)
+            if upvalueOk then
+                shootGun = value
+            end
+        end
+    end
+
+    if type(shootGun) ~= "function" then
+        return nil, "CombatController shootGun input is unavailable"
+    end
+
+    local infoOk, debugInfo = pcall(function()
+        return debug.info
+    end)
+    if not infoOk or type(debugInfo) ~= "function" then
+        return nil, "CombatController shootGun cannot be validated"
+    end
+    local nameOk, functionName = pcall(debugInfo, shootGun, "n")
+    if not nameOk or functionName ~= "shootGun" then
+        return nil, "CombatController attack input did not match shootGun"
+    end
+    return shootGun
+end
+
 function Compatibility:IsTouchEnabled()
     return UserInputService.TouchEnabled
 end
