@@ -37,7 +37,7 @@ local farmModes = {
 }
 local farmModeProfiles = {
     ["Farm Bones"] = {
-        Sea = "Second Sea",
+        Sea = "Third Sea",
         MinimumLevel = 2050,
         QuestPrefix = "HauntedQuest",
         QuestName = "HauntedQuest2",

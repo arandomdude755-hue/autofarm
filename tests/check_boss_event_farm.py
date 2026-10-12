@@ -29,12 +29,20 @@ require(
     "The BNN Bone, Cake Prince, and Tyrant farming modes must be available",
 )
 require(
-    'Sea = "Second Sea"' in CONFIG
-    and 'Sea = "Third Sea"' in CONFIG
+    'Sea = "Third Sea"' in CONFIG
     and 'QuestPrefix = "HauntedQuest"' in CONFIG
     and 'QuestPrefix = "CakeQuest"' in CONFIG
     and 'QuestPrefix = "TikiQuest"' in CONFIG,
     "Mode profiles must identify their source quest families and seas",
+)
+bones_profile = CONFIG[
+    CONFIG.index('["Farm Bones"] = {'):
+    CONFIG.index('["Farm Cake Prince"] = {')
+]
+require(
+    'Sea = "Third Sea"' in bones_profile
+    and 'QuestName = "HauntedQuest2"' in bones_profile,
+    "Farm Bones must run in Third Sea for its Haunted quest",
 )
 require(
     "AutoModeQuest = false" in CONFIG
