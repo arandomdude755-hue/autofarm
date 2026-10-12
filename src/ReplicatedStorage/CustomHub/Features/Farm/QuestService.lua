@@ -372,6 +372,11 @@ local function readFirstSeaQuestHud(self, guideData)
             return "unknown", nil, "PlayerGui.Main is unavailable"
         end
         if main:IsA("ScreenGui") and not main.Enabled then
+            local dialogueFrame = main:FindFirstChild("Dialogue")
+            if dialogueFrame and dialogueFrame:IsA("GuiObject") and dialogueFrame.Visible then
+                return "none", nil,
+                    "visible Main.Dialogue; StartQuest still requires active-state confirmation"
+            end
             return "unknown", nil, "PlayerGui.Main ScreenGui is disabled"
         end
 

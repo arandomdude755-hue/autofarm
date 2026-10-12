@@ -202,6 +202,21 @@ require(
     "First Sea main-quest UI fallback is missing",
 )
 
+hud_start = QUEST_SERVICE.index("local function readFirstSeaQuestHud")
+hud_end = QUEST_SERVICE.index("\nfunction QuestService.new", hud_start)
+hud_reader = QUEST_SERVICE[hud_start:hud_end]
+disabled_start = hud_reader.index("if main:IsA(\"ScreenGui\") and not main.Enabled then")
+disabled_end = hud_reader.index('\n        local questFrame = main:FindFirstChild("Quest")', disabled_start)
+disabled_branch = hud_reader[disabled_start:disabled_end]
+require(
+    'local dialogueFrame = main:FindFirstChild("Dialogue")' in disabled_branch
+    and 'dialogueFrame:IsA("GuiObject") and dialogueFrame.Visible' in disabled_branch
+    and 'return "none", nil,' in disabled_branch
+    and 'StartQuest still requires active-state confirmation' in disabled_branch
+    and 'return "unknown", nil, "PlayerGui.Main ScreenGui is disabled"' in disabled_branch,
+    "a visible quest dialogue should allow a bounded request but must not count as quest acceptance",
+)
+
 compatibility = (
     ROOT / "src/ReplicatedStorage/CustomHub/Compatibility.lua"
 ).read_text(encoding="utf-8")
