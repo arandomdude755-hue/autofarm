@@ -3607,8 +3607,16 @@ __bundleFactories["CustomHub.Features.Farm.EnemyService"] = function()
 local EnemyService = {}
 EnemyService.__index = EnemyService
 
-local HIDDEN_SPAWN_REFRESH_INTERVAL = 1
-local HIDDEN_SPAWN_RETRY_INTERVAL = 5
+local HIDDEN_SPAWN_REFRESH_INTERVAL = 5
+local HIDDEN_SPAWN_RETRY_INTERVAL = 10
+
+local function disconnect(connection)
+    if connection then
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+end
 
 local function singularizeEnemyWord(word)
     if #word > 3 and word:sub(-3) == "ies" then
@@ -3736,6 +3744,9 @@ function EnemyService.new(compatibility)
         CollisionOriginals = {},
         IgnoredSpawns = {},
         HiddenSpawnCache = nil,
+        PreparedTargets = setmetatable({}, { __mode = "k" }),
+        EnemyModels = setmetatable({}, { __mode = "k" }),
+        SpawnMarkers = setmetatable({}, { __mode = "k" }),
     }, EnemyService)
 end
 
@@ -3758,6 +3769,77 @@ function EnemyService:_GetEnemySpawnsFolder()
     return enemySpawns
 end
 
+function EnemyService:_GetEnemyModelIndex()
+    local enemies = self.Workspace:FindFirstChild("Enemies")
+    if not enemies then
+        enemies = self.Workspace:FindFirstChild("Enemies", true)
+    end
+    if enemies == self.EnemyContainer then
+        return self.EnemyModels, enemies
+    end
+
+    disconnect(self.EnemyAddedConnection)
+    disconnect(self.EnemyRemovingConnection)
+    self.EnemyAddedConnection = nil
+    self.EnemyRemovingConnection = nil
+    self.EnemyContainer = enemies
+    self.EnemyModels = setmetatable({}, { __mode = "k" })
+    if not enemies then
+        return self.EnemyModels, nil
+    end
+
+    for _, instance in ipairs(enemies:GetDescendants()) do
+        if instance:IsA("Model") then
+            self.EnemyModels[instance] = true
+        end
+    end
+    self.EnemyAddedConnection = enemies.DescendantAdded:Connect(function(instance)
+        if instance:IsA("Model") then
+            self.EnemyModels[instance] = true
+        end
+    end)
+    self.EnemyRemovingConnection = enemies.DescendantRemoving:Connect(function(instance)
+        if instance:IsA("Model") then
+            self.EnemyModels[instance] = nil
+        end
+    end)
+    return self.EnemyModels, enemies
+end
+
+function EnemyService:_GetSpawnMarkerIndex()
+    local enemySpawns = self:_GetEnemySpawnsFolder()
+    if enemySpawns == self.SpawnContainer then
+        return self.SpawnMarkers, enemySpawns
+    end
+
+    disconnect(self.SpawnAddedConnection)
+    disconnect(self.SpawnRemovingConnection)
+    self.SpawnAddedConnection = nil
+    self.SpawnRemovingConnection = nil
+    self.SpawnContainer = enemySpawns
+    self.SpawnMarkers = setmetatable({}, { __mode = "k" })
+    if not enemySpawns then
+        return self.SpawnMarkers, nil
+    end
+
+    for _, instance in ipairs(enemySpawns:GetDescendants()) do
+        if instance:IsA("BasePart") then
+            self.SpawnMarkers[instance] = true
+        end
+    end
+    self.SpawnAddedConnection = enemySpawns.DescendantAdded:Connect(function(instance)
+        if instance:IsA("BasePart") then
+            self.SpawnMarkers[instance] = true
+        end
+    end)
+    self.SpawnRemovingConnection = enemySpawns.DescendantRemoving:Connect(function(instance)
+        if instance:IsA("BasePart") then
+            self.SpawnMarkers[instance] = nil
+        end
+    end)
+    return self.SpawnMarkers, enemySpawns
+end
+
 function EnemyService:_RefreshHiddenSpawnCache()
     local now = os.clock()
     local current = self.HiddenSpawnCache
@@ -3767,6 +3849,7 @@ function EnemyService:_RefreshHiddenSpawnCache()
 
     local cache = {
         Parts = {},
+        ByName = {},
         Available = false,
         ExpiresAt = now + HIDDEN_SPAWN_RETRY_INTERVAL,
     }
@@ -3783,11 +3866,21 @@ function EnemyService:_RefreshHiddenSpawnCache()
                     end)
                     if readOk and isBasePart and parent == nil and type(name) == "string" then
                         cache.Parts[instance] = name
+                        local normalizedName = normalizeEnemyName(name)
+                        if normalizedName then
+                            local matches = cache.ByName[normalizedName]
+                            if not matches then
+                                matches = {}
+                                cache.ByName[normalizedName] = matches
+                            end
+                            table.insert(matches, instance)
+                        end
                     end
                 end
             end)
             if not scanOk then
                 cache.Parts = {}
+                cache.ByName = {}
                 cache.Available = false
                 cache.ExpiresAt = now + HIDDEN_SPAWN_RETRY_INTERVAL
             end
@@ -3832,17 +3925,14 @@ function EnemyService:IsAlive(model)
 end
 
 function EnemyService:FindNearest(targetName, origin)
-    local enemies = self.Workspace:FindFirstChild("Enemies")
-    if not enemies then
-        enemies = self.Workspace:FindFirstChild("Enemies", true)
-    end
+    local enemyModels, enemies = self:_GetEnemyModelIndex()
     if not enemies or not targetName or not origin then
         return nil
     end
 
     local nearest, nearestDistance = nil, math.huge
-    for _, enemy in ipairs(enemies:GetDescendants()) do
-        if enemy:IsA("Model")
+    for enemy in pairs(enemyModels) do
+        if isDescendantOf(enemy, enemies)
             and matchesEnemyName(enemy.Name, targetName)
             and self:IsAlive(enemy)
         then
@@ -3864,17 +3954,14 @@ function EnemyService:FindNearestInRange(origin, maxDistance)
         return nil
     end
 
-    local enemies = self.Workspace:FindFirstChild("Enemies")
-    if not enemies then
-        enemies = self.Workspace:FindFirstChild("Enemies", true)
-    end
+    local enemyModels, enemies = self:_GetEnemyModelIndex()
     if not enemies then
         return nil
     end
 
     local nearest, nearestDistance = nil, radius
-    for _, enemy in ipairs(enemies:GetDescendants()) do
-        if enemy:IsA("Model") and self:IsAlive(enemy) then
+    for enemy in pairs(enemyModels) do
+        if isDescendantOf(enemy, enemies) and self:IsAlive(enemy) then
             local distance = (enemy.HumanoidRootPart.Position - origin).Magnitude
             if distance <= nearestDistance then
                 nearest, nearestDistance = enemy, distance
@@ -3891,6 +3978,7 @@ function EnemyService:FindSpawn(targetName, origin)
         NormalMarkerFound = false,
         HiddenMarkerFound = false,
         HiddenDiscoveryAvailable = false,
+        HiddenDiscoveryChecked = false,
         SelectedSource = "none",
         SelectedName = nil,
         MatchedTarget = nil,
@@ -3901,11 +3989,21 @@ function EnemyService:FindSpawn(targetName, origin)
         return nil, false, diagnostic
     end
 
-    local enemySpawns = self:_GetEnemySpawnsFolder()
-    local hiddenCache = self:_RefreshHiddenSpawnCache()
+    local spawnMarkers, enemySpawns = self:_GetSpawnMarkerIndex()
+    local now = os.clock()
+    local hiddenCache = self.HiddenSpawnCache
+    if hiddenCache and now >= hiddenCache.ExpiresAt then
+        hiddenCache = nil
+    end
     diagnostic.EnemySpawnsContainerFound = enemySpawns ~= nil
-    diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
-    self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)
+    diagnostic.HiddenDiscoveryChecked = hiddenCache ~= nil
+    diagnostic.HiddenDiscoveryAvailable = hiddenCache ~= nil
+        and hiddenCache.Available == true
+    self:_PruneIgnoredSpawns(
+        enemySpawns,
+        hiddenCache or { Available = false, Parts = {} },
+        targetName
+    )
 
     local hasMatchingSpawn = false
     local nearest, nearestDistance = nil, math.huge
@@ -3949,22 +4047,28 @@ function EnemyService:FindSpawn(targetName, origin)
     end
 
     if enemySpawns then
-        local childrenOk, children = pcall(function()
-            return enemySpawns:GetDescendants()
-        end)
-        if childrenOk then
-            for _, spawnPart in ipairs(children) do
-                considerSpawn(spawnPart, enemySpawns, nil, "EnemySpawns")
-            end
+        for spawnPart in pairs(spawnMarkers) do
+            considerSpawn(spawnPart, enemySpawns, nil, "EnemySpawns")
         end
     end
 
-    -- Include cached unparented candidates in nearest selection, but refresh the
-    -- potentially expensive runtime enumeration no more than once per cache interval.
-    if hiddenCache.Available and os.clock() < hiddenCache.ExpiresAt then
-        for spawnPart, cachedName in pairs(hiddenCache.Parts) do
-            if matchesSpawnName(cachedName, normalizedTarget) then
-                considerSpawn(spawnPart, nil, cachedName, "unparented-cache")
+    -- Only enumerate all unparented runtime instances if the normal marker index
+    -- cannot provide a candidate. A valid cached fallback remains usable meanwhile.
+    if not hiddenCache and not nearest then
+        hiddenCache = self:_RefreshHiddenSpawnCache()
+        diagnostic.HiddenDiscoveryChecked = true
+        diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
+    end
+
+    if hiddenCache and hiddenCache.Available and os.clock() < hiddenCache.ExpiresAt then
+        local seenHidden = {}
+        for _, normalizedName in ipairs(normalizedTarget) do
+            for _, spawnPart in ipairs(hiddenCache.ByName[normalizedName] or {}) do
+                local cachedName = hiddenCache.Parts[spawnPart]
+                if cachedName and not seenHidden[spawnPart] then
+                    seenHidden[spawnPart] = true
+                    considerSpawn(spawnPart, nil, cachedName, "unparented-cache")
+                end
             end
         end
     end
@@ -4018,6 +4122,23 @@ function EnemyService:ClearIgnoredSpawns()
     table.clear(self.IgnoredSpawns)
 end
 
+function EnemyService:ClearTracking()
+    disconnect(self.EnemyAddedConnection)
+    disconnect(self.EnemyRemovingConnection)
+    disconnect(self.SpawnAddedConnection)
+    disconnect(self.SpawnRemovingConnection)
+    self.EnemyAddedConnection = nil
+    self.EnemyRemovingConnection = nil
+    self.SpawnAddedConnection = nil
+    self.SpawnRemovingConnection = nil
+    self.EnemyContainer = nil
+    self.SpawnContainer = nil
+    self.EnemyModels = setmetatable({}, { __mode = "k" })
+    self.SpawnMarkers = setmetatable({}, { __mode = "k" })
+    self.HiddenSpawnCache = nil
+    table.clear(self.PreparedTargets)
+end
+
 function EnemyService:PrepareTarget(model, playerRoot)
     if not self:IsAlive(model) or not playerRoot then
         return
@@ -4026,12 +4147,16 @@ function EnemyService:PrepareTarget(model, playerRoot)
         return
     end
 
+    if self.PreparedTargets[model] then
+        return
+    end
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then
             self.CollisionOriginals[part] = true
             part.CanCollide = false
         end
     end
+    self.PreparedTargets[model] = true
 end
 
 function EnemyService:RestoreTargetCollision()
@@ -4041,6 +4166,7 @@ function EnemyService:RestoreTargetCollision()
         end
         self.CollisionOriginals[part] = nil
     end
+    table.clear(self.PreparedTargets)
 end
 
 return EnemyService
@@ -4719,11 +4845,6 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
         return false, "Character is stunned or has no Stun state"
     end
 
-    local candidates = self:_GetAttackCandidates(character, root, tonumber(range) or 30)
-    if #candidates == 0 then
-        return false, "No valid hit parts in BNN attack range"
-    end
-
     local combatUtil = self.Dependencies.CombatUtil
     local weaponName = combatUtil:GetWeaponName(tool)
     local weaponData = combatUtil:GetWeaponData(weaponName)
@@ -4734,6 +4855,11 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
     local weaponType = weaponData.WeaponType
     if not combatUtil:CanAttack(character, weaponType) then
         return false, "CombatUtil rejected attack timing"
+    end
+
+    local candidates = self:_GetAttackCandidates(character, root, tonumber(range) or 30)
+    if #candidates == 0 then
+        return false, "No valid hit parts in BNN attack range"
     end
 
     local hitPart = table.remove(candidates, 1)[2]
@@ -4798,8 +4924,9 @@ local QUEST_DIALOGUE_RETREAT_INCREMENT = 24
 local QUEST_DIALOGUE_MAX_RETREAT_DISTANCE = 80
 local QUEST_DIALOGUE_MOVE_RETRY_INTERVAL = 0.5
 local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
-local NPC_SCAN_INTERVAL = 0.35
-local SPAWN_SCAN_INTERVAL = 0.5
+local FARM_STEP_INTERVAL = 0.1
+local NPC_SCAN_INTERVAL = 0.75
+local SPAWN_SCAN_INTERVAL = 1
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
@@ -5109,7 +5236,8 @@ function MainFarm:_PrintSpawnDiagnosticReport(report)
             "Normal EnemySpawns marker: " .. tostring(report.NormalMarkerFound == true),
             "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
                 .. " (discovery_available="
-                .. tostring(report.HiddenDiscoveryAvailable == true) .. ")",
+                .. tostring(report.HiddenDiscoveryAvailable == true)
+                .. ", checked=" .. tostring(report.HiddenDiscoveryChecked == true) .. ")",
             "Selected candidate: " .. selected,
             "IsSpawnAvailable: " .. availability,
             "MovementService:MoveTo accepted=" .. moveAccepted
@@ -6358,7 +6486,7 @@ function MainFarm:_Run(session)
             self.TargetName = nil
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
-        task.wait()
+        task.wait(FARM_STEP_INTERVAL)
     end
 end
 
@@ -6483,6 +6611,7 @@ function MainFarm:Stop()
     if self.EnemyService then
         self.EnemyService:RestoreTargetCollision()
         self.EnemyService:ClearIgnoredSpawns()
+        self.EnemyService:ClearTracking()
     end
     self.Target = nil
     self.TargetName = nil

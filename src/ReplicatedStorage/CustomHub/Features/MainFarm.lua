@@ -14,8 +14,9 @@ local QUEST_DIALOGUE_RETREAT_INCREMENT = 24
 local QUEST_DIALOGUE_MAX_RETREAT_DISTANCE = 80
 local QUEST_DIALOGUE_MOVE_RETRY_INTERVAL = 0.5
 local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
-local NPC_SCAN_INTERVAL = 0.35
-local SPAWN_SCAN_INTERVAL = 0.5
+local FARM_STEP_INTERVAL = 0.1
+local NPC_SCAN_INTERVAL = 0.75
+local SPAWN_SCAN_INTERVAL = 1
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
@@ -325,7 +326,8 @@ function MainFarm:_PrintSpawnDiagnosticReport(report)
             "Normal EnemySpawns marker: " .. tostring(report.NormalMarkerFound == true),
             "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
                 .. " (discovery_available="
-                .. tostring(report.HiddenDiscoveryAvailable == true) .. ")",
+                .. tostring(report.HiddenDiscoveryAvailable == true)
+                .. ", checked=" .. tostring(report.HiddenDiscoveryChecked == true) .. ")",
             "Selected candidate: " .. selected,
             "IsSpawnAvailable: " .. availability,
             "MovementService:MoveTo accepted=" .. moveAccepted
@@ -1574,7 +1576,7 @@ function MainFarm:_Run(session)
             self.TargetName = nil
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
-        task.wait()
+        task.wait(FARM_STEP_INTERVAL)
     end
 end
 
@@ -1699,6 +1701,7 @@ function MainFarm:Stop()
     if self.EnemyService then
         self.EnemyService:RestoreTargetCollision()
         self.EnemyService:ClearIgnoredSpawns()
+        self.EnemyService:ClearTracking()
     end
     self.Target = nil
     self.TargetName = nil

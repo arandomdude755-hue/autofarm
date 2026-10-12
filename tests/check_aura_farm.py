@@ -36,8 +36,8 @@ find_in_range = function_body(
     "\nfunction EnemyService:FindSpawn",
 )
 require(
-    'FindFirstChild("Enemies")' in find_in_range
-    and "enemies:GetDescendants()" in find_in_range
+    "self:_GetEnemyModelIndex()" in find_in_range
+    and "for enemy in pairs(enemyModels)" in find_in_range
     and "self:IsAlive(enemy)" in find_in_range
     and "distance <= nearestDistance" in find_in_range,
     "Aura target lookup must choose the nearest living enemy within the configured radius",

@@ -207,11 +207,6 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
         return false, "Character is stunned or has no Stun state"
     end
 
-    local candidates = self:_GetAttackCandidates(character, root, tonumber(range) or 30)
-    if #candidates == 0 then
-        return false, "No valid hit parts in BNN attack range"
-    end
-
     local combatUtil = self.Dependencies.CombatUtil
     local weaponName = combatUtil:GetWeaponName(tool)
     local weaponData = combatUtil:GetWeaponData(weaponName)
@@ -222,6 +217,11 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
     local weaponType = weaponData.WeaponType
     if not combatUtil:CanAttack(character, weaponType) then
         return false, "CombatUtil rejected attack timing"
+    end
+
+    local candidates = self:_GetAttackCandidates(character, root, tonumber(range) or 30)
+    if #candidates == 0 then
+        return false, "No valid hit parts in BNN attack range"
     end
 
     local hitPart = table.remove(candidates, 1)[2]

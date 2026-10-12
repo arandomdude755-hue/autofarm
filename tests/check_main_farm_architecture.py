@@ -69,11 +69,10 @@ for token in (
     "SetFarmCollisionSuppression(false)",
     "CharacterAdded",
     "CharacterRemoving",
-    "task.wait()",
+    "FARM_STEP_INTERVAL = 0.1",
+    "task.wait(FARM_STEP_INTERVAL)",
 ):
     require(token in main_farm, f"Main Farm lifecycle/dependency missing: {token}")
-require("task.wait(0.15)" not in main_farm,
-        "Main Farm still imposes a poll delay that is absent from BNN's level loop")
 
 unknown_state_start = main_farm.index('if questState == "unknown" then')
 unknown_state_end = main_farm.index('elseif questState == "active-unknown" then', unknown_state_start)
@@ -118,6 +117,15 @@ for token in (
     require(token in combat, f"BNN M1 branch/cooldown path is missing: {token}")
 require("AttackBusy" not in combat,
         "CustomHub still gates M1 with a local animation-duration flag absent from BNN")
+attack_m1 = combat[
+    combat.index("function CombatService:AttackM1"):
+    combat.index("\nfunction CombatService:Cancel")
+]
+require(
+    attack_m1.index("combatUtil:CanAttack(character, weaponType)")
+    < attack_m1.index("self:_GetAttackCandidates("),
+    "melee hit scanning must be skipped while CombatUtil rejects the attack cadence",
+)
 require(
     'AttackNoAnimation = false' in config,
     "Attack No Animation default must follow BNN's unset/animated branch unless explicitly configured",

@@ -197,7 +197,9 @@ require(
     "spawn availability must validate a nested real marker or a fresh cached unparented marker",
 )
 require(
-    "self:_PruneIgnoredSpawns(enemySpawns, hiddenCache, targetName)" in ENEMY
+    "self:_PruneIgnoredSpawns(" in ENEMY
+    and "hiddenCache or { Available = false, Parts = {} }" in ENEMY
+    and "targetName" in ENEMY
     and "self.IgnoredSpawns[spawnPart]" in ENEMY,
     "stale and ignored spawn markers must not be selected",
 )
