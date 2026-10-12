@@ -28,8 +28,8 @@ require(
     "farm work must yield at a bounded 10 Hz cadence instead of running every rendered frame",
 )
 require(
-    "NPC_SCAN_INTERVAL = 0.75" in MAIN and "SPAWN_SCAN_INTERVAL = 1" in MAIN,
-    "full enemy and spawn searches must not repeat multiple times per second",
+    "NPC_SCAN_INTERVAL = 0.15" in MAIN and "SPAWN_SCAN_INTERVAL = 1" in MAIN,
+    "indexed target lookups should respond quickly while spawn discovery stays throttled",
 )
 
 enemy_index = function_body(
@@ -106,6 +106,53 @@ require(
     < restore_collision.index("for part, originalCanCollide in pairs(targetParts)")
     < restore_collision.index("self.CollisionPartsByTarget[target] = nil"),
     "clearing a defeated target must discard its collision records without iterating or rewriting corpse parts",
+)
+
+collision_part = function_body(
+    MOVEMENT,
+    "function MovementService:_ApplyFarmCollisionPart(",
+    "\nfunction MovementService:_ApplyFarmCollision()",
+)
+collision_setup = function_body(
+    MOVEMENT,
+    "function MovementService:SetFarmCollisionSuppression(",
+    "\nfunction MovementService:_Finish(",
+)
+collision_apply = function_body(
+    MOVEMENT,
+    "function MovementService:_ApplyFarmCollision()",
+    "\nfunction MovementService:SetFarmCollisionSuppression(",
+)
+hold_position = function_body(
+    MOVEMENT,
+    "function MovementService:HoldPosition(",
+    "\nfunction MovementService:_RequestRoute(",
+)
+move_to = function_body(
+    MOVEMENT,
+    "function MovementService:MoveTo(",
+    "\nreturn MovementService",
+)
+require(
+    "GetPropertyChangedSignal(\"CanCollide\")" in collision_part
+    and "part.CanCollide = false" in collision_part
+    and "DescendantAdded:Connect" in collision_apply
+    and "Heartbeat:Connect" not in collision_setup,
+    "farm noclip must use property/hierarchy events instead of a per-frame character scan",
+)
+require(
+    "active.Goal = root.CFrame" in hold_position
+    and "HoldingForSearch = true" in hold_position
+    and "CustomHubFarmHoldForce" in hold_position
+    and "function MainFarm:_HoldPosition(session)" in MAIN,
+    "target-search gaps must hold the current airborne position until movement resumes",
+)
+require(
+    "and not active.HoldingForSearch" in move_to
+    and "active.HoldingForSearch = false" in move_to
+    and "root.CFrame = CFrame.new(nextPosition)" in move_to
+    and "PathfindingService" not in move_to,
+    "farm travel must resume from a search hold and keep the existing direct noclip movement path",
 )
 
 find_spawn = function_body(ENEMY, "function EnemyService:FindSpawn", "\nfunction EnemyService:IsSpawnAvailable")

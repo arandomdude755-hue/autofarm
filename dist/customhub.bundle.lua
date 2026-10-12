@@ -4346,7 +4346,6 @@ local TIKI_STAGING = CFrame.new(
     -1.37611875E-34,
     -0.929097056
 )
-
 local function disconnect(connection)
     if connection then
         pcall(function()
@@ -4373,6 +4372,7 @@ function MovementService.new(compatibility, report)
         FarmCollisionOriginals = {},
         FarmCollisionPartConnections = {},
         FarmCollisionErrorReported = false,
+        HoldForce = nil,
     }, MovementService)
 end
 
@@ -4575,9 +4575,67 @@ function MovementService:_StopMovement()
     end
 end
 
+function MovementService:_DestroyHoldForce()
+    if self.HoldForce and self.HoldForce.Parent then
+        self.HoldForce:Destroy()
+    end
+    self.HoldForce = nil
+end
+
 function MovementService:Cancel()
     self.RouteGeneration += 1
     self:_StopMovement()
+    self:_DestroyHoldForce()
+end
+
+function MovementService:HoldPosition(isCurrent)
+    local character, humanoid, root = self.Compatibility:GetCharacterParts()
+    if not character or not humanoid or not root then
+        return false, "Character is unavailable"
+    end
+    isCurrent = isCurrent or function()
+        return true
+    end
+    if not isCurrent() then
+        return false, "Farm session is no longer current"
+    end
+
+    local active = self.Active
+    if active
+        and active.Character == character
+        and active.KeepSession
+        and active.IsCurrent()
+    then
+        if active.HoldingForSearch then
+            return true, "already holding"
+        end
+        active.Goal = root.CFrame
+        active.Threshold = 1
+        active.Speed = 0
+        active.Holding = false
+        active.HoldingForSearch = true
+        active.BestDistance = 0
+        active.LastProgressAt = os.clock()
+        return true, "holding current position"
+    end
+
+    if active then
+        self:_StopMovement()
+    end
+    if self.HoldForce and self.HoldForce.Parent ~= root then
+        self:_DestroyHoldForce()
+    end
+    if not self.HoldForce then
+        local holdForce = Instance.new("BodyVelocity")
+        holdForce.Name = "CustomHubFarmHoldForce"
+        holdForce.Velocity = Vector3.zero
+        holdForce.MaxForce = Vector3.new(100000, 100000, 100000)
+        holdForce.P = 10000
+        holdForce.Parent = root
+        self.HoldForce = holdForce
+    end
+    self.HoldForce.Velocity = Vector3.zero
+    return true, "holding current position"
 end
 
 function MovementService:_RequestRoute(route, isCurrent, routeGeneration)
@@ -4658,6 +4716,7 @@ function MovementService:MoveTo(destination, options)
     if active
         and active.Character == character
         and active.RouteName == (route and route.Name)
+        and not active.HoldingForSearch
         and (active.Goal.Position - goal.Position).Magnitude <= 12
     then
         return true, "already moving"
@@ -4671,13 +4730,19 @@ function MovementService:MoveTo(destination, options)
         and not route
         and active.IsCurrent()
     then
+        local previousGoal = active.Goal.Position
+        local destinationShift = (previousGoal - goal.Position).Magnitude
+        local wasHolding = active.Holding or active.HoldingForSearch
         active.Goal = goal
         active.Threshold = threshold
         active.Speed = tonumber(options.Speed) or active.Speed
         active.IsCurrent = isCurrent
         active.Holding = false
-        active.BestDistance = (goal.Position - root.Position).Magnitude
-        active.LastProgressAt = os.clock()
+        active.HoldingForSearch = false
+        if wasHolding or destinationShift > 12 then
+            active.BestDistance = (goal.Position - root.Position).Magnitude
+            active.LastProgressAt = os.clock()
+        end
         if active.BestDistance <= threshold then
             root.CFrame = destination
             root.AssemblyLinearVelocity = Vector3.zero
@@ -4701,6 +4766,7 @@ function MovementService:MoveTo(destination, options)
         return true, "arrived"
     end
 
+    self:_DestroyHoldForce()
     self.Generation += 1
     self.TagGeneration += 1
     local generation = self.Generation
@@ -4749,6 +4815,7 @@ function MovementService:MoveTo(destination, options)
         HasTeleportTag = self.OwnsTeleportTag,
         KeepSession = options.KeepSession == true and route == nil,
         Holding = false,
+        HoldingForSearch = false,
         BestDistance = (goal.Position - root.Position).Magnitude,
         LastProgressAt = os.clock(),
     }
@@ -4774,6 +4841,15 @@ function MovementService:MoveTo(destination, options)
 
         local goalNow = active.Goal
         local thresholdNow = active.Threshold
+        if active.HoldingForSearch then
+            root.CFrame = goalNow
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            active.Holding = true
+            active.BestDistance = 0
+            active.LastProgressAt = os.clock()
+            return
+        end
         local offset = goalNow.Position - root.Position
         local distance = offset.Magnitude
         if distance <= thresholdNow then
@@ -4799,6 +4875,7 @@ function MovementService:MoveTo(destination, options)
         elseif os.clock() - active.LastProgressAt > 2.5 then
             self.LastStallAt = os.clock()
             self:_Finish(active, true)
+            self:HoldPosition(active.IsCurrent)
             self.Report("Movement stalled; cancelling this attempt before retry", "warning")
             return
         end
@@ -5111,7 +5188,7 @@ local QUEST_DIALOGUE_MAX_RETREAT_DISTANCE = 80
 local QUEST_DIALOGUE_MOVE_RETRY_INTERVAL = 0.5
 local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
 local FARM_STEP_INTERVAL = 0.1
-local NPC_SCAN_INTERVAL = 0.75
+local NPC_SCAN_INTERVAL = 0.15
 local SPAWN_SCAN_INTERVAL = 1
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
@@ -5537,6 +5614,15 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession)
     })
 end
 
+function MainFarm:_HoldPosition(session)
+    if not self.MovementService then
+        return false, "Movement service is unavailable"
+    end
+    return self.MovementService:HoldPosition(function()
+        return self:_IsCurrent(session)
+    end)
+end
+
 function MainFarm:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)
     local key = questKey(candidate)
     local recovery = self.QuestDialogueRecovery
@@ -5832,10 +5918,10 @@ function MainFarm:_StepAura(session, root)
         if targetRoot and (targetRoot.Position - root.Position).Magnitude <= radius then
             target = self.Target
         else
-            self:_ClearTarget()
+            self:_ClearTarget(true)
         end
     elseif self.Target or self.TargetName then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
     end
 
     if not target and now >= (self.NextEnemySearchAt or 0) then
@@ -5844,6 +5930,7 @@ function MainFarm:_StepAura(session, root)
     end
 
     if not target then
+        self:_HoldPosition(session)
         self:_SetStatus(
             "Aura Farm waiting: no living enemy within " .. tostring(radius) .. " studs",
             "warning"
@@ -6018,7 +6105,7 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
             end
         end
     else
-        self:_ClearTarget()
+        self:_ClearTarget(true)
         self:_SetStatus("Mode target died or became invalid; reacquiring", "info")
     end
 end
@@ -6141,7 +6228,7 @@ function MainFarm:_StepBossEventMode(
         return
     end
     if self.Target then
-        self:_ClearTarget()
+        self:_ClearTarget(true)
     end
 
     if self.SpawnCandidate and not self.EnemyService:IsSpawnAvailable(
@@ -6212,6 +6299,7 @@ function MainFarm:_StepBossEventMode(
     end
 
     if self.ModeSpawnMarkersExhausted then
+        self:_HoldPosition(session)
         self.EnemyService:ClearIgnoredSpawns()
         self.SpawnCandidate = nil
         self.SpawnCandidateTargetName = nil
@@ -6225,11 +6313,12 @@ function MainFarm:_StepBossEventMode(
     if self.SpawnCandidateDiagnostic
         and self.SpawnCandidateDiagnostic.HiddenDiscoveryLoading
     then
+        self:_HoldPosition(session)
         self:_SetStatus("Checking hidden spawn markers in the background", "info")
         return
     end
 
-    self.MovementService:Cancel()
+    self:_HoldPosition(session)
     local limitation = profile.EventPhaseNotMigrated
         and "; the BNN-specific Eye/Tree activation phase is not migrated"
         or ""
@@ -6462,6 +6551,7 @@ function MainFarm:_Step(session)
             self.TargetName = activeTarget
         end
         if self.SpawnSearchExhausted then
+            self:_HoldPosition(session)
             self:_SetStatus(
                 "No living " .. activeTarget
                     .. " was found after two spawn cycles; continuing throttled scans of loaded NPCs",
@@ -6470,6 +6560,7 @@ function MainFarm:_Step(session)
             return
         end
         if self.SpawnRetryAt and now < self.SpawnRetryAt then
+            self:_HoldPosition(session)
             self:_SetStatus(
                 "No living " .. activeTarget .. " after checking known spawns; retrying shortly",
                 "warning"
@@ -6509,6 +6600,7 @@ function MainFarm:_Step(session)
                     "A matching enemy spawn marker is stale or ignored; rescanning",
                     "warning"
                 )
+                self:_HoldPosition(session)
                 return
             end
             local spawnDestination = spawnPart.CFrame * CFrame.new(0, 60, 0)
@@ -6602,6 +6694,9 @@ function MainFarm:_Step(session)
                     "warning"
                 )
             end
+        end
+        if not spawnPart then
+            self:_HoldPosition(session)
         end
         return
     end

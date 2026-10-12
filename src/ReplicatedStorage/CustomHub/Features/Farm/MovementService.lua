@@ -30,7 +30,6 @@ local TIKI_STAGING = CFrame.new(
     -1.37611875E-34,
     -0.929097056
 )
-
 local function disconnect(connection)
     if connection then
         pcall(function()
@@ -57,6 +56,7 @@ function MovementService.new(compatibility, report)
         FarmCollisionOriginals = {},
         FarmCollisionPartConnections = {},
         FarmCollisionErrorReported = false,
+        HoldForce = nil,
     }, MovementService)
 end
 
@@ -259,9 +259,67 @@ function MovementService:_StopMovement()
     end
 end
 
+function MovementService:_DestroyHoldForce()
+    if self.HoldForce and self.HoldForce.Parent then
+        self.HoldForce:Destroy()
+    end
+    self.HoldForce = nil
+end
+
 function MovementService:Cancel()
     self.RouteGeneration += 1
     self:_StopMovement()
+    self:_DestroyHoldForce()
+end
+
+function MovementService:HoldPosition(isCurrent)
+    local character, humanoid, root = self.Compatibility:GetCharacterParts()
+    if not character or not humanoid or not root then
+        return false, "Character is unavailable"
+    end
+    isCurrent = isCurrent or function()
+        return true
+    end
+    if not isCurrent() then
+        return false, "Farm session is no longer current"
+    end
+
+    local active = self.Active
+    if active
+        and active.Character == character
+        and active.KeepSession
+        and active.IsCurrent()
+    then
+        if active.HoldingForSearch then
+            return true, "already holding"
+        end
+        active.Goal = root.CFrame
+        active.Threshold = 1
+        active.Speed = 0
+        active.Holding = false
+        active.HoldingForSearch = true
+        active.BestDistance = 0
+        active.LastProgressAt = os.clock()
+        return true, "holding current position"
+    end
+
+    if active then
+        self:_StopMovement()
+    end
+    if self.HoldForce and self.HoldForce.Parent ~= root then
+        self:_DestroyHoldForce()
+    end
+    if not self.HoldForce then
+        local holdForce = Instance.new("BodyVelocity")
+        holdForce.Name = "CustomHubFarmHoldForce"
+        holdForce.Velocity = Vector3.zero
+        holdForce.MaxForce = Vector3.new(100000, 100000, 100000)
+        holdForce.P = 10000
+        holdForce.Parent = root
+        self.HoldForce = holdForce
+    end
+    self.HoldForce.Velocity = Vector3.zero
+    return true, "holding current position"
 end
 
 function MovementService:_RequestRoute(route, isCurrent, routeGeneration)
@@ -342,6 +400,7 @@ function MovementService:MoveTo(destination, options)
     if active
         and active.Character == character
         and active.RouteName == (route and route.Name)
+        and not active.HoldingForSearch
         and (active.Goal.Position - goal.Position).Magnitude <= 12
     then
         return true, "already moving"
@@ -355,13 +414,19 @@ function MovementService:MoveTo(destination, options)
         and not route
         and active.IsCurrent()
     then
+        local previousGoal = active.Goal.Position
+        local destinationShift = (previousGoal - goal.Position).Magnitude
+        local wasHolding = active.Holding or active.HoldingForSearch
         active.Goal = goal
         active.Threshold = threshold
         active.Speed = tonumber(options.Speed) or active.Speed
         active.IsCurrent = isCurrent
         active.Holding = false
-        active.BestDistance = (goal.Position - root.Position).Magnitude
-        active.LastProgressAt = os.clock()
+        active.HoldingForSearch = false
+        if wasHolding or destinationShift > 12 then
+            active.BestDistance = (goal.Position - root.Position).Magnitude
+            active.LastProgressAt = os.clock()
+        end
         if active.BestDistance <= threshold then
             root.CFrame = destination
             root.AssemblyLinearVelocity = Vector3.zero
@@ -385,6 +450,7 @@ function MovementService:MoveTo(destination, options)
         return true, "arrived"
     end
 
+    self:_DestroyHoldForce()
     self.Generation += 1
     self.TagGeneration += 1
     local generation = self.Generation
@@ -433,6 +499,7 @@ function MovementService:MoveTo(destination, options)
         HasTeleportTag = self.OwnsTeleportTag,
         KeepSession = options.KeepSession == true and route == nil,
         Holding = false,
+        HoldingForSearch = false,
         BestDistance = (goal.Position - root.Position).Magnitude,
         LastProgressAt = os.clock(),
     }
@@ -458,6 +525,15 @@ function MovementService:MoveTo(destination, options)
 
         local goalNow = active.Goal
         local thresholdNow = active.Threshold
+        if active.HoldingForSearch then
+            root.CFrame = goalNow
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            active.Holding = true
+            active.BestDistance = 0
+            active.LastProgressAt = os.clock()
+            return
+        end
         local offset = goalNow.Position - root.Position
         local distance = offset.Magnitude
         if distance <= thresholdNow then
@@ -483,6 +559,7 @@ function MovementService:MoveTo(destination, options)
         elseif os.clock() - active.LastProgressAt > 2.5 then
             self.LastStallAt = os.clock()
             self:_Finish(active, true)
+            self:HoldPosition(active.IsCurrent)
             self.Report("Movement stalled; cancelling this attempt before retry", "warning")
             return
         end
