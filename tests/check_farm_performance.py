@@ -109,6 +109,11 @@ require(
 )
 
 find_spawn = function_body(ENEMY, "function EnemyService:FindSpawn", "\nfunction EnemyService:IsSpawnAvailable")
+refresh_hidden_spawns = function_body(
+    ENEMY,
+    "function EnemyService:_RefreshHiddenSpawnCache()",
+    "\nfunction EnemyService:_PruneIgnoredSpawns(",
+)
 require(
     "HIDDEN_SPAWN_REFRESH_INTERVAL = 5" in ENEMY
     and "HIDDEN_SPAWN_RETRY_INTERVAL = 10" in ENEMY
@@ -116,6 +121,16 @@ require(
     < find_spawn.index("self:_RefreshHiddenSpawnCache()")
     and "hiddenCache.ByName[normalizedName]" in find_spawn,
     "expensive hidden-instance enumeration must be fallback-only, infrequent, and name-indexed",
+)
+require(
+    "task.defer(" in refresh_hidden_spawns
+    and "HIDDEN_SPAWN_SCAN_CHUNK_SIZE" in refresh_hidden_spawns
+    and "task.wait()" in refresh_hidden_spawns
+    and "cache.Loading = false" in refresh_hidden_spawns
+    and "not hiddenCache.Loading" in find_spawn
+    and "HiddenDiscoveryLoading" in find_spawn
+    and "Checking hidden spawn markers in the background" in MAIN,
+    "unparented-instance fallback must be asynchronous and chunked, never block target acquisition",
 )
 require(
     "SpawnMarkersByName[normalizedName]" in find_spawn

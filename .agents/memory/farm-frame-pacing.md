@@ -9,6 +9,8 @@ After that full-character scan was removed, in-game testing reported the overall
 
 Further testing isolated the remaining hitch to target acquisition: farming was smooth when a target was already available, but dropped frames while deciding which NPC to target. Name-target lookups and spawn-marker lookups should use normalized-name buckets rather than scanning every indexed model or marker per search.
 
-**Why:** repeated full-character hierarchy scans, collision writes at frame frequency, and global target/spawn candidate scans are avoidable frame-time work; restoring many corpse parts can also add physics work on each kill. The player reports BNN and Quantum did not show the same issue, so live testing is still needed to confirm fixes.
+The player tested the name-index optimization and reported that the hitch persisted. A separate unparented-instance fallback still enumerates a broad runtime list when normal NPC/spawn lookup has no result; move that fallback off the farm step and chunk it. Do not treat this change as confirmed until retested in-game.
 
-**How to apply:** when changing Main Farm movement, collision handling, or target acquisition, avoid full-tree per-frame work, preserve collision restoration across stop/respawn, skip property writes for dead targets, use indexed candidate subsets, and verify performance with an in-game test.
+**Why:** repeated full-character hierarchy scans, collision writes at frame frequency, global target/spawn candidate scans, and unparented-instance enumeration can all stall the client; restoring many corpse parts can also add physics work on each kill. Source checks cannot distinguish which path dominates on the player’s device.
+
+**How to apply:** when changing Main Farm movement, collision handling, or target acquisition, avoid full-tree per-frame work, preserve collision restoration across stop/respawn, skip property writes for dead targets, use indexed candidate subsets, keep broad fallback discovery off the farm step, and verify performance with an in-game test.

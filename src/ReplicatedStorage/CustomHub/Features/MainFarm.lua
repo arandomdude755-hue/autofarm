@@ -327,6 +327,7 @@ function MainFarm:_PrintSpawnDiagnosticReport(report)
             "Hidden unparented marker: " .. tostring(report.HiddenMarkerFound == true)
                 .. " (discovery_available="
                 .. tostring(report.HiddenDiscoveryAvailable == true)
+                .. ", loading=" .. tostring(report.HiddenDiscoveryLoading == true)
                 .. ", checked=" .. tostring(report.HiddenDiscoveryChecked == true) .. ")",
             "Selected candidate: " .. selected,
             "IsSpawnAvailable: " .. availability,
@@ -1125,6 +1126,13 @@ function MainFarm:_StepBossEventMode(
         return
     end
 
+    if self.SpawnCandidateDiagnostic
+        and self.SpawnCandidateDiagnostic.HiddenDiscoveryLoading
+    then
+        self:_SetStatus("Checking hidden spawn markers in the background", "info")
+        return
+    end
+
     self.MovementService:Cancel()
     local limitation = profile.EventPhaseNotMigrated
         and "; the BNN-specific Eye/Tree activation phase is not migrated"
@@ -1485,6 +1493,10 @@ function MainFarm:_Step(session)
                         "warning"
                     )
                 end
+            elseif spawnDiagnostic and spawnDiagnostic.HiddenDiscoveryLoading then
+                self.SpawnCandidate = nil
+                self.SpawnLoading = nil
+                self:_SetStatus("Checking hidden spawn markers in the background", "info")
             else
                 self.SpawnCandidate = nil
                 self.SpawnLoading = nil

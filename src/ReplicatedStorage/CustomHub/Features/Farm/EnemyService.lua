@@ -3,6 +3,7 @@ EnemyService.__index = EnemyService
 
 local HIDDEN_SPAWN_REFRESH_INTERVAL = 5
 local HIDDEN_SPAWN_RETRY_INTERVAL = 10
+local HIDDEN_SPAWN_SCAN_CHUNK_SIZE = 64
 
 local function disconnect(connection)
     if connection then
@@ -293,7 +294,7 @@ end
 function EnemyService:_RefreshHiddenSpawnCache()
     local now = os.clock()
     local current = self.HiddenSpawnCache
-    if current and now < current.ExpiresAt then
+    if current and (current.Loading or now < current.ExpiresAt) then
         return current
     end
 
@@ -301,43 +302,67 @@ function EnemyService:_RefreshHiddenSpawnCache()
         Parts = {},
         ByName = {},
         Available = false,
-        ExpiresAt = now + HIDDEN_SPAWN_RETRY_INTERVAL,
+        Loading = true,
+        ExpiresAt = math.huge,
     }
-    local getter = self.Compatibility and self.Compatibility.GetUnparentedInstances
-    if type(getter) == "function" then
-        local callOk, instances = pcall(getter, self.Compatibility)
-        if callOk and type(instances) == "table" then
-            cache.Available = true
-            cache.ExpiresAt = now + HIDDEN_SPAWN_REFRESH_INTERVAL
-            local scanOk = pcall(function()
-                for _, instance in pairs(instances) do
-                    local readOk, isBasePart, name, parent = pcall(function()
-                        return instance:IsA("BasePart"), instance.Name, instance.Parent
-                    end)
-                    if readOk and isBasePart and parent == nil and type(name) == "string" then
-                        cache.Parts[instance] = name
-                        local normalizedName = normalizeEnemyName(name)
-                        if normalizedName then
-                            local matches = cache.ByName[normalizedName]
-                            if not matches then
-                                matches = {}
-                                cache.ByName[normalizedName] = matches
-                            end
-                            table.insert(matches, instance)
-                        end
-                    end
-                end
-            end)
-            if not scanOk then
-                cache.Parts = {}
-                cache.ByName = {}
-                cache.Available = false
-                cache.ExpiresAt = now + HIDDEN_SPAWN_RETRY_INTERVAL
-            end
+    self.HiddenSpawnCache = cache
+
+    local function markUnavailable()
+        if self.HiddenSpawnCache == cache then
+            cache.Available = false
+            cache.Loading = false
+            cache.ExpiresAt = os.clock() + HIDDEN_SPAWN_RETRY_INTERVAL
         end
     end
 
-    self.HiddenSpawnCache = cache
+    task.defer(function()
+        local getter = self.Compatibility and self.Compatibility.GetUnparentedInstances
+        if type(getter) ~= "function" then
+            markUnavailable()
+            return
+        end
+
+        local callOk, instances = pcall(getter, self.Compatibility)
+        if not callOk or type(instances) ~= "table" or self.HiddenSpawnCache ~= cache then
+            markUnavailable()
+            return
+        end
+
+        cache.Available = true
+        local scanned = 0
+        for _, instance in pairs(instances) do
+            if self.HiddenSpawnCache ~= cache then
+                return
+            end
+
+            local readOk, isBasePart, name, parent = pcall(function()
+                return instance:IsA("BasePart"), instance.Name, instance.Parent
+            end)
+            if readOk and isBasePart and parent == nil and type(name) == "string" then
+                cache.Parts[instance] = name
+                local normalizedName = normalizeEnemyName(name)
+                if normalizedName then
+                    local matches = cache.ByName[normalizedName]
+                    if not matches then
+                        matches = {}
+                        cache.ByName[normalizedName] = matches
+                    end
+                    table.insert(matches, instance)
+                end
+            end
+
+            scanned += 1
+            if scanned % HIDDEN_SPAWN_SCAN_CHUNK_SIZE == 0 then
+                task.wait()
+            end
+        end
+
+        if self.HiddenSpawnCache == cache then
+            cache.Loading = false
+            cache.ExpiresAt = os.clock() + HIDDEN_SPAWN_REFRESH_INTERVAL
+        end
+    end)
+
     return cache
 end
 
@@ -450,13 +475,15 @@ function EnemyService:FindSpawn(targetName, origin)
     local _, enemySpawns = self:_GetSpawnMarkerIndex()
     local now = os.clock()
     local hiddenCache = self.HiddenSpawnCache
-    if hiddenCache and now >= hiddenCache.ExpiresAt then
+    if hiddenCache and not hiddenCache.Loading and now >= hiddenCache.ExpiresAt then
         hiddenCache = nil
     end
     diagnostic.EnemySpawnsContainerFound = enemySpawns ~= nil
     diagnostic.HiddenDiscoveryChecked = hiddenCache ~= nil
     diagnostic.HiddenDiscoveryAvailable = hiddenCache ~= nil
         and hiddenCache.Available == true
+    diagnostic.HiddenDiscoveryLoading = hiddenCache ~= nil
+        and hiddenCache.Loading == true
     self:_PruneIgnoredSpawns(
         enemySpawns,
         hiddenCache or { Available = false, Parts = {} },
@@ -522,9 +549,14 @@ function EnemyService:FindSpawn(targetName, origin)
         hiddenCache = self:_RefreshHiddenSpawnCache()
         diagnostic.HiddenDiscoveryChecked = true
         diagnostic.HiddenDiscoveryAvailable = hiddenCache.Available == true
+        diagnostic.HiddenDiscoveryLoading = hiddenCache.Loading == true
     end
 
-    if hiddenCache and hiddenCache.Available and os.clock() < hiddenCache.ExpiresAt then
+    if hiddenCache
+        and hiddenCache.Available
+        and not hiddenCache.Loading
+        and os.clock() < hiddenCache.ExpiresAt
+    then
         local seenHidden = {}
         for _, normalizedName in ipairs(normalizedTarget) do
             for _, spawnPart in ipairs(hiddenCache.ByName[normalizedName] or {}) do
