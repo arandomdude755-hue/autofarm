@@ -136,6 +136,11 @@ local Config = {
                     Action = "farm.main",
                 },
                 {
+                    Kind = "button",
+                    Label = "Copy status report",
+                    Action = "farm.status.copy",
+                },
+                {
                     Kind = "settingSelect",
                     Label = "Weapon category",
                     Action = "farm.weaponCategory.select",
@@ -3560,6 +3565,38 @@ local function questDataSummary(label, snapshot)
     )
 end
 
+local function diagnosticSeaName(compatibility)
+    local workspace = compatibility and compatibility.Workspace
+    local mapReadOk, mapName = pcall(function()
+        return workspace and workspace:GetAttribute("MAP")
+    end)
+    if mapReadOk then
+        if mapName == "Sea1" then
+            return "First Sea"
+        elseif mapName == "Sea2" then
+            return "Second Sea"
+        elseif mapName == "Sea3" then
+            return "Third Sea"
+        end
+    end
+    if not compatibility then
+        return "Unknown"
+    end
+    if type(compatibility.IsFirstSea) == "function" then
+        local ok, isFirstSea = pcall(compatibility.IsFirstSea, compatibility)
+        if ok and isFirstSea then
+            return "First Sea"
+        end
+    end
+    if type(compatibility.IsThirdSea) == "function" then
+        local ok, isThirdSea = pcall(compatibility.IsThirdSea, compatibility)
+        if ok and isThirdSea then
+            return "Third Sea"
+        end
+    end
+    return "Unknown"
+end
+
 function MainFarm:_SetStatus(message, kind)
     local now = os.clock()
     if self.LastStatus == message and now - (self.LastStatusAt or 0) < 1.5 then
@@ -3682,6 +3719,7 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
 
         local lines = {
             "===== [QuestDiagnostic] REPORT BEGIN =====",
+            "Sea: " .. diagnosticSeaName(self.Context and self.Context.Compatibility),
             "Candidate: quest=" .. tostring(report.CandidateQuestName)
                 .. " id=" .. tostring(report.CandidateQuestId),
             "StartQuest: pcall_succeeded=" .. pcallOutcome
@@ -3704,6 +3742,7 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
                 .. "\n...[truncated]" .. endMarker
         end
 
+        self.LastQuestDiagnosticReportText = text
         local copied = false
         local clipboardCallOk = pcall(function()
             if type(setclipboard) == "function" then
@@ -3717,6 +3756,29 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
             print(text)
         end
     end)
+end
+
+function MainFarm:CopyStatusReport()
+    local text = self.LastQuestDiagnosticReportText
+    if type(text) ~= "string" or text == "" then
+        self:_SetStatus("No completed quest status report is available yet.", "warning")
+        return true
+    end
+
+    local copied = false
+    local clipboardCallOk = pcall(function()
+        if type(setclipboard) == "function" then
+            setclipboard(text)
+            copied = true
+        end
+    end)
+    if clipboardCallOk and copied then
+        self:_SetStatus("Complete quest status report copied to clipboard.", "success")
+    else
+        print(text)
+        self:_SetStatus("Clipboard unavailable; complete report printed to output.", "warning")
+    end
+    return true
 end
 
 function MainFarm:_PrintSpawnDiagnosticReport(report)
@@ -3929,6 +3991,7 @@ function MainFarm:_RequestQuest(candidate, session)
         self.QuestStartAttemptCount = 0
         self.QuestDiagnosticWaitKey = key
         self.QuestDiagnosticWaitStartedAt = now
+        self.LastQuestDiagnosticReportText = nil
         self.QuestDiagnosticReport = {
             CandidateQuestName = diagnosticScalar(candidate.QuestName),
             CandidateQuestId = diagnosticScalar(candidate.Id),
@@ -4555,6 +4618,9 @@ function MainFarm:Stop()
 end
 
 function MainFarm:Handle(actionId, payload)
+    if actionId == "farm.status.copy" then
+        return self:CopyStatusReport()
+    end
     if actionId ~= "farm.main" then
         return false
     end

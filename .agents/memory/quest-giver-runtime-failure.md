@@ -9,6 +9,8 @@ The user now reports the spawn-target issue seems fixed. Keep spawn tracking out
 
 Live diagnostics showed `PlayerGui.Main` disabled and its `Dialogue` ImageLabel hidden. The actual open quest-giver UI is under `PlayerGui.DialogueGui`; its visible title reads `Quest Giver`. Use that generic title as a request opportunity, never as proof of acceptance.
 
-**Why:** the user's in-game diagnostic proved the older `Main.Dialogue` path is a hidden placeholder while a separate dialogue UI is visible.
+The user also observes different quest-status wording for the same situation across the three seas. Reports should identify the sea and preserve reader evidence so those differences can be compared.
 
-**How to apply:** keep quest acceptance, active-quest detection, and enemy/spawn discovery as separate paths. Do not regress the validated First Sea target matching or reopen spawn discovery for the dialogue failure. Use the visible `DialogueGui` quest-giver title only to permit a bounded request; retain validated acceptance checks. Avoid repeated section/control descriptions and keep the UI rows compact.
+**Why:** in-game diagnostics show that the old `Main.Dialogue` path is a hidden placeholder while a separate dialogue UI is visible; the user also needs sea-specific status differences to remain attributable.
+
+**How to apply:** keep quest acceptance, active-quest detection, and enemy/spawn discovery as separate paths. Do not regress the validated First Sea target matching or reopen spawn discovery for the dialogue failure. Use the visible `DialogueGui` quest-giver title only to permit a bounded request; retain validated acceptance checks. Include sea and reader evidence in reports rather than normalizing away sea-specific paths. Avoid repeated section/control descriptions and keep the UI rows compact.

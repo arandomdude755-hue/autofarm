@@ -107,6 +107,11 @@ local Config = {
                     Action = "farm.main",
                 },
                 {
+                    Kind = "button",
+                    Label = "Copy status report",
+                    Action = "farm.status.copy",
+                },
+                {
                     Kind = "settingSelect",
                     Label = "Weapon category",
                     Action = "farm.weaponCategory.select",

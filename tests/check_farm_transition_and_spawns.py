@@ -53,6 +53,17 @@ require("response is not acceptance" in request,
 require("activeTarget == self.PendingQuestTargetName" in step,
         "confirmation must match the active target selected for this request")
 
+quest_report = FARM[
+    FARM.index("function MainFarm:_PrintQuestDiagnosticReport"):
+    FARM.index("function MainFarm:_PrintSpawnDiagnosticReport")
+]
+require(
+    '"Sea: " .. diagnosticSeaName(self.Context and self.Context.Compatibility)' in quest_report
+    and "self.LastQuestDiagnosticReportText = text" in quest_report
+    and "self.LastQuestDiagnosticReportText = nil" in request,
+    "the latest complete report must include its sea and replace stale reports for a new attempt",
+)
+
 require("function MainFarm:_ClearTarget(preserveMovement)" in FARM,
         "normal target cleanup needs a movement-preserving option")
 require("if self.MovementService and not preserveMovement then" in FARM,

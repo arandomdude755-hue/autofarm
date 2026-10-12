@@ -30,6 +30,12 @@ require('Label = "Auto Farm Level"' in farm_config,
         "Farm toggle must be labelled Auto Farm Level")
 require('Action = "farm.main"' in farm_config,
         "Farm toggle must use MainFarm's registered action")
+require(
+    'Kind = "button"' in farm_config
+    and 'Label = "Copy status report"' in farm_config
+    and 'Action = "farm.status.copy"' in farm_config,
+    "Farm page must expose a button for copying the complete status report",
+)
 require('Kind = "settingSelect"' in farm_config
         and 'Action = "farm.weaponCategory.select"' in farm_config
         and 'Setting = "WeaponCategory"' in farm_config
@@ -76,6 +82,19 @@ require("for _, featureModule in ipairs(self.Modules) do" in dispatch
 handle = function_body(MAIN_FARM, "function MainFarm:Handle", "\nfunction MainFarm:Cleanup")
 require('if actionId ~= "farm.main" then' in handle,
         "MainFarm must handle the Farm page's configured action")
+require('if actionId == "farm.status.copy" then' in handle
+        and "self:CopyStatusReport()" in handle,
+        "the copy-report action must not toggle or restart Main Farm")
+copy_report = function_body(
+    MAIN_FARM,
+    "function MainFarm:CopyStatusReport",
+    "\nfunction MainFarm:_PrintSpawnDiagnosticReport",
+)
+require("self.LastQuestDiagnosticReportText" in copy_report
+        and "setclipboard(text)" in copy_report
+        and "Complete quest status report copied to clipboard." in copy_report
+        and "complete report printed to output" in copy_report,
+        "the copy action must reuse the complete cached report and handle clipboard unavailability")
 require("self:Start()" in handle and "self:Stop()" in handle,
         "The Main Farm toggle must start and stop the existing MainFarm instance")
 start = function_body(MAIN_FARM, "function MainFarm:Start()", "\nfunction MainFarm:Stop")
