@@ -79,10 +79,27 @@ restore_collision = function_body(
     "function EnemyService:RestoreTargetCollision",
     "\nreturn EnemyService",
 )
+clear_target = function_body(
+    MAIN,
+    "function MainFarm:_ClearTarget(",
+    "\nfunction MainFarm:_ResetSpawnSearch(",
+)
 require(
     prepare_target.index("self.PreparedTargets[model]") < prepare_target.index("model:GetDescendants()")
     and "table.clear(self.PreparedTargets)" in restore_collision,
     "target collision preparation must not rescan the same model every farm step",
+)
+require(
+    "CollisionPartsByTarget" in prepare_target
+    and "RestoreTargetCollision(self.Target)" in clear_target
+    and "humanoid.Health <= 0" in restore_collision
+    and "if shouldRestore then" in restore_collision
+    and "part.CanCollide ~= originalCanCollide" in restore_collision
+    and "self.CollisionPartsByTarget[target] = nil" in restore_collision
+    and restore_collision.index("if shouldRestore then")
+    < restore_collision.index("for part, originalCanCollide in pairs(targetParts)")
+    < restore_collision.index("self.CollisionPartsByTarget[target] = nil"),
+    "clearing a defeated target must discard its collision records without iterating or rewriting corpse parts",
 )
 
 find_spawn = function_body(ENEMY, "function EnemyService:FindSpawn", "\nfunction EnemyService:IsSpawnAvailable")

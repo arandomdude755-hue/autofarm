@@ -135,7 +135,7 @@ function EnemyService.new(compatibility)
     return setmetatable({
         Compatibility = compatibility,
         Workspace = compatibility.Workspace,
-        CollisionOriginals = {},
+        CollisionPartsByTarget = setmetatable({}, { __mode = "k" }),
         IgnoredSpawns = {},
         HiddenSpawnCache = nil,
         PreparedTargets = setmetatable({}, { __mode = "k" }),
@@ -544,23 +544,52 @@ function EnemyService:PrepareTarget(model, playerRoot)
     if self.PreparedTargets[model] then
         return
     end
+    local targetParts = {}
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then
-            self.CollisionOriginals[part] = true
+            targetParts[part] = part.CanCollide
             part.CanCollide = false
         end
     end
+    self.CollisionPartsByTarget[model] = targetParts
     self.PreparedTargets[model] = true
 end
 
-function EnemyService:RestoreTargetCollision()
-    for part, originalCanCollide in pairs(self.CollisionOriginals) do
-        if part and part.Parent then
-            part.CanCollide = originalCanCollide
+function EnemyService:RestoreTargetCollision(target)
+    if target then
+        local targetParts = self.CollisionPartsByTarget[target]
+        if targetParts then
+            local shouldRestore = target.Parent ~= nil
+            if shouldRestore then
+                local humanoid = target:FindFirstChildWhichIsA("Humanoid")
+                if humanoid and humanoid.Health <= 0 then
+                    shouldRestore = false
+                end
+            end
+
+            if shouldRestore then
+                for part, originalCanCollide in pairs(targetParts) do
+                    if part.Parent and part.CanCollide ~= originalCanCollide then
+                        part.CanCollide = originalCanCollide
+                    end
+                end
+            end
         end
-        self.CollisionOriginals[part] = nil
+        self.CollisionPartsByTarget[target] = nil
+        self.PreparedTargets[target] = nil
+        return
+    end
+
+    for targetModel, targetParts in pairs(self.CollisionPartsByTarget) do
+        for part, originalCanCollide in pairs(targetParts) do
+            if part.Parent and part.CanCollide ~= originalCanCollide then
+                part.CanCollide = originalCanCollide
+            end
+        end
+        self.CollisionPartsByTarget[targetModel] = nil
     end
     table.clear(self.PreparedTargets)
+    table.clear(self.CollisionPartsByTarget)
 end
 
 return EnemyService

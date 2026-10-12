@@ -546,7 +546,7 @@ function MainFarm:_ClearTarget(preserveMovement)
     local hadTarget = self.Target ~= nil or self.TargetName ~= nil
     if hadTarget then
         if self.EnemyService then
-            self.EnemyService:RestoreTargetCollision()
+            self.EnemyService:RestoreTargetCollision(self.Target)
         end
         if self.MovementService and not preserveMovement then
             self.MovementService:Cancel()
