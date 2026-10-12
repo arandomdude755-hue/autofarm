@@ -15,6 +15,12 @@ When no selected Mastery skill is ready or its controls fail to load, do not sup
 
 **How to apply:** preserve the normal skill-ready path, but ensure cooldown, missing-UI, and activation-failure paths still attack with the selected Mastery category and expose failures through status.
 
+Do not label the M1 fallback's rate-limit window as "waiting for a ready skill." Preserve and report the last actual M1 result separately from skill readiness.
+
+**Why:** the user saw a skill-readiness message that was actually caused by the M1 fallback throttle, hiding whether the gun was reloading or activation had merely been requested.
+
+**How to apply:** when the fallback is rate-limited, report its prior result and the skill-key state distinctly; never treat Tool:Activate success as confirmation of damage.
+
 Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary and target-scoped through the game's Mouse module, verify that the aim assignment works before sending a key, and release the key on cancellation.
 
 **Why:** the user sees no value in configuring skills used only for the Tiki puzzle and requested that it use any available skill automatically. They approved normal farming skill settings separately. The user did not approve purchases or server hopping. BNN also relies on executor-specific persistence and remote-interception APIs that are not portable or safely scoped.

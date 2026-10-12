@@ -119,6 +119,10 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
         return nil, "PlayerGui.Main.Skills is unavailable"
     end
 
+    local selectedKeyCount = 0
+    local checkedToolCount = 0
+    local missingToolCategory
+    local ignoredToolName
     local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
         if category.Name == preferredCategory then
@@ -136,7 +140,16 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
                     table.insert(selectedKeys, keyName)
                 end
             end
-            if tool and #selectedKeys > 0 and not (ignoredTools and ignoredTools[tool.Name]) then
+            selectedKeyCount += #selectedKeys
+            if #selectedKeys > 0 and not tool then
+                missingToolCategory = missingToolCategory or category.Name
+            elseif tool and #selectedKeys > 0
+                and ignoredTools
+                and ignoredTools[tool.Name]
+            then
+                ignoredToolName = ignoredToolName or tool.Name
+            elseif tool and #selectedKeys > 0 then
+                checkedToolCount += 1
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
                     local equipped, equipResult = self:EquipTool(tool)
@@ -172,7 +185,16 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
             end
         end
     end
-    return nil, "No selected skill is currently ready"
+    if selectedKeyCount == 0 then
+        return nil, "No selected skill keys are enabled"
+    end
+    if checkedToolCount == 0 and ignoredToolName then
+        return nil, "Skill controls are temporarily unavailable for " .. ignoredToolName
+    end
+    if checkedToolCount == 0 and missingToolCategory then
+        return nil, "No owned " .. missingToolCategory .. " skill weapon is available"
+    end
+    return nil, "All selected skill keys are on cooldown"
 end
 
 function CombatService:FindReadyFarmSkill(farmSettings, preferredCategory, ignoredTools, onlyCategory)
@@ -422,9 +444,20 @@ function CombatService:AttackGunM1(target)
     local activationOk, activationError = pcall(function()
         tool:Activate()
     end)
+    local aimWaitOk, aimWaitError = pcall(function()
+        local runService = self.Compatibility.RunService
+        if runService and runService.Heartbeat then
+            runService.Heartbeat:Wait()
+        else
+            task.wait()
+        end
+    end)
     self:_RestoreTemporaryAim(aimContext)
     if not activationOk then
         return false, "Gun Tool:Activate failed: " .. tostring(activationError)
+    end
+    if not aimWaitOk then
+        return false, "Gun aim release wait failed: " .. tostring(aimWaitError)
     end
     self.NextGunM1At = now + getGunCooldown()
     return true, "Gun Tool:Activate request issued; server damage is not confirmed"

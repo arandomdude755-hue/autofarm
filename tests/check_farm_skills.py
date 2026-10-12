@@ -93,6 +93,8 @@ require(
     and "ignoredTools" in ready_skill
     and "onlyCategory" in ready_skill
     and "category.Name == onlyCategory" in ready_skill
+    and "No selected skill keys are enabled" in ready_skill
+    and "All selected skill keys are on cooldown" in ready_skill
     and "GetDescendants" not in ready_skill,
     "Skill lookup must use the live skill UI, skip transformations and unavailable tools, and stay bounded",
 )
@@ -126,6 +128,9 @@ require(
     and "NextGunM1At" in gun_m1
     and "self:_SetTemporaryAim(target)" in gun_m1
     and "tool:Activate()" in gun_m1
+    and "Heartbeat:Wait()" in gun_m1
+    and gun_m1.index("tool:Activate()") < gun_m1.index("Heartbeat:Wait()")
+    and gun_m1.index("Heartbeat:Wait()") < gun_m1.index("self:_RestoreTemporaryAim(aimContext)")
     and "validator2:FireServer" not in gun_m1
     and "ShootGunEvent" not in gun_m1
     and "debugLibrary" not in gun_m1,
@@ -204,6 +209,7 @@ mastery_m1 = function_body(
 require(
     "MASTERY_M1_FALLBACK_INTERVAL" in mastery_m1
     and "EquipWeapon(masteryCategory)" in mastery_m1
+    and "LastMasteryM1Result" in mastery_m1
     and 'masteryCategory == "Gun"' in mastery_m1
     and "AttackGunM1(target)" in mastery_m1
     and 'masteryCategory == "Blox Fruit"' in mastery_m1
@@ -235,6 +241,12 @@ require(
     and farm_skill.index("not masteryCategory")
     < farm_skill.index("currentSettings.UseFarmSkills == true")
     and "currentSettings.FarmMastery == true" in farm_skill
+    and "local callOk, activated, activationResult = pcall(function()" in farm_skill
+    and "if not callOk then" in farm_skill
+    and "Mastery waiting for a ready selected " not in farm_skill
+    and "selected skills cooling down" in farm_skill
+    and "no skill keys enabled" in farm_skill
+    and "M1 cooling down; last request issued" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition")
     < farm_skill.index("self:_TryMasteryM1Fallback")
     and "masteryCategory" in farm_skill
@@ -243,7 +255,7 @@ require(
         "self:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)"
     ) >= 1
     and "Skill failed; " in farm_skill
-    and "fallbackIssued, fallbackResult = self:_TryMasteryM1Fallback(" in farm_skill
+    and "fallbackIssued, fallbackResult, fallbackLastResult =" in farm_skill
     and "combatService:EquipWeapon(restoreCategory)" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
     "Mastery skills must bypass the general farm-skill toggle while respecting selected category and keys",
