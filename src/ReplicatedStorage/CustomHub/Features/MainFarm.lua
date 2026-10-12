@@ -851,27 +851,10 @@ function MainFarm:_TryStartFarmSkill(
     if masteryCategory == "Gun" then
         gunM1Issued, gunM1Result = self.CombatService:AttackGunM1(target)
     end
-    if not farmSettings or farmSettings.UseFarmSkills ~= true then
+    if masteryCategory == nil
+        and (not farmSettings or farmSettings.UseFarmSkills ~= true)
+    then
         self.FarmSkillPreparing = nil
-        if masteryCategory == "Gun" then
-            if gunM1Issued then
-                self:_SetStatus(
-                    "Gun M1 activation sent; enable Use skills while farming for Gun abilities",
-                    "success"
-                )
-            elseif gunM1Result ~= "Gun M1 is cooling down"
-                and gunM1Result ~= "Gun is reloading"
-            then
-                self:_SetStatus("Gun mastery M1 unavailable: " .. tostring(gunM1Result), "warning")
-            end
-            return true
-        elseif masteryCategory then
-            self:_SetStatus(
-                "Mastery waiting: enable Use skills while farming",
-                "warning"
-            )
-            return true
-        end
         return false
     end
 
@@ -979,7 +962,6 @@ function MainFarm:_TryStartFarmSkill(
                     and self.Target == target
                     and self.EnemyService:IsAlive(target)
                     and currentSettings
-                    and currentSettings.UseFarmSkills == true
                     and currentSettings[skill.Setting] == true
                     and (
                         (masteryCategory
@@ -991,6 +973,7 @@ function MainFarm:_TryStartFarmSkill(
                             ) == masteryCategory)
                         or (
                             not masteryCategory
+                            and currentSettings.UseFarmSkills == true
                             and (
                                 currentSettings.FarmMastery ~= true
                                 or allowMastery == false

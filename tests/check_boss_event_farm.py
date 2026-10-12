@@ -205,8 +205,8 @@ require(
     and "function CombatService:UseSkill" in COMBAT
     and "SendKeyEvent(true, keyName" in COMBAT
     and "SendKeyEvent(false, keyName" in COMBAT
-    and "mouse.Hit = targetPart.CFrame" in COMBAT
-    and "mouse.Target = targetPart" in COMBAT,
+    and "aimContext.Mouse.Hit = targetPart.CFrame" in COMBAT
+    and "aimContext.Mouse.Target = mouseTarget" in COMBAT,
     "Puzzle attacks must target the event object, respect Skull Guitar reload, and release skill keys",
 )
 restore_weapon = function_body(

@@ -288,6 +288,33 @@ local Config = {
                     Options = farmModes,
                 },
                 {
+                    Kind = "sectionHeader",
+                    Label = "Farm Mastery",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Farm Mastery",
+                    Action = "farm.mastery.enabled",
+                    Setting = "FarmMastery",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Mastery method",
+                    Action = "farm.mastery.category.select",
+                    Setting = "MasteryCategory",
+                    Options = { "Blox Fruit", "Gun" },
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Mastery health threshold",
+                    Action = "farm.mastery.healthPercent.set",
+                    Setting = "MasteryHealthPercent",
+                    Min = 0,
+                    Max = 100,
+                    Step = 1,
+                    Unit = "%",
+                },
+                {
                     Kind = "settingToggle",
                     Label = "Auto quest for modes",
                     Action = "farm.autoModeQuest",
@@ -394,33 +421,6 @@ local Config = {
                     Label = "Auto turn on Buso",
                     Action = "farm.settings.autoBuso",
                     Setting = "AutoBuso",
-                },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Farm Mastery",
-                },
-                {
-                    Kind = "settingToggle",
-                    Label = "Farm Mastery",
-                    Action = "farm.mastery.enabled",
-                    Setting = "FarmMastery",
-                },
-                {
-                    Kind = "settingDropdown",
-                    Label = "Mastery method",
-                    Action = "farm.mastery.category.select",
-                    Setting = "MasteryCategory",
-                    Options = { "Blox Fruit", "Gun" },
-                },
-                {
-                    Kind = "settingSlider",
-                    Label = "Mastery health threshold",
-                    Action = "farm.mastery.healthPercent.set",
-                    Setting = "MasteryHealthPercent",
-                    Min = 0,
-                    Max = 100,
-                    Step = 1,
-                    Unit = "%",
                 },
             },
         },
@@ -5986,23 +5986,97 @@ function CombatService:FindReadyTikiSkill()
     end)
 end
 
+function CombatService:_GetAimTarget(target)
+    if not target then
+        return nil, nil
+    end
+    if target:IsA("BasePart") then
+        return target, target
+    end
+    if not target:IsA("Model") then
+        return nil, nil
+    end
+
+    for _, partName in ipairs({ "UpperTorso", "Torso", "HumanoidRootPart", "Head" }) do
+        local part = target:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            return part, target
+        end
+    end
+    if target.PrimaryPart and target.PrimaryPart:IsA("BasePart") then
+        return target.PrimaryPart, target
+    end
+    local part = target:FindFirstChildWhichIsA("BasePart", true)
+    if part then
+        return part, target
+    end
+    return nil, nil
+end
+
+function CombatService:_UpdateTemporaryAim(aimContext, target)
+    local targetPart, mouseTarget = self:_GetAimTarget(target)
+    if not targetPart then
+        return false, "Skill target has no aimable BasePart"
+    end
+    local setAimOk = pcall(function()
+        aimContext.Mouse.Hit = targetPart.CFrame
+        aimContext.Mouse.Target = mouseTarget
+    end)
+    local verifyAimOk, assignedHit, assignedTarget = pcall(function()
+        return aimContext.Mouse.Hit, aimContext.Mouse.Target
+    end)
+    if not setAimOk or not verifyAimOk
+        or typeof(assignedHit) ~= "CFrame"
+        or (assignedHit.Position - targetPart.Position).Magnitude > 0.1
+        or assignedTarget ~= mouseTarget
+    then
+        return false, "ReplicatedStorage.Mouse rejected the temporary target-model aim"
+    end
+    aimContext.TargetPart = targetPart
+    return true
+end
+
+function CombatService:_SetTemporaryAim(target)
+    local mouse = self.Dependencies.Mouse
+    if type(mouse) ~= "table" then
+        return nil, "ReplicatedStorage.Mouse did not expose the BNN aim table"
+    end
+    local readAimOk, oldHit, oldTarget = pcall(function()
+        return mouse.Hit, mouse.Target
+    end)
+    if not readAimOk then
+        return nil, "ReplicatedStorage.Mouse aim state is unreadable"
+    end
+
+    local aimContext = {
+        Mouse = mouse,
+        OldHit = oldHit,
+        OldTarget = oldTarget,
+    }
+    local aimOk, aimError = self:_UpdateTemporaryAim(aimContext, target)
+    if not aimOk then
+        self:_RestoreTemporaryAim(aimContext)
+        return nil, aimError
+    end
+    return aimContext
+end
+
+function CombatService:_RestoreTemporaryAim(aimContext)
+    if not aimContext or not aimContext.Mouse then
+        return
+    end
+    pcall(function()
+        aimContext.Mouse.Hit = aimContext.OldHit
+        aimContext.Mouse.Target = aimContext.OldTarget
+    end)
+end
+
 function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
         return false, "Skill input is invalid"
     end
     if not target or not target.Parent or target:GetAttribute("AlreadyDestroyedClient") == true then
         return false, "Skill target is no longer available"
-    end
-
-    local targetPart
-    if target:IsA("BasePart") then
-        targetPart = target
-    elseif target:IsA("Model") then
-        targetPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart")
-            or target:FindFirstChildWhichIsA("BasePart", true)
-    end
-    if not targetPart or not targetPart:IsA("BasePart") then
-        return false, "Skill target has no aimable BasePart"
     end
 
     local equipped, equipResult = self:EquipTool(tool)
@@ -6017,47 +6091,15 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         return false, "VirtualInputManager is unavailable in this runtime"
     end
 
-    local mouse = self.Dependencies.Mouse
-    if type(mouse) ~= "table" then
-        return false, "ReplicatedStorage.Mouse did not expose the BNN aim table"
-    end
-    local readAimOk, oldHit, oldTarget = pcall(function()
-        return mouse.Hit, mouse.Target
-    end)
-    if not readAimOk then
-        return false, "ReplicatedStorage.Mouse aim state is unreadable"
-    end
-
-    local setAimOk = pcall(function()
-        mouse.Hit = targetPart.CFrame
-        mouse.Target = targetPart
-    end)
-    local verifyAimOk, assignedHit, assignedTarget = pcall(function()
-        return mouse.Hit, mouse.Target
-    end)
-    if not setAimOk or not verifyAimOk
-        or typeof(assignedHit) ~= "CFrame"
-        or (assignedHit.Position - targetPart.Position).Magnitude > 0.1
-        or assignedTarget ~= targetPart
-    then
-        pcall(function()
-            mouse.Hit = oldHit
-            mouse.Target = oldTarget
-        end)
-        return false, "ReplicatedStorage.Mouse rejected the temporary skill aim target"
-    end
-
-    local function restoreAim()
-        pcall(function()
-            mouse.Hit = oldHit
-            mouse.Target = oldTarget
-        end)
+    local aimContext, aimError = self:_SetTemporaryAim(target)
+    if not aimContext then
+        return false, tostring(aimError)
     end
     local pressed, pressError = pcall(function()
         inputService:SendKeyEvent(true, keyName, false, game)
     end)
     if not pressed then
-        restoreAim()
+        self:_RestoreTemporaryAim(aimContext)
         return false, "Skill key press failed: " .. tostring(pressError)
     end
     self.ActiveInputService = inputService
@@ -6065,9 +6107,15 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
 
     local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
     local holdUntil = os.clock() + holdDuration
+    local aimUpdateError
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
             if shouldContinue and not shouldContinue() then
+                break
+            end
+            local aimUpdated, aimResult = self:_UpdateTemporaryAim(aimContext, target)
+            if not aimUpdated then
+                aimUpdateError = aimResult
                 break
             end
             task.wait(math.min(0.05, math.max(0.01, holdUntil - os.clock())))
@@ -6079,13 +6127,16 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     end)
     self.ActiveInputService = nil
     self.ActiveSkillKey = nil
-    restoreAim()
+    self:_RestoreTemporaryAim(aimContext)
 
     if not releaseOk then
         return false, "Skill key release failed: " .. tostring(releaseError)
     end
     if not waitOk then
         return false, "Skill hold failed: " .. tostring(waitError)
+    end
+    if aimUpdateError then
+        return false, "Skill aim update failed: " .. tostring(aimUpdateError)
     end
     return true, keyName .. " skill key sent"
 end
@@ -6163,142 +6214,19 @@ function CombatService:AttackGunM1(target)
         return math.clamp(cooldown, 0.05, 5)
     end
 
-    if tool.Name == "Skull Guitar" then
-        local skullRemote = tool:FindFirstChild("RemoteEvent")
-        if not skullRemote or not skullRemote:IsA("RemoteEvent") then
-            return false, "Skull Guitar has no RemoteEvent"
-        end
-        local tapSent, tapError = pcall(function()
-            skullRemote:FireServer("TAP", targetRoot.Position)
-        end)
-        if not tapSent then
-            return false, "Skull Guitar TAP request failed: " .. tostring(tapError)
-        end
-        self.NextGunM1At = now + getGunCooldown()
-        return true, "BNN-style Skull Guitar TAP request issued; server damage is not confirmed"
+    local aimContext, aimError = self:_SetTemporaryAim(target)
+    if not aimContext then
+        return false, tostring(aimError)
     end
-
-    local replicatedStorage = self.Compatibility.ReplicatedStorage
-    local controllers = replicatedStorage and replicatedStorage:FindFirstChild("Controllers")
-    local modules = replicatedStorage and replicatedStorage:FindFirstChild("Modules")
-    local remotes = replicatedStorage and replicatedStorage:FindFirstChild("Remotes")
-    local combatControllerModule = controllers
-        and controllers:FindFirstChild("CombatController")
-    local netModule = modules and modules:FindFirstChild("Net")
-    local validator2 = remotes and remotes:FindFirstChild("Validator2")
-    if not combatControllerModule or not netModule or not validator2 then
-        return false, "BNN gun M1 controller or validator dependency is unavailable"
-    end
-    local shootGunEvent = netModule:FindFirstChild("RE/ShootGunEvent")
-    if not shootGunEvent then
-        return false, "Modules.Net.RE/ShootGunEvent is unavailable"
-    end
-
-    local controllerOk, combatController = pcall(require, combatControllerModule)
-    if not controllerOk or type(combatController) ~= "table"
-        or type(combatController.Attack) ~= "function"
-    then
-        return false, "CombatController.Attack could not be loaded"
-    end
-
-    local debugLibrary = debug
-    if type(debugLibrary) ~= "table"
-        or type(debugLibrary.getupvalues) ~= "function"
-        or type(debugLibrary.getupvalue) ~= "function"
-        or type(debugLibrary.setupvalue) ~= "function"
-    then
-        return false, "Executor debug upvalue APIs are unavailable"
-    end
-    local allUpvaluesOk, allUpvalues = pcall(
-        debugLibrary.getupvalues,
-        combatController.Attack
-    )
-    local validatorState = allUpvaluesOk
-        and type(allUpvalues) == "table"
-        and allUpvalues[9]
-    if not validatorState then
-        return false, "CombatController validator state at upvalue 9 is unavailable"
-    end
-
-    local function readUpvalue(index)
-        local readOk, firstValue, secondValue = pcall(
-            debugLibrary.getupvalue,
-            validatorState,
-            index
-        )
-        if not readOk then
-            return nil
-        end
-        if secondValue ~= nil then
-            return secondValue
-        end
-        return firstValue
-    end
-    local state15 = readUpvalue(15)
-    local state13 = readUpvalue(13)
-    local modulus = readUpvalue(16)
-    local divisor = readUpvalue(17)
-    local current = readUpvalue(14)
-    local seed = readUpvalue(12)
-    local counter = readUpvalue(18)
-    if type(state15) ~= "number"
-        or type(state13) ~= "number"
-        or type(modulus) ~= "number"
-        or modulus == 0
-        or type(divisor) ~= "number"
-        or divisor == 0
-        or type(current) ~= "number"
-        or type(seed) ~= "number"
-        or type(counter) ~= "number"
-    then
-        return false, "CombatController validator upvalues do not match the BNN layout"
-    end
-
-    local y = seed * state13
-    local validatorValue = (
-        (current * state13 + seed * state15) % modulus * modulus
-        + y
-    ) % divisor
-    local updatedCurrent = math.floor(validatorValue / modulus)
-    local updatedSeed = validatorValue - updatedCurrent * modulus
-    local updatedCounter = counter + 1
-
-    local setupOk, setupError = pcall(function()
-        debugLibrary.setupvalue(validatorState, 15, state15)
-        debugLibrary.setupvalue(validatorState, 13, state13)
-        debugLibrary.setupvalue(validatorState, 16, modulus)
-        debugLibrary.setupvalue(validatorState, 17, divisor)
-        debugLibrary.setupvalue(validatorState, 14, updatedCurrent)
-        debugLibrary.setupvalue(validatorState, 12, updatedSeed)
-        debugLibrary.setupvalue(validatorState, 18, updatedCounter)
+    local activationOk, activationError = pcall(function()
+        tool:Activate()
     end)
-    if not setupOk then
-        return false, "CombatController validator state update failed: " .. tostring(setupError)
+    self:_RestoreTemporaryAim(aimContext)
+    if not activationOk then
+        return false, "Gun Tool:Activate failed: " .. tostring(activationError)
     end
-
-    local validatorSent, validatorError = pcall(function()
-        validator2:FireServer(math.floor(validatorValue / divisor * 16777215), updatedCounter)
-    end)
-    if not validatorSent then
-        return false, "Validator2 gun request failed: " .. tostring(validatorError)
-    end
-
-    local gunSent, gunError
-    if tool.Name == "Cannon" then
-        gunSent, gunError = pcall(function()
-            shootGunEvent:FireServer(target)
-        end)
-    else
-        gunSent, gunError = pcall(function()
-            shootGunEvent:FireServer(targetRoot.Position, { targetRoot })
-        end)
-    end
-    if not gunSent then
-        return false, "ShootGunEvent gun request failed: " .. tostring(gunError)
-    end
-
     self.NextGunM1At = now + getGunCooldown()
-    return true, "BNN-style gun M1 request issued; server damage is not confirmed"
+    return true, "Gun Tool:Activate request issued; server damage is not confirmed"
 end
 
 function CombatService:TapSkullGuitar(targetPosition)
@@ -7396,27 +7324,10 @@ function MainFarm:_TryStartFarmSkill(
     if masteryCategory == "Gun" then
         gunM1Issued, gunM1Result = self.CombatService:AttackGunM1(target)
     end
-    if not farmSettings or farmSettings.UseFarmSkills ~= true then
+    if masteryCategory == nil
+        and (not farmSettings or farmSettings.UseFarmSkills ~= true)
+    then
         self.FarmSkillPreparing = nil
-        if masteryCategory == "Gun" then
-            if gunM1Issued then
-                self:_SetStatus(
-                    "Gun M1 activation sent; enable Use skills while farming for Gun abilities",
-                    "success"
-                )
-            elseif gunM1Result ~= "Gun M1 is cooling down"
-                and gunM1Result ~= "Gun is reloading"
-            then
-                self:_SetStatus("Gun mastery M1 unavailable: " .. tostring(gunM1Result), "warning")
-            end
-            return true
-        elseif masteryCategory then
-            self:_SetStatus(
-                "Mastery waiting: enable Use skills while farming",
-                "warning"
-            )
-            return true
-        end
         return false
     end
 
@@ -7524,7 +7435,6 @@ function MainFarm:_TryStartFarmSkill(
                     and self.Target == target
                     and self.EnemyService:IsAlive(target)
                     and currentSettings
-                    and currentSettings.UseFarmSkills == true
                     and currentSettings[skill.Setting] == true
                     and (
                         (masteryCategory
@@ -7536,6 +7446,7 @@ function MainFarm:_TryStartFarmSkill(
                             ) == masteryCategory)
                         or (
                             not masteryCategory
+                            and currentSettings.UseFarmSkills == true
                             and (
                                 currentSettings.FarmMastery ~= true
                                 or allowMastery == false

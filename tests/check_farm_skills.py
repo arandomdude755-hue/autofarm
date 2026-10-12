@@ -39,6 +39,28 @@ require(
     and 'Action = "farm.mastery.healthPercent.set"' in CONFIG,
     "Farm skill controls must be opt-in, bounded by settings, and default selected keys consistently",
 )
+pages_start = CONFIG.index("    Pages = {")
+farm_page_start = CONFIG.index('        Farm = {\n            Controls = {', pages_start)
+farm_page_end = CONFIG.index("        Player = {", farm_page_start)
+farm_page = CONFIG[farm_page_start:farm_page_end]
+farm_settings_start = CONFIG.index(
+    '        FarmSettings = {\n            Title = "Farm settings"',
+    farm_page_end,
+)
+farm_settings_end = CONFIG.index("    },\n}\n\nfor settingName", farm_settings_start)
+farm_settings_page = CONFIG[farm_settings_start:farm_settings_end]
+require(
+    all(
+        action in farm_page
+        for action in (
+            'Action = "farm.mastery.enabled"',
+            'Action = "farm.mastery.category.select"',
+            'Action = "farm.mastery.healthPercent.set"',
+        )
+    )
+    and "farm.mastery." not in farm_settings_page,
+    "Farm Mastery controls must live on the Farming page, not Farm Settings",
+)
 require(
     'I("Melee", { "Z", "X", "C" })' in BNN
     and 'I("Sword", { "Z", "X" })' in BNN
@@ -97,16 +119,33 @@ require(
     and "self:EquipTool(tool)" in gun_m1
     and "IsGunReloading" in gun_m1
     and "NextGunM1At" in gun_m1
-    and "debugLibrary.getupvalues" in gun_m1
-    and "debugLibrary.getupvalue" in gun_m1
-    and "debugLibrary.setupvalue" in gun_m1
-    and "validator2:FireServer" in gun_m1
-    and 'netModule:FindFirstChild("RE/ShootGunEvent")' in gun_m1
-    and "shootGunEvent:FireServer(targetRoot.Position, { targetRoot })" in gun_m1
-    and "shootGunEvent:FireServer(target)" in gun_m1
-    and 'skullRemote:FireServer("TAP", targetRoot.Position)' in gun_m1
-    and "tool:Activate()" not in gun_m1,
-    "Gun M1 must follow the BNN validator and ShootGunEvent path with its Cannon and Skull Guitar cases",
+    and "self:_SetTemporaryAim(target)" in gun_m1
+    and "tool:Activate()" in gun_m1
+    and "validator2:FireServer" not in gun_m1
+    and "ShootGunEvent" not in gun_m1
+    and "debugLibrary" not in gun_m1,
+    "Gun M1 must use target-scoped aim and standard Tool activation",
+)
+
+aim_target = function_body(
+    COMBAT,
+    "function CombatService:_GetAimTarget",
+    "\nfunction CombatService:_SetTemporaryAim",
+)
+aim_updater = function_body(
+    COMBAT,
+    "function CombatService:_UpdateTemporaryAim",
+    "\nfunction CombatService:_SetTemporaryAim",
+)
+require(
+    all(part_name in aim_target for part_name in ("UpperTorso", "Torso", "HumanoidRootPart"))
+    and "target.PrimaryPart" in aim_target
+    and "G.Hit = T.HumanoidRootPart.CFrame" in BNN
+    and "G.Target = T" in BNN
+    and "aimContext.Mouse.Hit = targetPart.CFrame" in aim_updater
+    and "aimContext.Mouse.Target = mouseTarget" in aim_updater
+    and "assignedTarget ~= mouseTarget" in aim_updater,
+    "Skill aim must track a body part and set Mouse.Target to the enemy model as BNN does",
 )
 
 use_skill = function_body(
@@ -117,8 +156,9 @@ use_skill = function_body(
 require(
     "SendKeyEvent(true, keyName" in use_skill
     and "SendKeyEvent(false, keyName" in use_skill
-    and "mouse.Hit = targetPart.CFrame" in use_skill
-    and "mouse.Target = targetPart" in use_skill
+    and "self:_SetTemporaryAim(target)" in use_skill
+    and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
+    and "self:_RestoreTemporaryAim(aimContext)" in use_skill
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
     "Skill use must aim only at the selected target, honor hold settings, and always release on cancellation",
@@ -170,14 +210,17 @@ require(
     and "self.Target == target" in farm_skill
     and "currentSettings.UseFarmSkills == true" in farm_skill
     and "currentSettings[skill.Setting] == true" in farm_skill
+    and "farmSettings.UseFarmSkills ~= true" in farm_skill
+    and farm_skill.index("not masteryCategory")
+    < farm_skill.index("currentSettings.UseFarmSkills == true")
     and "currentSettings.FarmMastery == true" in farm_skill
     and 'if masteryCategory == "Gun" then' in farm_skill
     and "self.CombatService:AttackGunM1(target)" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("AttackGunM1")
     and "masteryCategory" in farm_skill
     and "combatService:EquipWeapon(restoreCategory)" in farm_skill
-    and "Mastery waiting: enable Use skills while farming" in farm_skill,
-    "Skill use must be throttled, cancellable, and restore the correct weapon",
+    and "Mastery waiting: enable Use skills while farming" not in farm_skill,
+    "Mastery skills must bypass the general farm-skill toggle while respecting selected category and keys",
 )
 require(
     MAIN_FARM.count("self:_TryStartFarmSkill(") == 3
@@ -216,7 +259,7 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: ready skills use validated UI state, targeted aim, and cancellation-safe key release")
-print("PASS: Gun Mastery uses the BNN validator, ShootGunEvent, and weapon-specific cases")
+print("PASS: ready skills use validated UI state, target-model aim, and cancellation-safe key release")
+print("PASS: Gun Mastery uses scoped Mouse aim and standard Tool activation")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")

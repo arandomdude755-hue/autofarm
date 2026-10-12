@@ -89,7 +89,6 @@ expected_external_require_arguments = {
     "mouseModule",
     "combatUtilModule",
     "netModule",
-    "combatControllerModule",
     "itemServiceModule",
     "itemConfigModule",
 }
