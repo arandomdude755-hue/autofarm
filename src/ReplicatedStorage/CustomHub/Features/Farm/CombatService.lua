@@ -25,6 +25,20 @@ local skillCategories = {
     { Name = "Blox Fruit", Token = "BloxFruit", Keys = { "Z", "X", "C", "V", "F" } },
 }
 
+local function listSkillUiToolNames(skills)
+    if not skills then
+        return "missing"
+    end
+    local names = {}
+    for _, child in ipairs(skills:GetChildren()) do
+        table.insert(names, child.Name)
+    end
+    if #names == 0 then
+        return "none"
+    end
+    return table.concat(names, ", ")
+end
+
 function CombatService.new(compatibility, enemyService)
     local dependencies, dependencyError = compatibility:GetCombatDependencies()
     if not dependencies then
@@ -99,6 +113,38 @@ function CombatService:FindWeapon(category)
         end
     end
     return nil
+end
+
+function CombatService:FindSkillWeapon(category)
+    local player = self.Compatibility.Player
+    local backpack = player and player:FindFirstChild("Backpack")
+    local character = player and player.Character
+
+    local function findMatchingTool(container, exactName)
+        if not container then
+            return nil
+        end
+        for _, item in ipairs(container:GetChildren()) do
+            if item:IsA("Tool")
+                and item.ToolTip == category
+                and (not exactName or item.Name == exactName)
+            then
+                return item
+            end
+        end
+        return nil
+    end
+
+    -- Keep the explicitly requested Skull Guitar preference, then mirror
+    -- BNN's NameWeapon order: hotbar Backpack first, equipped Character next.
+    if category == "Gun" then
+        local skullGuitar = findMatchingTool(backpack, "Skull Guitar")
+            or findMatchingTool(character, "Skull Guitar")
+        if skullGuitar then
+            return skullGuitar
+        end
+    end
+    return findMatchingTool(backpack) or findMatchingTool(character)
 end
 
 function CombatService:FindToolByName(toolName)
@@ -180,11 +226,13 @@ function CombatService:_FindReadySkill(
     end
     for _, category in ipairs(orderedCategories) do
         if not onlyCategory or category.Name == onlyCategory then
-            local tool = self:FindWeapon(category.Name)
+            local tool = self:FindSkillWeapon(category.Name)
             local selectedKeys = {}
+            local selectedKeySet = {}
             for _, keyName in ipairs(category.Keys) do
                 if isEnabled(category, keyName) then
                     table.insert(selectedKeys, keyName)
+                    selectedKeySet[keyName] = true
                 end
             end
             selectedKeyCount += #selectedKeys
@@ -203,46 +251,54 @@ function CombatService:_FindReadySkill(
                     if not equipped then
                         return nil, tostring(equipResult)
                     end
-                    return nil, "Waiting for skill UI for " .. tool.Name, tool
+                    return nil,
+                        "Waiting for PlayerGui.Main.Skills entry '"
+                            .. tool.Name .. "' (entries: "
+                            .. listSkillUiToolNames(skills) .. ")",
+                        tool
                 end
-                for _, keyName in ipairs(selectedKeys) do
-                    local frame = toolSkills:FindFirstChild(keyName)
+                for _, frame in ipairs(toolSkills:GetChildren()) do
+                    local keyName = frame.Name
+                    local selectedKey = selectedKeySet[keyName]
                     local title = frame and frame:FindFirstChild("Title")
                     local cooldown = frame and frame:FindFirstChild("Cooldown")
                     local titleText = title and title:IsA("TextLabel") and title.Text or ""
-                    local cooldownSize = cooldown and cooldown:IsA("GuiObject")
-                        and cooldown.Size
                     local cooldownEmpty = cooldown
                         and cooldown:IsA("GuiObject")
-                        and cooldown.Size.X.Offset == 0
-                        and cooldown.Size.X.Scale <= 0.005
+                        and cooldown.Size == UDim2.new(0, 0, 1, -1)
                     local cooldownFull = cooldown
                         and cooldown:IsA("GuiObject")
-                        and cooldown.Size.X.Offset == 0
-                        and math.abs(cooldown.Size.X.Scale - 1) <= 0.001
+                        and cooldown.Size == UDim2.new(1, 0, 1, -1)
                     local hasSkillControls = frame
                         and frame:IsA("Frame")
                         and title
                         and title:IsA("TextLabel")
                         and cooldown
                         and cooldown:IsA("GuiObject")
-                    if not hasSkillControls then
+                    if frame.Name ~= "Template"
+                        and selectedKey
+                        and not hasSkillControls
+                    then
                         incompleteSkillControls = incompleteSkillControls or (
                             tool.Name .. " " .. keyName .. " controls are incomplete"
                         )
-                    elseif titleText == "" or titleText == "???" then
+                    elseif frame.Name ~= "Template"
+                        and selectedKey
+                        and (titleText == "" or titleText == "???")
+                    then
                         unavailableSkillTitle = unavailableSkillTitle or (
                             tool.Name .. " " .. keyName .. " title is unavailable"
                         )
-                    elseif string.find(titleText, "Transformation", 1, true) then
+                    elseif frame.Name ~= "Template"
+                        and selectedKey
+                        and string.find(titleText, "Transformation", 1, true)
+                    then
                         unavailableSkillTitle = unavailableSkillTitle or (
                             tool.Name .. " " .. keyName .. " is not an attack skill"
                         )
-                    else
+                    elseif frame.Name ~= "Template" and selectedKey then
                         local titleColor = title.TextColor3
-                        local titleIsReady = titleColor.R >= 0.98
-                            and titleColor.G >= 0.98
-                            and titleColor.B >= 0.98
+                        local titleIsReady = titleColor == Color3.new(1, 1, 1)
                         local isReady = (titleIsReady and cooldownEmpty) or cooldownFull
                         if isReady then
                             return {

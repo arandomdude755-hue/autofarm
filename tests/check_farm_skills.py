@@ -87,16 +87,19 @@ require(
     'self.Compatibility:GetPlayerGui()' in ready_skill
     and 'FindFirstChild("Skills")' in ready_skill
     and 'FindFirstChild("Cooldown")' in ready_skill
-    and "titleColor.R >= 0.98" in ready_skill
-    and "titleColor.G >= 0.98" in ready_skill
-    and "titleColor.B >= 0.98" in ready_skill
-    and "cooldown.Size.X.Scale <= 0.005" in ready_skill
-    and "math.abs(cooldown.Size.X.Scale - 1) <= 0.001" in ready_skill
+    and "titleColor == Color3.new(1, 1, 1)" in ready_skill
+    and "cooldown.Size == UDim2.new(0, 0, 1, -1)" in ready_skill
+    and "cooldown.Size == UDim2.new(1, 0, 1, -1)" in ready_skill
     and "isReady = (titleIsReady and cooldownEmpty) or cooldownFull" in ready_skill
-    and "local tool = self:FindWeapon(category.Name)" in ready_skill
+    and "local tool = self:FindSkillWeapon(category.Name)" in ready_skill
     and "frame.Visible" not in ready_skill
+    and 'for _, frame in ipairs(toolSkills:GetChildren()) do' in ready_skill
+    and 'selectedKeySet[keyName]' in ready_skill
+    and 'frame.Name ~= "Template"' in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
+    and "PlayerGui.Main.Skills entry" in ready_skill
+    and "listSkillUiToolNames(skills)" in ready_skill
     and "equippedTool" not in ready_skill
     and "LastMasterySkillKey" not in ready_skill
     and "ignoredTools" in ready_skill
@@ -110,11 +113,11 @@ require(
     "Mastery readiness must match BNN's two cooldown states while reporting incomplete controls distinctly",
 )
 require(
-    "for _, keyName in ipairs(selectedKeys) do" in ready_skill
+    "for _, frame in ipairs(toolSkills:GetChildren()) do" in ready_skill
     and "if isReady then" in ready_skill
     and "LastMasterySkillKey" not in COMBAT
     and "rotatedKeys" not in ready_skill,
-    "All categories must use the same ordered scan of selected keys on every retry",
+    "Ready skills must be discovered by scanning the live GUI frames on every retry",
 )
 farm_skill_lookup = function_body(
     COMBAT,
@@ -148,6 +151,18 @@ require(
     and "foundUnequippedSkullGuitar" not in find_weapon
     and "Skull Guitar is in the Backpack; it will not be equipped for farming" not in find_weapon,
     "Gun selection must prioritize Skull Guitar from Character or Player.Backpack",
+)
+find_skill_weapon = function_body(
+    COMBAT,
+    "function CombatService:FindSkillWeapon",
+    "\nfunction CombatService:FindToolByName",
+)
+require(
+    'findMatchingTool(backpack, "Skull Guitar")' in find_skill_weapon
+    and 'findMatchingTool(character, "Skull Guitar")' in find_skill_weapon
+    and find_skill_weapon.index("findMatchingTool(backpack)") < find_skill_weapon.index("findMatchingTool(character)")
+    and "item.ToolTip == category" in find_skill_weapon,
+    "Skill weapon lookup must use BNN's Backpack-first category search while retaining Skull Guitar preference",
 )
 equipped_weapon = function_body(
     COMBAT,
@@ -366,7 +381,7 @@ require(
     and "Mastery waiting for a ready selected " not in farm_skill
     and "Mastery waiting: selected skills cooling down" in farm_skill
     and "Mastery waiting: enable a selected skill key" in farm_skill
-    and "Mastery skill controls unavailable:" in farm_skill
+    and '"Mastery waiting: " .. tostring(skillError)' in farm_skill
     and "Mastery skill input failed:" in farm_skill
     and '"Using Mastery "' not in farm_skill
     and "return true\n        end\n        if skillError" in mastery_no_skill_branch
@@ -387,6 +402,32 @@ require(
     and "local masteryCategoryNow = currentSettings" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
     "Mastery must reuse the farm skill flow, allow normal skills above threshold, and wait without wrong-weapon fallback",
+)
+preparing_branch = farm_skill.split("if preparingTool then", 1)[1].split(
+    "self.FarmSkillPreparing = nil\n    if not skill then",
+    1,
+)[0]
+normal_timeout = farm_skill.split(
+    "if not masteryCategory then\n            self.FarmSkillIgnoredTools[preparingTool.Name]",
+    1,
+)[1].split(
+    "\n        end",
+    1,
+)[0]
+mastery_timeout = farm_skill.split(
+    '"Mastery waiting: " .. tostring(skillError)',
+    1,
+)[1].split("return true", 1)[0]
+require(
+    "skillError" in preparing_branch
+    and "self.FarmSkillPreparing = nil" in normal_timeout
+    and "self.FarmSkillPreparing = nil" not in mastery_timeout
+    and "Mastery waiting: " in farm_skill
+    and "return true" in farm_skill.split(
+        '"Mastery waiting: " .. tostring(skillError)',
+        1,
+    )[1],
+    "Mastery must keep retrying and report exact missing controls; only ordinary farm skill fallback expires",
 )
 require(
     "key input" in mastery_skill_success
@@ -434,7 +475,7 @@ require(
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: Mastery and regular skills share category-filtered cooldown readiness without tool pinning or key rotation")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
-print("PASS: Mastery selects its category through the normal weapon resolver; Skull Guitar TAP is chosen only while equipped")
+print("PASS: skill weapon lookup follows BNN's Backpack-first flow; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
 print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")
 print("PASS: ordinary farm attacks restore Farm Weapon after asynchronous skill use")

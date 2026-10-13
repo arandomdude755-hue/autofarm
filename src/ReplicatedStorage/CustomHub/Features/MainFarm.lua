@@ -889,30 +889,29 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillPreparing = preparation
         end
         if now < preparation.Deadline then
-            self:_SetStatus("Preparing skill controls for " .. preparingTool.Name, "info")
+            self:_SetStatus(
+                masteryCategory and ("Preparing mastery skills: " .. tostring(skillError))
+                    or ("Preparing skill controls for " .. preparingTool.Name),
+                "info"
+            )
             return true
         end
         if not masteryCategory then
             self.FarmSkillIgnoredTools[preparingTool.Name] =
                 now + FARM_SKILL_UNAVAILABLE_RETRY
-        end
-        self.FarmSkillPreparing = nil
-        if not masteryCategory then
+            self.FarmSkillPreparing = nil
             self.CombatService:EquipWeapon(weaponCategory)
-        end
-        if masteryCategory then
             self:_SetStatus(
-                "Mastery skill controls unavailable: " .. preparingTool.Name
-                    .. "; waiting for skill controls",
+                "Skill controls did not load for " .. preparingTool.Name .. "; using M1",
                 "warning"
             )
-            return true
+            return false
         end
         self:_SetStatus(
-            "Skill controls did not load for " .. preparingTool.Name .. "; using M1",
+            "Mastery waiting: " .. tostring(skillError),
             "warning"
         )
-        return false
+        return true
     end
     self.FarmSkillPreparing = nil
     if not skill then
