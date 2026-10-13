@@ -611,6 +611,19 @@ function CombatService:_RestoreTemporaryAim(aimContext)
     end)
 end
 
+function CombatService:SetFarmSkillAimTarget(target)
+    local targetPart = self:_GetAimTarget(target, true)
+    if not targetPart then
+        self:ClearFarmSkillAimTarget()
+        return false, "Skill target has no aimable BasePart"
+    end
+    return SkillAimRedirect:SetTarget(targetPart, self)
+end
+
+function CombatService:ClearFarmSkillAimTarget()
+    return SkillAimRedirect:ClearTarget(self)
+end
+
 function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
         return false, "Skill input is invalid"
@@ -1180,6 +1193,7 @@ function CombatService:Cancel()
     self.ActiveInputRelease = nil
     self.ActiveInputService = nil
     self.ActiveSkillKey = nil
+    self:ClearFarmSkillAimTarget()
     return true
 end
 

@@ -316,10 +316,14 @@ require(
     and "arguments[1] = context.Position" in SKILL_AIM_REDIRECT
     and "arguments[1] = context.CFrame" in SKILL_AIM_REDIRECT
     and "function SkillAimRedirect:Begin" in SKILL_AIM_REDIRECT
+    and "function SkillAimRedirect:SetTarget" in SKILL_AIM_REDIRECT
     and "function SkillAimRedirect:Update" in SKILL_AIM_REDIRECT
     and "function SkillAimRedirect:End" in SKILL_AIM_REDIRECT
+    and "function SkillAimRedirect:ClearTarget" in SKILL_AIM_REDIRECT
+    and "context.Persistent = true" in SKILL_AIM_REDIRECT
+    and "if context.Persistent or context.InputActive then" in SKILL_AIM_REDIRECT
     and "require(script.Parent.SkillAimRedirect)" in COMBAT,
-    "Skill aiming must apply BNN-style position replacement only during an active, target-scoped skill cast",
+    "Skill aiming must refresh BNN-style target position throughout an eligible farm target and clear on target changes",
 )
 
 use_skill = function_body(
@@ -350,6 +354,16 @@ require(
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
     "Normal and mastery skills must share the same unpinned equip/input/aim lifecycle",
+)
+require(
+    "function CombatService:SetFarmSkillAimTarget" in COMBAT
+    and "function CombatService:ClearFarmSkillAimTarget" in COMBAT
+    and "self:ClearFarmSkillAimTarget()" in function_body(
+        COMBAT,
+        "function CombatService:Cancel",
+        "\nreturn CombatService",
+    ),
+    "Farm skill aim state must be controllable and cleared when combat is cancelled",
 )
 gun_m1 = function_body(
     COMBAT,
@@ -456,12 +470,16 @@ mastery_no_skill_branch = farm_skill.split("if not skill then", 1)[1].split(
     1,
 )[0]
 require(
-    "if not masteryCategory\n        and not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)" in farm_skill
+    "local ordinaryAtAttackPosition = masteryCategory ~= nil" in farm_skill
+    and "if not ordinaryAtAttackPosition then" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
     and "masteryCategory ~= nil\n                            or self:_IsAtFarmAttackPosition(" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
     and "local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)" in farm_skill
     and "local skillCategory = masteryCategory or weaponCategory" in farm_skill
+    and "local shouldTrackSkillAim = masteryCategory ~= nil" in farm_skill
+    and "self.CombatService:SetFarmSkillAimTarget(target)" in farm_skill
+    and "self.CombatService:ClearFarmSkillAimTarget()" in farm_skill
     and "if masteryCategory == nil\n        and (not farmSettings or farmSettings.UseFarmSkills ~= true)" in farm_skill
     and "if not masteryCategory then\n            self.FarmSkillPreparing = nil\n            return false" not in mastery_policy_setup
     and "local skillScanInterval = FARM_SKILL_SCAN_INTERVAL" in farm_skill

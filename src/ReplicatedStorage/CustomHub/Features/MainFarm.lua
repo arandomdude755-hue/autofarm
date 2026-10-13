@@ -689,6 +689,9 @@ function MainFarm:_ClearTarget(preserveMovement)
     self.Target = nil
     self.TargetName = nil
     self.TargetIsBoss = nil
+    if self.CombatService then
+        self.CombatService:ClearFarmSkillAimTarget()
+    end
 end
 
 function MainFarm:_ResetSpawnSearch(targetName)
@@ -980,16 +983,32 @@ function MainFarm:_TryStartFarmSkill(
         local configuredCategory = farmSettings.MasteryCategory
         if configuredCategory ~= "Blox Fruit" and configuredCategory ~= "Gun" then
             self.FarmSkillPreparing = nil
+            if self.CombatService then
+                self.CombatService:ClearFarmSkillAimTarget()
+            end
             self:_SetStatus("Farm Mastery needs a valid Blox Fruit or Gun method", "error")
             return true
         end
     end
     local skillCategory = masteryCategory or weaponCategory
+    local ordinaryAtAttackPosition = masteryCategory ~= nil
+        or self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)
+    local shouldTrackSkillAim = masteryCategory ~= nil
+        or (
+            farmSettings
+            and farmSettings.UseFarmSkills == true
+            and ordinaryAtAttackPosition
+        )
+    if self.CombatService then
+        if shouldTrackSkillAim then
+            self.CombatService:SetFarmSkillAimTarget(target)
+        else
+            self.CombatService:ClearFarmSkillAimTarget()
+        end
+    end
     -- Ordinary farm skills wait for their attack position. Mastery follows the
     -- reference flow and may send a ready skill while approaching.
-    if not masteryCategory
-        and not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)
-    then
+    if not ordinaryAtAttackPosition then
         self.FarmSkillPreparing = nil
         return false
     end

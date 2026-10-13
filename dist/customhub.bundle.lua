@@ -6004,7 +6004,8 @@ function SkillAimRedirect:Begin(targetPart)
     if not targetPart or not targetPart:IsA("BasePart") then
         return nil, "Skill aim target is unavailable"
     end
-    if clearExpiredContext() then
+    local context = clearExpiredContext()
+    if context and context.InputActive then
         return nil, "Another skill aim redirect is already active"
     end
 
@@ -6013,17 +6014,59 @@ function SkillAimRedirect:Begin(targetPart)
         return nil, installError
     end
 
-    local context = {
-        Active = true,
-        ExpiresAt = os.clock() + 7,
-    }
-    state.ActiveContext = context
+    if not context then
+        context = {
+            Active = true,
+            Persistent = false,
+            InputActive = false,
+        }
+        state.ActiveContext = context
+    end
+    context.Active = true
+    context.InputActive = true
+    context.ExpiresAt = nil
     local updated, updateError = self:Update(context, targetPart)
     if not updated then
         self:End(context)
         return nil, updateError
     end
     return context
+end
+
+function SkillAimRedirect:SetTarget(targetPart, owner)
+    if not targetPart or not targetPart:IsA("BasePart") then
+        return false, "Skill aim target is unavailable"
+    end
+
+    local context = clearExpiredContext()
+    if context and context.InputActive then
+        return false, "A skill cast is already using the aim target"
+    end
+
+    local installed, installError = installNamecallHook()
+    if not installed then
+        return false, installError
+    end
+
+    if not context then
+        context = {
+            Active = true,
+            Persistent = true,
+            InputActive = false,
+        }
+        state.ActiveContext = context
+    end
+    context.Active = true
+    context.Persistent = true
+    context.InputActive = false
+    context.Owner = owner
+    context.ExpiresAt = nil
+    local updated, updateError = self:Update(context, targetPart)
+    if not updated then
+        self:ClearTarget(owner)
+        return false, updateError
+    end
+    return true
 end
 
 function SkillAimRedirect:Update(context, targetPart)
@@ -6036,7 +6079,11 @@ function SkillAimRedirect:Update(context, targetPart)
 
     context.Position = targetPart.Position
     context.CFrame = targetPart.CFrame
-    context.ExpiresAt = os.clock() + 7
+    if context.Persistent or context.InputActive then
+        context.ExpiresAt = nil
+    else
+        context.ExpiresAt = os.clock() + 1
+    end
     return true
 end
 
@@ -6044,10 +6091,30 @@ function SkillAimRedirect:End(context)
     if not context then
         return
     end
-    context.Active = false
-    if state.ActiveContext == context then
-        state.ActiveContext = nil
+    context.InputActive = false
+    if context.Persistent then
+        context.Active = true
+        context.ExpiresAt = nil
+    else
+        context.Active = true
+        context.ExpiresAt = os.clock() + 1
     end
+end
+
+function SkillAimRedirect:ClearTarget(owner)
+    local context = clearExpiredContext()
+    if not context or (owner and context.Owner ~= owner) then
+        return false
+    end
+
+    context.Persistent = false
+    context.Owner = nil
+    if context.InputActive then
+        return true
+    end
+    context.Active = false
+    state.ActiveContext = nil
+    return true
 end
 
 return SkillAimRedirect
@@ -6669,6 +6736,19 @@ function CombatService:_RestoreTemporaryAim(aimContext)
     end)
 end
 
+function CombatService:SetFarmSkillAimTarget(target)
+    local targetPart = self:_GetAimTarget(target, true)
+    if not targetPart then
+        self:ClearFarmSkillAimTarget()
+        return false, "Skill target has no aimable BasePart"
+    end
+    return SkillAimRedirect:SetTarget(targetPart, self)
+end
+
+function CombatService:ClearFarmSkillAimTarget()
+    return SkillAimRedirect:ClearTarget(self)
+end
+
 function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
         return false, "Skill input is invalid"
@@ -7238,6 +7318,7 @@ function CombatService:Cancel()
     self.ActiveInputRelease = nil
     self.ActiveInputService = nil
     self.ActiveSkillKey = nil
+    self:ClearFarmSkillAimTarget()
     return true
 end
 
@@ -7938,6 +8019,9 @@ function MainFarm:_ClearTarget(preserveMovement)
     self.Target = nil
     self.TargetName = nil
     self.TargetIsBoss = nil
+    if self.CombatService then
+        self.CombatService:ClearFarmSkillAimTarget()
+    end
 end
 
 function MainFarm:_ResetSpawnSearch(targetName)
@@ -8229,16 +8313,32 @@ function MainFarm:_TryStartFarmSkill(
         local configuredCategory = farmSettings.MasteryCategory
         if configuredCategory ~= "Blox Fruit" and configuredCategory ~= "Gun" then
             self.FarmSkillPreparing = nil
+            if self.CombatService then
+                self.CombatService:ClearFarmSkillAimTarget()
+            end
             self:_SetStatus("Farm Mastery needs a valid Blox Fruit or Gun method", "error")
             return true
         end
     end
     local skillCategory = masteryCategory or weaponCategory
+    local ordinaryAtAttackPosition = masteryCategory ~= nil
+        or self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)
+    local shouldTrackSkillAim = masteryCategory ~= nil
+        or (
+            farmSettings
+            and farmSettings.UseFarmSkills == true
+            and ordinaryAtAttackPosition
+        )
+    if self.CombatService then
+        if shouldTrackSkillAim then
+            self.CombatService:SetFarmSkillAimTarget(target)
+        else
+            self.CombatService:ClearFarmSkillAimTarget()
+        end
+    end
     -- Ordinary farm skills wait for their attack position. Mastery follows the
     -- reference flow and may send a ready skill while approaching.
-    if not masteryCategory
-        and not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)
-    then
+    if not ordinaryAtAttackPosition then
         self.FarmSkillPreparing = nil
         return false
     end
