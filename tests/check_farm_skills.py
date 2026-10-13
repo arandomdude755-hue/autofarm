@@ -101,7 +101,8 @@ require(
     and 'frame.Name ~= "Template"' in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
-    and "Mastery tool equipped; waiting for its skill controls to sync" in ready_skill
+    and "Mastery tool equip requested; waiting for it to enter Character" in ready_skill
+    and ready_skill.index("self:EquipTool(tool)") < ready_skill.index("local toolSkills = skills:FindFirstChild(tool.Name)")
     and "Mastery skill UI needs to resync:" in ready_skill
     and "cooldownEmpty and not cooldownFull" in ready_skill
     and "onlyCategory and masterySkillUiTool or nil" in ready_skill

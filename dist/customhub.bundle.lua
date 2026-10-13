@@ -6495,9 +6495,11 @@ function CombatService:_FindReadySkill(
                         if not equipped then
                             return nil, tostring(equipResult), tool
                         end
+                    if tool.Parent ~= character then
                         return nil,
-                            "Mastery tool equipped; waiting for its skill controls to sync",
+                            "Mastery tool equip requested; waiting for it to enter Character",
                             tool
+                    end
                     end
                 end
                 local toolSkills = skills:FindFirstChild(tool.Name)
