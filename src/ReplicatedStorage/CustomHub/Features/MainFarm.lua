@@ -831,29 +831,11 @@ function MainFarm:_TryStartFarmSkill(
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
     local skillScanInterval = FARM_SKILL_SCAN_INTERVAL
-    local masteryTool
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
         if configuredCategory ~= "Blox Fruit" and configuredCategory ~= "Gun" then
             self.FarmSkillPreparing = nil
             self:_SetStatus("Farm Mastery needs a valid Blox Fruit or Gun method", "error")
-            return true
-        end
-        if not masteryCategory then
-            self.FarmSkillPreparing = nil
-            return false
-        end
-        local equipped, equipResult =
-            self.CombatService:EquipWeapon(masteryCategory)
-        if equipped then
-            masteryTool = equipResult
-        end
-        if not masteryTool then
-            self:_SetStatus(
-                "Mastery waiting: no usable " .. masteryCategory .. " tool"
-                    .. (equipResult and (" (" .. tostring(equipResult) .. ")") or ""),
-                "warning"
-            )
             return true
         end
     end
@@ -894,8 +876,7 @@ function MainFarm:_TryStartFarmSkill(
         farmSettings,
         skillCategory,
         skillIgnoredTools,
-        masteryCategory,
-        masteryTool
+        masteryCategory
     )
     if preparingTool then
         local preparation = self.FarmSkillPreparing
@@ -965,12 +946,7 @@ function MainFarm:_TryStartFarmSkill(
     if farmSettings.FarmSkillFastRelease == true then
         skillHold = 0.05
     end
-    local usingSkillStatus = "Using " .. skill.Category .. " " .. skill.Key .. " skill"
-    if masteryCategory then
-        usingSkillStatus = "Using Mastery " .. skill.Category .. " " .. skill.Key
-            .. " (" .. string.format("%.2fs hold", skillHold) .. ")"
-    end
-    self:_SetStatus(usingSkillStatus, "success")
+    self:_SetStatus("Using " .. skill.Category .. " " .. skill.Key .. " skill", "success")
     local function runSkillAttempt()
         local callOk, activated, activationResult = pcall(function()
             return combatService:UseSkill(
@@ -981,12 +957,10 @@ function MainFarm:_TryStartFarmSkill(
                 function()
                     local currentSettings = self.Context and self.Context.Config
                         and self.Context.Config.FarmSettings
-                    local currentCharacter
                     local currentRoot
                     if self.Context and self.Context.Compatibility then
-                        local character, _, characterRoot =
+                        local _, _, characterRoot =
                             self.Context.Compatibility:GetCharacterParts()
-                        currentCharacter = character
                         currentRoot = characterRoot
                     end
                     return self:_IsCurrent(session)
@@ -994,14 +968,6 @@ function MainFarm:_TryStartFarmSkill(
                         and self.EnemyService:IsAlive(target)
                         and currentSettings
                         and currentSettings[skill.Setting] == true
-                        and (
-                            not masteryTool
-                            or (
-                                masteryTool.Parent == currentCharacter
-                                and self.CombatService:FindEquippedWeapon(masteryCategory)
-                                    == masteryTool
-                            )
-                        )
                         and (
                             (masteryCategory
                                 and currentSettings.FarmMastery == true
@@ -1013,18 +979,10 @@ function MainFarm:_TryStartFarmSkill(
                             or (
                                 not masteryCategory
                                 and currentSettings.UseFarmSkills == true
-                                and (
-                                    currentSettings.FarmMastery ~= true
-                                    or allowMastery == false
-                                )
                             )
                         )
-                        and (
-                            masteryCategory ~= nil
-                            or self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
-                        )
-                end,
-                masteryTool ~= nil
+                        and self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
+                end
             )
         end)
         if not callOk then
@@ -1075,8 +1033,8 @@ function MainFarm:_TryStartFarmSkill(
         end
     end
 
-    -- Mastery supplies its eligible category/tool and health threshold; the
-    -- shared farm-skill lifecycle handles scanning, input, and cleanup.
+    -- Mastery only narrows the category and blocks unsafe fallback attacks;
+    -- skill lookup, cooldown checks, aiming, input, and retries stay shared.
     task.spawn(function()
         finishSkillAttempt(runSkillAttempt())
     end)

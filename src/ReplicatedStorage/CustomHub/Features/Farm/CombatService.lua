@@ -38,7 +38,6 @@ function CombatService.new(compatibility, enemyService)
         FruitAttackIndex = 1,
         NextGunM1At = {},
         NextFruitM1At = {},
-        LastMasterySkillKey = setmetatable({}, { __mode = "k" }),
     }, CombatService)
 end
 
@@ -156,10 +155,8 @@ function CombatService:_FindReadySkill(
     isEnabled,
     preferredCategory,
     ignoredTools,
-    onlyCategory,
-    equippedTool
+    onlyCategory
 )
-    local player = self.Compatibility.Player
     local playerGui = self.Compatibility:GetPlayerGui()
     local main = playerGui and playerGui:FindFirstChild("Main")
     local skills = main and main:FindFirstChild("Skills")
@@ -183,42 +180,11 @@ function CombatService:_FindReadySkill(
     end
     for _, category in ipairs(orderedCategories) do
         if not onlyCategory or category.Name == onlyCategory then
-            local tool
-            if equippedTool then
-                local character = player and player.Character
-                if equippedTool.Parent == character
-                    and equippedTool:IsA("Tool")
-                    and equippedTool.ToolTip == category.Name
-                then
-                    tool = equippedTool
-                end
-            elseif onlyCategory then
-                tool = self:FindEquippedWeapon(category.Name)
-            else
-                tool = self:FindWeapon(category.Name)
-            end
+            local tool = self:FindWeapon(category.Name)
             local selectedKeys = {}
             for _, keyName in ipairs(category.Keys) do
                 if isEnabled(category, keyName) then
                     table.insert(selectedKeys, keyName)
-                end
-            end
-            if equippedTool and #selectedKeys > 1 then
-                local lastKey = self.LastMasterySkillKey[equippedTool]
-                local lastIndex
-                for index, keyName in ipairs(selectedKeys) do
-                    if keyName == lastKey then
-                        lastIndex = index
-                        break
-                    end
-                end
-                if lastIndex then
-                    local rotatedKeys = {}
-                    for offset = 1, #selectedKeys do
-                        local index = ((lastIndex + offset - 1) % #selectedKeys) + 1
-                        table.insert(rotatedKeys, selectedKeys[index])
-                    end
-                    selectedKeys = rotatedKeys
                 end
             end
             selectedKeyCount += #selectedKeys
@@ -233,11 +199,9 @@ function CombatService:_FindReadySkill(
                 checkedToolCount += 1
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
-                    if not equippedTool then
-                        local equipped, equipResult = self:EquipTool(tool)
-                        if not equipped then
-                            return nil, tostring(equipResult)
-                        end
+                    local equipped, equipResult = self:EquipTool(tool)
+                    if not equipped then
+                        return nil, tostring(equipResult)
                     end
                     return nil, "Waiting for skill UI for " .. tool.Name, tool
                 end
@@ -300,7 +264,7 @@ function CombatService:_FindReadySkill(
         return nil, "Skill controls are temporarily unavailable for " .. ignoredToolName
     end
     if checkedToolCount == 0 and missingToolCategory then
-        return nil, "No equipped " .. missingToolCategory .. " skill weapon is available"
+        return nil, "No usable " .. missingToolCategory .. " skill weapon is available"
     end
     if incompleteSkillControls then
         return nil, "Skill UI incomplete: " .. incompleteSkillControls
@@ -315,12 +279,11 @@ function CombatService:FindReadyFarmSkill(
     farmSettings,
     preferredCategory,
     ignoredTools,
-    onlyCategory,
-    equippedTool
+    onlyCategory
 )
     return self:_FindReadySkill(function(category, keyName)
         return farmSettings["FarmSkill_" .. category.Token .. "_" .. keyName] == true
-    end, preferredCategory, ignoredTools, onlyCategory, equippedTool)
+    end, preferredCategory, ignoredTools, onlyCategory)
 end
 
 function CombatService:FindReadyTikiSkill()
@@ -414,7 +377,7 @@ function CombatService:_RestoreTemporaryAim(aimContext)
     end)
 end
 
-function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue, pinEquippedTool)
+function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
         return false, "Skill input is invalid"
     end
@@ -429,9 +392,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     end
     character = self.Compatibility.Player and self.Compatibility.Player.Character
     if not character or tool.Parent ~= character then
-        return false, pinEquippedTool
-            and "Selected mastery weapon is no longer equipped"
-            or "Selected skill weapon did not equip"
+        return false, "Selected skill weapon did not equip"
     end
 
     local aimContext, aimError = self:_SetTemporaryAim(target)
@@ -456,9 +417,6 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         self:_RestoreTemporaryAim(aimContext)
         return false, "Skill key press failed: " .. tostring(pressError)
     end
-    if pinEquippedTool then
-        self.LastMasterySkillKey[tool] = keyName
-    end
     local inputReleased = false
     local function releaseInput()
         if inputReleased then
@@ -475,14 +433,9 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
     local holdUntil = os.clock() + holdDuration
     local aimUpdateError
-    local weaponChanged = false
     local farmStateChanged = false
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
-            if pinEquippedTool and tool.Parent ~= character then
-                weaponChanged = true
-                break
-            end
             if shouldContinue and not shouldContinue() then
                 farmStateChanged = true
                 break
@@ -513,9 +466,6 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     end
     if aimUpdateError then
         return false, "Skill aim update failed: " .. tostring(aimUpdateError)
-    end
-    if weaponChanged then
-        return false, "Selected mastery weapon changed during skill input"
     end
     if farmStateChanged then
         return false, "Skill input cancelled because farm state changed"

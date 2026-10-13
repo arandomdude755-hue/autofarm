@@ -93,14 +93,12 @@ require(
     and "cooldown.Size.X.Scale <= 0.005" in ready_skill
     and "math.abs(cooldown.Size.X.Scale - 1) <= 0.001" in ready_skill
     and "isReady = (titleIsReady and cooldownEmpty) or cooldownFull" in ready_skill
-    and "bnnCooldown" not in ready_skill
-    and "self.LastMasterySkillKey[equippedTool]" in ready_skill
-    and "rotatedKeys" in ready_skill
+    and "local tool = self:FindWeapon(category.Name)" in ready_skill
     and "frame.Visible" not in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
-    and "if not equippedTool then" in ready_skill
-    and "equippedTool.Parent == character" in ready_skill
+    and "equippedTool" not in ready_skill
+    and "LastMasterySkillKey" not in ready_skill
     and "ignoredTools" in ready_skill
     and "onlyCategory" in ready_skill
     and "category.Name == onlyCategory" in ready_skill
@@ -114,9 +112,9 @@ require(
 require(
     "for _, keyName in ipairs(selectedKeys) do" in ready_skill
     and "if isReady then" in ready_skill
-    and "self.LastMasterySkillKey[equippedTool]" in ready_skill
-    and "rotatedKeys" in ready_skill,
-    "Each rescan must inspect every selected key, including another ready key and a reused off-cooldown Z",
+    and "LastMasterySkillKey" not in COMBAT
+    and "rotatedKeys" not in ready_skill,
+    "All categories must use the same ordered scan of selected keys on every retry",
 )
 farm_skill_lookup = function_body(
     COMBAT,
@@ -131,10 +129,10 @@ tiki_skill_lookup = function_body(
 require(
     '"FarmSkill_" .. category.Token .. "_" .. keyName' in farm_skill_lookup
     and "onlyCategory" in farm_skill_lookup
-    and "equippedTool" in farm_skill_lookup
+    and "equippedTool" not in farm_skill_lookup
     and "return self:_FindReadySkill(function()" in tiki_skill_lookup
     and "farmSettings" not in tiki_skill_lookup,
-    "Regular combat must honor skill selection while Tiki automatically accepts any ready skill",
+    "Farm skill lookup must lock to an optional category without pinning an equipped tool",
 )
 
 find_weapon = function_body(
@@ -265,22 +263,22 @@ require(
     and "SendKeyEvent(true," in BNN
     and "SendKeyEvent(false," in BNN
     and "self.ActiveInputRelease = releaseInput" in use_skill
-    and "pinEquippedTool" in use_skill
     and "self:EquipTool(tool)" in use_skill
     and use_skill.index("self:EquipTool(tool)") < use_skill.index("SendKeyEvent(true, keyName")
     and use_skill.index("local waitOk, waitError = pcall(function()")
     < use_skill.index("local releaseOk, releaseResult = pcall(releaseInput)")
     < use_skill.index("if farmStateChanged then")
     and "tool.Parent ~= character" in use_skill
+    and "pinEquippedTool" not in use_skill
     and "farmStateChanged = true" in use_skill
     and '"Skill input cancelled because farm state changed"' in use_skill
-    and "self.LastMasterySkillKey[tool] = keyName" in use_skill
+    and "LastMasterySkillKey" not in COMBAT
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
-    "Normal and mastery skills must share equip/input/aim behavior while mastery pins its tool",
+    "Normal and mastery skills must share the same unpinned equip/input/aim lifecycle",
 )
 
 attack_position = function_body(
@@ -322,6 +320,7 @@ farm_skill = function_body(
     "function MainFarm:_TryStartFarmSkill",
     "\nfunction MainFarm:_StepAura",
 )
+mastery_policy_setup = farm_skill.split("    local now = os.clock()", 1)[0]
 skill_dispatch = farm_skill.split(
     "    task.spawn(function()",
     1,
@@ -343,6 +342,10 @@ require(
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
     and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
+    and "local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)" in farm_skill
+    and "local skillCategory = masteryCategory or weaponCategory" in farm_skill
+    and "if masteryCategory == nil\n        and (not farmSettings or farmSettings.UseFarmSkills ~= true)" in farm_skill
+    and "if not masteryCategory then\n            self.FarmSkillPreparing = nil\n            return false" not in mastery_policy_setup
     and "local skillScanInterval = FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "self.NextFarmSkillScanAt = now + skillScanInterval" in farm_skill
     and "self.NextFarmSkillScanAt = os.clock() + skillScanInterval" in farm_skill
@@ -356,9 +359,7 @@ require(
     and "self.Target == target" in farm_skill
     and "currentSettings.UseFarmSkills == true" in farm_skill
     and "currentSettings[skill.Setting] == true" in farm_skill
-    and "farmSettings.UseFarmSkills ~= true" in farm_skill
-    and farm_skill.index("not masteryCategory")
-    < farm_skill.index("currentSettings.UseFarmSkills == true")
+    and "currentSettings.FarmMastery ~= true" not in farm_skill
     and "currentSettings.FarmMastery == true" in farm_skill
     and "local callOk, activated, activationResult = pcall(function()" in farm_skill
     and "if not callOk then" in farm_skill
@@ -367,18 +368,16 @@ require(
     and "Mastery waiting: enable a selected skill key" in farm_skill
     and "Mastery skill controls unavailable:" in farm_skill
     and "Mastery skill input failed:" in farm_skill
-    and 'string.format("%.2fs hold", skillHold)' in farm_skill
+    and '"Using Mastery "' not in farm_skill
     and "return true\n        end\n        if skillError" in mastery_no_skill_branch
     and "AttackGunM1(" not in farm_skill
     and "AttackM1(" not in farm_skill
     and "masteryCategory" in farm_skill
-    and "self.CombatService:EquipWeapon(masteryCategory)" in farm_skill
-    and '"Mastery waiting: no usable "' in farm_skill
-    and "self.CombatService:FindEquippedWeapon(masteryCategory)" in farm_skill
-    and "masteryTool ~= nil" in farm_skill
-    and "self.CombatService:FindEquippedWeapon(masteryCategory)" in farm_skill
-    and "masteryTool.Parent == currentCharacter" in farm_skill
-    and "masteryCategory ~= nil\n                            or self:_IsAtFarmAttackPosition" in farm_skill
+    and "masteryTool" not in farm_skill
+    and "self.CombatService:EquipWeapon(masteryCategory)" not in farm_skill
+    and "self.CombatService:FindReadyFarmSkill(\n        farmSettings,\n        skillCategory,\n        skillIgnoredTools,\n        masteryCategory\n    )" in farm_skill
+    and "self.CombatService:FindEquippedWeapon(masteryCategory)" not in farm_skill
+    and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
     and "MASTERY_M1_FALLBACK_INTERVAL" not in farm_skill
     and "skillIgnoredTools," in farm_skill
     and "if masteryCategory then\n            return true" in farm_skill
@@ -387,7 +386,7 @@ require(
     and "if not masteryCategoryNow then" in farm_skill
     and "local masteryCategoryNow = currentSettings" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
-    "Mastery skills must stay on the pinned equipped tool, retry UI detection, and bypass farm-only movement checks",
+    "Mastery must reuse the farm skill flow, allow normal skills above threshold, and wait without wrong-weapon fallback",
 )
 require(
     "key input" in mastery_skill_success
@@ -433,9 +432,9 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: Mastery and regular skills share cooldown readiness; Mastery still pins and rotates its tool's keys")
+print("PASS: Mastery and regular skills share category-filtered cooldown readiness without tool pinning or key rotation")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
-print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
+print("PASS: Mastery selects its category through the normal weapon resolver; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
 print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")
 print("PASS: ordinary farm attacks restore Farm Weapon after asynchronous skill use")
