@@ -360,11 +360,50 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
         end
     end
     if self.CombatService then
+        local masteryTool = category
+            and self.CombatService:FindSkillWeapon(
+                category,
+                farmSettings.FarmMastery == true
+            )
+        local player = self.Context and self.Context.Compatibility
+            and self.Context.Compatibility.Player
+        local character = player and player.Character
+        local backpack = player and player:FindFirstChild("Backpack")
+        local toolParent = masteryTool and masteryTool.Parent == character
+                and "Character"
+            or (masteryTool and masteryTool.Parent == backpack and "Backpack")
+            or (masteryTool and masteryTool.Parent and masteryTool.Parent.Name)
+            or "none"
+        table.insert(
+            lines,
+            "Mastery tool: " .. (masteryTool and masteryTool.Name or "none")
+                .. "; parent=" .. tostring(toolParent)
+                .. "; enabled=" .. tostring(masteryTool and masteryTool.Enabled)
+        )
+        if category == "Gun" then
+            local gunParent = self.LastMasteryGunM1Tool
+                and self.LastMasteryGunM1Tool.Parent
+                and self.LastMasteryGunM1Tool.Parent.Name
+                or "none"
+            table.insert(
+                lines,
+                "Gun M1 last: " .. tostring(self.LastMasteryGunM1Result or "not attempted")
+                    .. "; tool="
+                    .. tostring(self.LastMasteryGunM1Tool and self.LastMasteryGunM1Tool.Name or "none")
+                    .. "; parent=" .. tostring(gunParent)
+                    .. "; age="
+                    .. string.format(
+                        "%.2f",
+                        math.max(0, os.clock() - (self.LastMasteryGunM1At or os.clock()))
+                    )
+            )
+        end
         local diagnosticOk, diagnostic = pcall(
             self.CombatService.BuildFarmSkillDiagnostic,
             self.CombatService,
             farmSettings,
-            category
+            category,
+            farmSettings.FarmMastery == true
         )
         table.insert(
             lines,
@@ -963,6 +1002,71 @@ function MainFarm:_GetMasteryCategory(target, farmSettings, allowMastery)
     return nil
 end
 
+function MainFarm:_SyncFarmSkillContext(
+    target,
+    weaponCategory,
+    farmSettings,
+    allowMastery,
+    masteryCategory
+)
+    local masteryIsAllowed = farmSettings
+        and farmSettings.FarmMastery == true
+        and allowMastery ~= false
+    local skillCategory = masteryCategory
+    if not skillCategory and farmSettings and farmSettings.UseFarmSkills == true then
+        skillCategory = weaponCategory
+    end
+    local contextWeaponCategory
+    if not masteryCategory then
+        contextWeaponCategory = weaponCategory
+    end
+    local selectedTool = skillCategory and self.CombatService
+        and self.CombatService:FindSkillWeapon(skillCategory, true)
+    local nextContext = {
+        Target = target,
+        WeaponCategory = contextWeaponCategory,
+        FarmSkillsEnabled = masteryCategory == nil
+            and farmSettings
+            and farmSettings.UseFarmSkills == true,
+        MasteryEnabled = masteryIsAllowed == true,
+        MasteryMethod = masteryIsAllowed and farmSettings.MasteryCategory,
+        MasteryThreshold = masteryIsAllowed and farmSettings.MasteryHealthPercent,
+        AllowMastery = allowMastery ~= false,
+        ActiveMasteryCategory = masteryCategory,
+        SkillCategory = skillCategory,
+        Tool = selectedTool,
+    }
+    local oldContext = self.FarmSkillContext
+    local changed = not oldContext
+        or oldContext.Target ~= nextContext.Target
+        or oldContext.WeaponCategory ~= nextContext.WeaponCategory
+        or oldContext.FarmSkillsEnabled ~= nextContext.FarmSkillsEnabled
+        or oldContext.MasteryEnabled ~= nextContext.MasteryEnabled
+        or oldContext.MasteryMethod ~= nextContext.MasteryMethod
+        or oldContext.MasteryThreshold ~= nextContext.MasteryThreshold
+        or oldContext.AllowMastery ~= nextContext.AllowMastery
+        or oldContext.ActiveMasteryCategory ~= nextContext.ActiveMasteryCategory
+        or oldContext.SkillCategory ~= nextContext.SkillCategory
+        or oldContext.Tool ~= nextContext.Tool
+
+    if changed then
+        if self.FarmSkillActive and self.CombatService then
+            self.CombatService:Cancel()
+        end
+        self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+        self.FarmSkillActive = false
+        self.FarmSkillTarget = nil
+        self.FarmSkillPreparing = nil
+        self.FarmSkillIgnoredTools = {}
+        self.NextFarmSkillScanAt = 0
+        if self.CombatService then
+            self.CombatService:ClearFarmSkillAimTarget()
+        end
+    end
+    self.FarmSkillContext = nextContext
+    return changed
+end
+
 function MainFarm:_TryStartFarmSkill(
     target,
     session,
@@ -975,6 +1079,13 @@ function MainFarm:_TryStartFarmSkill(
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    self:_SyncFarmSkillContext(
+        target,
+        weaponCategory,
+        farmSettings,
+        allowMastery,
+        masteryCategory
+    )
     local masteryGunM1Result
     local masteryGunM1Error
     if masteryCategory == "Gun" and self.CombatService then
@@ -986,9 +1097,19 @@ function MainFarm:_TryStartFarmSkill(
                 masteryGunM1Result = inputResult
             elseif inputResult ~= "Gun is reloading"
                 and inputResult ~= "Gun M1 is cooling down"
+                and inputResult ~= "Gun is disabled"
+                and inputResult ~= "Selected mastery Gun is no longer equipped"
+                and inputResult ~= "Gun M1 weapon did not equip"
             then
                 masteryGunM1Error = inputResult
             end
+            self.LastMasteryGunM1Tool = equippedGun
+            self.LastMasteryGunM1Result = inputResult
+            self.LastMasteryGunM1At = os.clock()
+        else
+            self.LastMasteryGunM1Tool = nil
+            self.LastMasteryGunM1Result = "Waiting for the selected Gun to equip"
+            self.LastMasteryGunM1At = os.clock()
         end
     end
     if self.FarmSkillActive then
@@ -1067,6 +1188,7 @@ function MainFarm:_TryStartFarmSkill(
         local preparation = self.FarmSkillPreparing
         local refreshAttempts = preparation
             and preparation.Target == target
+            and preparation.ToolName == preparingTool.Name
             and preparation.TotalRefreshAttempts
             or 0
         if not preparation
@@ -1122,6 +1244,30 @@ function MainFarm:_TryStartFarmSkill(
                 "Mastery skill UI refresh failed: " .. tostring(refreshResult),
                 "warning"
             )
+            return true
+        end
+        if masteryCategory then
+            if not preparation.RetryAt then
+                preparation.RetryAt = now + FARM_SKILL_UNAVAILABLE_RETRY
+                self:_SetStatus(
+                    "Mastery waiting: skill UI did not recover; will retry refresh",
+                    "warning"
+                )
+                return true
+            elseif now < preparation.RetryAt then
+                self:_SetStatus(
+                    "Mastery waiting: retrying skill UI refresh in "
+                        .. string.format("%.1f", preparation.RetryAt - now)
+                        .. "s",
+                    "info"
+                )
+                return true
+            end
+            preparation.TotalRefreshAttempts = 0
+            preparation.StartedAt = now
+            preparation.Deadline = now + FARM_SKILL_PREPARE_TIMEOUT
+            preparation.RetryAt = nil
+            self:_SetStatus("Mastery retrying skill UI recovery", "info")
             return true
         end
         self:_SetStatus(

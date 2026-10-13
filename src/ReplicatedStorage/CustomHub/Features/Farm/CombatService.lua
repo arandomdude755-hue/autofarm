@@ -129,10 +129,30 @@ function CombatService:FindWeapon(category)
     return nil
 end
 
-function CombatService:FindSkillWeapon(category)
+function CombatService:FindSkillWeapon(category, preferEquipped)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
     local character = player and player.Character
+
+    if preferEquipped then
+        local equipped = self:FindEquippedWeapon(category)
+        if equipped then
+            return equipped
+        end
+        if category == "Gun" and backpack then
+            for _, item in ipairs(backpack:GetChildren()) do
+                if item:IsA("Tool")
+                    and item.ToolTip == category
+                    and item.Name ~= "Skull Guitar"
+                then
+                    return item
+                end
+            end
+            -- Mastery must not equip Skull Guitar solely because it is in the
+            -- hotbar; it is eligible here only when already equipped.
+            return nil
+        end
+    end
 
     local function findMatchingTool(container, exactName)
         if not container then
@@ -149,9 +169,9 @@ function CombatService:FindSkillWeapon(category)
         return nil
     end
 
-    -- Keep the explicitly requested Skull Guitar preference, then mirror
+    -- Preserve the existing non-Mastery Skull Guitar preference, then mirror
     -- BNN's NameWeapon order: hotbar Backpack first, equipped Character next.
-    if category == "Gun" then
+    if category == "Gun" and not preferEquipped then
         local skullGuitar = findMatchingTool(backpack, "Skull Guitar")
             or findMatchingTool(character, "Skull Guitar")
         if skullGuitar then
@@ -253,6 +273,8 @@ function CombatService:_FindReadySkill(
     local ignoredToolName
     local incompleteSkillControls
     local unavailableSkillTitle
+    local masterySkillUiMismatch
+    local masterySkillUiTool
     local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
         if category.Name == preferredCategory then
@@ -263,7 +285,7 @@ function CombatService:_FindReadySkill(
     end
     for _, category in ipairs(orderedCategories) do
         if not onlyCategory or category.Name == onlyCategory then
-            local tool = self:FindSkillWeapon(category.Name)
+            local tool = self:FindSkillWeapon(category.Name, onlyCategory ~= nil)
             local selectedKeys = {}
             local selectedKeySet = {}
             for _, keyName in ipairs(category.Keys) do
@@ -282,6 +304,18 @@ function CombatService:_FindReadySkill(
                 ignoredToolName = ignoredToolName or tool.Name
             elseif tool and #selectedKeys > 0 then
                 checkedToolCount += 1
+                if onlyCategory then
+                    local character = player and player.Character
+                    if tool.Parent ~= character then
+                        local equipped, equipResult = self:EquipTool(tool)
+                        if not equipped then
+                            return nil, tostring(equipResult), tool
+                        end
+                        return nil,
+                            "Mastery tool equipped; waiting for its skill controls to sync",
+                            tool
+                    end
+                end
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
                     local equipped, equipResult = self:EquipTool(tool)
@@ -319,6 +353,9 @@ function CombatService:_FindReadySkill(
                         incompleteSkillControls = incompleteSkillControls or (
                             tool.Name .. " " .. keyName .. " controls are incomplete"
                         )
+                        if onlyCategory then
+                            masterySkillUiTool = masterySkillUiTool or tool
+                        end
                     elseif frame.Name ~= "Template"
                         and selectedKey
                         and (titleText == "" or titleText == "???")
@@ -326,6 +363,9 @@ function CombatService:_FindReadySkill(
                         unavailableSkillTitle = unavailableSkillTitle or (
                             tool.Name .. " " .. keyName .. " title is unavailable"
                         )
+                        if onlyCategory then
+                            masterySkillUiTool = masterySkillUiTool or tool
+                        end
                     elseif frame.Name ~= "Template"
                         and selectedKey
                         and string.find(titleText, "Transformation", 1, true)
@@ -344,6 +384,13 @@ function CombatService:_FindReadySkill(
                                 Key = keyName,
                                 Setting = "FarmSkill_" .. category.Token .. "_" .. keyName,
                             }
+                        elseif onlyCategory and cooldownEmpty and not cooldownFull
+                            and not titleIsReady
+                        then
+                            masterySkillUiMismatch = masterySkillUiMismatch
+                                or (tool.Name .. " " .. keyName
+                                    .. " shows an empty cooldown but is not ready")
+                            masterySkillUiTool = masterySkillUiTool or tool
                         end
                     end
                 end
@@ -360,10 +407,18 @@ function CombatService:_FindReadySkill(
         return nil, "No usable " .. missingToolCategory .. " skill weapon is available"
     end
     if incompleteSkillControls then
-        return nil, "Skill UI incomplete: " .. incompleteSkillControls
+        return nil,
+            "Skill UI incomplete: " .. incompleteSkillControls,
+            onlyCategory and masterySkillUiTool or nil
     end
     if unavailableSkillTitle then
-        return nil, "Selected skill unavailable: " .. unavailableSkillTitle
+        return nil,
+            "Selected skill unavailable: " .. unavailableSkillTitle,
+            onlyCategory and masterySkillUiTool or nil
+    end
+    if masterySkillUiMismatch then
+        return nil, "Mastery skill UI needs to resync: " .. masterySkillUiMismatch,
+            masterySkillUiTool
     end
     return nil, "All selected skill keys are on cooldown"
 end
@@ -379,14 +434,14 @@ function CombatService:FindReadyFarmSkill(
     end, preferredCategory, ignoredTools, onlyCategory)
 end
 
-function CombatService:BuildFarmSkillDiagnostic(farmSettings, categoryName)
+function CombatService:BuildFarmSkillDiagnostic(farmSettings, categoryName, preferEquipped)
     local player = self.Compatibility.Player
     local character = player and player.Character
     local backpack = player and player:FindFirstChild("Backpack")
     local playerGui = self.Compatibility:GetPlayerGui()
     local main = playerGui and playerGui:FindFirstChild("Main")
     local skills = main and main:FindFirstChild("Skills")
-    local tool = self:FindSkillWeapon(categoryName)
+    local tool = self:FindSkillWeapon(categoryName, preferEquipped == true)
     local toolParent = "none"
     if tool then
         if tool.Parent == character then

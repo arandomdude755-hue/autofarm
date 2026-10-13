@@ -5,7 +5,7 @@ description: Project decisions for migrating Banana Cat Hub farming features and
 
 Migrate BNN features in functional slices, and add settings alongside the feature that uses them. Use this project’s configuration path rather than copying BNN executor filesystem persistence. Do not expose BNN controls until their behavior is implemented.
 
-For the Tiki Outpost puzzle, automatically use any currently ready skill; do not expose puzzle-only skill selection settings. Regular farming skill selection is separate and opt-in. Skull Guitar may be loaded and used against puzzle objects only if already owned; never buy items or server-hop for this feature. Farm Mastery may select a matching Gun or Blox Fruit tool from the Character or Player.Backpack; Player.Backpack means unequipped hotbar tools, not stored inventory. For Gun, prefer Skull Guitar if present in either live tool container. Use Skull Guitar TAP only when it is actually equipped. Resume the selected Farm Weapon after the puzzle phase.
+For the Tiki Outpost puzzle, automatically use any currently ready skill; do not expose puzzle-only skill selection settings. Regular farming skill selection is separate and opt-in. Skull Guitar may be loaded and used against puzzle objects only if already owned; never buy items or server-hop for this feature. Farm Mastery prefers a currently equipped matching Gun or Blox Fruit; if none is equipped, it may select a matching tool from Player.Backpack, which means unequipped hotbar tools, not stored inventory. Never auto-equip Skull Guitar solely because it is in the hotbar; it is eligible for Mastery only when already equipped. Use Skull Guitar TAP only when it is actually equipped. Resume the selected Farm Weapon after the puzzle phase.
 
 The general “Use skills while farming” toggle gates only ordinary farm skill use. Farm Mastery uses the universal skill-key selections for its configured mastery category without requiring that toggle.
 
@@ -29,4 +29,10 @@ Use Vxeze's reference-style Gun M1 approach: locate the game's gun-shoot functio
 
 **Why:** BNN and Quantum's manual validator/remote paths are version-sensitive, and Skull Guitar's direct TAP call did not work in the user's test even though manual TAP worked. Vxeze instead finds the client shoot function and overrides its target lookup, which is the approved implementation direction. The user clarified that Player.Backpack means unequipped hotbar tools rather than stored inventory and does not want Skull Guitar equipped solely for Mastery.
 
-**How to apply:** resolve mastery weapons only from live Character/Player.Backpack Tool instances; never query stored inventory. Keep the shared skill flow unchanged. Use the target-directed client gun handler only when a matching Gun is already equipped, restore its original target lookup immediately after firing, honor reload/cooldown state, and keep Gun M1 independently throttled from skills. Do not use direct TAP/Validator2/ShootGunEvent remote firing as a fallback.
+**How to apply:** resolve mastery weapons only from live Character/Player.Backpack Tool instances; never query stored inventory. Prefer an equipped tool, and exclude Skull Guitar from the unequipped-Gun fallback. Keep the shared skill flow unchanged. Use the target-directed client gun handler only when a matching Gun is already equipped, restore its original target lookup immediately after firing, honor reload/cooldown state, and keep Gun M1 independently throttled from skills. Do not use direct TAP/Validator2/ShootGunEvent remote firing as a fallback.
+
+Changing the target, Mastery method, or selected tool during a farm must not leave a stale skill input or preparation state blocking the current farm. Re-evaluate the active context and safely release/reset stale state when it changes.
+
+**Why:** the user explicitly wants switching weapons or modes mid-farm to recover rather than break any farm function.
+
+**How to apply:** track target/method/tool identity, cancel held input on context changes, clear cached readiness/preparation, then reacquire the current tool and skill UI before continuing.

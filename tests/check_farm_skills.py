@@ -94,13 +94,17 @@ require(
     and "cooldown.Size == UDim2.new(0, 0, 1, -1)" in ready_skill
     and "cooldown.Size == UDim2.new(1, 0, 1, -1)" in ready_skill
     and "isReady = (titleIsReady and cooldownEmpty) or cooldownFull" in ready_skill
-    and "local tool = self:FindSkillWeapon(category.Name)" in ready_skill
+    and "local tool = self:FindSkillWeapon(category.Name, onlyCategory ~= nil)" in ready_skill
     and "frame.Visible" not in ready_skill
     and 'for _, frame in ipairs(toolSkills:GetChildren()) do' in ready_skill
     and 'selectedKeySet[keyName]' in ready_skill
     and 'frame.Name ~= "Template"' in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
+    and "Mastery tool equipped; waiting for its skill controls to sync" in ready_skill
+    and "Mastery skill UI needs to resync:" in ready_skill
+    and "cooldownEmpty and not cooldownFull" in ready_skill
+    and "onlyCategory and masterySkillUiTool or nil" in ready_skill
     and "PlayerGui.Main.Skills entry" in ready_skill
     and "listSkillUiToolNames(skills)" in ready_skill
     and "equippedTool" not in ready_skill
@@ -194,7 +198,12 @@ find_skill_weapon = function_body(
     "\nfunction CombatService:FindToolByName",
 )
 require(
-    'findMatchingTool(backpack, "Skull Guitar")' in find_skill_weapon
+    "if preferEquipped then" in find_skill_weapon
+    and 'if category == "Gun" and backpack then' in find_skill_weapon
+    and 'item.Name ~= "Skull Guitar"' in find_skill_weapon
+    and 'return nil' in find_skill_weapon
+    and 'if category == "Gun" and not preferEquipped then' in find_skill_weapon
+    and 'findMatchingTool(backpack, "Skull Guitar")' in find_skill_weapon
     and 'findMatchingTool(character, "Skull Guitar")' in find_skill_weapon
     and find_skill_weapon.index("findMatchingTool(backpack)") < find_skill_weapon.index("findMatchingTool(character)")
     and "item.ToolTip == category" in find_skill_weapon,
@@ -465,6 +474,22 @@ require(
     "Mastery must switch categories only at or below the configured health threshold",
 )
 
+skill_context = function_body(
+    MAIN_FARM,
+    "function MainFarm:_SyncFarmSkillContext",
+    "\nfunction MainFarm:_TryStartFarmSkill",
+)
+require(
+    "oldContext.Tool ~= nextContext.Tool" in skill_context
+    and "oldContext.MasteryMethod ~= nextContext.MasteryMethod" in skill_context
+    and "oldContext.ActiveMasteryCategory ~= nextContext.ActiveMasteryCategory" in skill_context
+    and "self.CombatService:Cancel()" in skill_context
+    and "self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1" in skill_context
+    and "self.FarmSkillPreparing = nil" in skill_context
+    and "self.NextFarmSkillScanAt = 0" in skill_context,
+    "Changing the selected method, target, or tool must cancel stale input and reset farm-skill preparation",
+)
+
 require(
     "_TryMasteryM1Fallback" not in MAIN_FARM
     and "LastMasteryM1Result" not in MAIN_FARM
@@ -503,6 +528,9 @@ require(
     and "masteryCategory ~= nil\n                            or self:_IsAtFarmAttackPosition(" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
     and "local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)" in farm_skill
+    and "self:_SyncFarmSkillContext(" in farm_skill
+    and 'inputResult ~= "Gun is disabled"' in farm_skill
+    and "self.LastMasteryGunM1Result = inputResult" in farm_skill
     and "local skillCategory = masteryCategory or weaponCategory" in farm_skill
     and "local shouldTrackSkillAim = masteryCategory ~= nil" in farm_skill
     and "self.CombatService:SetFarmSkillAimTarget(target)" in farm_skill
@@ -518,6 +546,9 @@ require(
     and "preparation.TotalRefreshAttempts < MASTERY_SKILL_UI_REFRESH_LIMIT" in farm_skill
     and "self.CombatService:RefreshEquippedTool(preparingTool)" in farm_skill
     and "tool UI refresh limit reached" in farm_skill
+    and "preparation.RetryAt = now + FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
+    and "Mastery retrying skill UI recovery" in farm_skill
+    and "preparation.ToolName == preparingTool.Name" in farm_skill
     and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
     and farm_skill.count("task.spawn(function()") == 1
     and "finishSkillAttempt(runSkillAttempt())" in skill_dispatch
@@ -651,7 +682,8 @@ require(
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: Mastery and regular skills share category-filtered cooldown readiness without tool pinning or key rotation")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
-print("PASS: skill weapon lookup follows BNN's Backpack-first flow while Gun M1 uses only an already equipped tool")
+print("PASS: Mastery reuses equipped tools safely and excludes unequipped Skull Guitar")
+print("PASS: non-Mastery skill lookup preserves BNN's Backpack-first behavior")
 print("PASS: Gun Mastery fires through the game gun handler without interrupting skill dispatch")
 print("PASS: Mastery skills may fire during approach; ordinary skills retain the attack-position gate")
 print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")

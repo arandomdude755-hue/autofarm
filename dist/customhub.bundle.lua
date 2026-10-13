@@ -6326,10 +6326,30 @@ function CombatService:FindWeapon(category)
     return nil
 end
 
-function CombatService:FindSkillWeapon(category)
+function CombatService:FindSkillWeapon(category, preferEquipped)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
     local character = player and player.Character
+
+    if preferEquipped then
+        local equipped = self:FindEquippedWeapon(category)
+        if equipped then
+            return equipped
+        end
+        if category == "Gun" and backpack then
+            for _, item in ipairs(backpack:GetChildren()) do
+                if item:IsA("Tool")
+                    and item.ToolTip == category
+                    and item.Name ~= "Skull Guitar"
+                then
+                    return item
+                end
+            end
+            -- Mastery must not equip Skull Guitar solely because it is in the
+            -- hotbar; it is eligible here only when already equipped.
+            return nil
+        end
+    end
 
     local function findMatchingTool(container, exactName)
         if not container then
@@ -6346,9 +6366,9 @@ function CombatService:FindSkillWeapon(category)
         return nil
     end
 
-    -- Keep the explicitly requested Skull Guitar preference, then mirror
+    -- Preserve the existing non-Mastery Skull Guitar preference, then mirror
     -- BNN's NameWeapon order: hotbar Backpack first, equipped Character next.
-    if category == "Gun" then
+    if category == "Gun" and not preferEquipped then
         local skullGuitar = findMatchingTool(backpack, "Skull Guitar")
             or findMatchingTool(character, "Skull Guitar")
         if skullGuitar then
@@ -6450,6 +6470,8 @@ function CombatService:_FindReadySkill(
     local ignoredToolName
     local incompleteSkillControls
     local unavailableSkillTitle
+    local masterySkillUiMismatch
+    local masterySkillUiTool
     local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
         if category.Name == preferredCategory then
@@ -6460,7 +6482,7 @@ function CombatService:_FindReadySkill(
     end
     for _, category in ipairs(orderedCategories) do
         if not onlyCategory or category.Name == onlyCategory then
-            local tool = self:FindSkillWeapon(category.Name)
+            local tool = self:FindSkillWeapon(category.Name, onlyCategory ~= nil)
             local selectedKeys = {}
             local selectedKeySet = {}
             for _, keyName in ipairs(category.Keys) do
@@ -6479,6 +6501,18 @@ function CombatService:_FindReadySkill(
                 ignoredToolName = ignoredToolName or tool.Name
             elseif tool and #selectedKeys > 0 then
                 checkedToolCount += 1
+                if onlyCategory then
+                    local character = player and player.Character
+                    if tool.Parent ~= character then
+                        local equipped, equipResult = self:EquipTool(tool)
+                        if not equipped then
+                            return nil, tostring(equipResult), tool
+                        end
+                        return nil,
+                            "Mastery tool equipped; waiting for its skill controls to sync",
+                            tool
+                    end
+                end
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
                     local equipped, equipResult = self:EquipTool(tool)
@@ -6516,6 +6550,9 @@ function CombatService:_FindReadySkill(
                         incompleteSkillControls = incompleteSkillControls or (
                             tool.Name .. " " .. keyName .. " controls are incomplete"
                         )
+                        if onlyCategory then
+                            masterySkillUiTool = masterySkillUiTool or tool
+                        end
                     elseif frame.Name ~= "Template"
                         and selectedKey
                         and (titleText == "" or titleText == "???")
@@ -6523,6 +6560,9 @@ function CombatService:_FindReadySkill(
                         unavailableSkillTitle = unavailableSkillTitle or (
                             tool.Name .. " " .. keyName .. " title is unavailable"
                         )
+                        if onlyCategory then
+                            masterySkillUiTool = masterySkillUiTool or tool
+                        end
                     elseif frame.Name ~= "Template"
                         and selectedKey
                         and string.find(titleText, "Transformation", 1, true)
@@ -6541,6 +6581,13 @@ function CombatService:_FindReadySkill(
                                 Key = keyName,
                                 Setting = "FarmSkill_" .. category.Token .. "_" .. keyName,
                             }
+                        elseif onlyCategory and cooldownEmpty and not cooldownFull
+                            and not titleIsReady
+                        then
+                            masterySkillUiMismatch = masterySkillUiMismatch
+                                or (tool.Name .. " " .. keyName
+                                    .. " shows an empty cooldown but is not ready")
+                            masterySkillUiTool = masterySkillUiTool or tool
                         end
                     end
                 end
@@ -6557,10 +6604,18 @@ function CombatService:_FindReadySkill(
         return nil, "No usable " .. missingToolCategory .. " skill weapon is available"
     end
     if incompleteSkillControls then
-        return nil, "Skill UI incomplete: " .. incompleteSkillControls
+        return nil,
+            "Skill UI incomplete: " .. incompleteSkillControls,
+            onlyCategory and masterySkillUiTool or nil
     end
     if unavailableSkillTitle then
-        return nil, "Selected skill unavailable: " .. unavailableSkillTitle
+        return nil,
+            "Selected skill unavailable: " .. unavailableSkillTitle,
+            onlyCategory and masterySkillUiTool or nil
+    end
+    if masterySkillUiMismatch then
+        return nil, "Mastery skill UI needs to resync: " .. masterySkillUiMismatch,
+            masterySkillUiTool
     end
     return nil, "All selected skill keys are on cooldown"
 end
@@ -6576,14 +6631,14 @@ function CombatService:FindReadyFarmSkill(
     end, preferredCategory, ignoredTools, onlyCategory)
 end
 
-function CombatService:BuildFarmSkillDiagnostic(farmSettings, categoryName)
+function CombatService:BuildFarmSkillDiagnostic(farmSettings, categoryName, preferEquipped)
     local player = self.Compatibility.Player
     local character = player and player.Character
     local backpack = player and player:FindFirstChild("Backpack")
     local playerGui = self.Compatibility:GetPlayerGui()
     local main = playerGui and playerGui:FindFirstChild("Main")
     local skills = main and main:FindFirstChild("Skills")
-    local tool = self:FindSkillWeapon(categoryName)
+    local tool = self:FindSkillWeapon(categoryName, preferEquipped == true)
     local toolParent = "none"
     if tool then
         if tool.Parent == character then
@@ -7781,11 +7836,50 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
         end
     end
     if self.CombatService then
+        local masteryTool = category
+            and self.CombatService:FindSkillWeapon(
+                category,
+                farmSettings.FarmMastery == true
+            )
+        local player = self.Context and self.Context.Compatibility
+            and self.Context.Compatibility.Player
+        local character = player and player.Character
+        local backpack = player and player:FindFirstChild("Backpack")
+        local toolParent = masteryTool and masteryTool.Parent == character
+                and "Character"
+            or (masteryTool and masteryTool.Parent == backpack and "Backpack")
+            or (masteryTool and masteryTool.Parent and masteryTool.Parent.Name)
+            or "none"
+        table.insert(
+            lines,
+            "Mastery tool: " .. (masteryTool and masteryTool.Name or "none")
+                .. "; parent=" .. tostring(toolParent)
+                .. "; enabled=" .. tostring(masteryTool and masteryTool.Enabled)
+        )
+        if category == "Gun" then
+            local gunParent = self.LastMasteryGunM1Tool
+                and self.LastMasteryGunM1Tool.Parent
+                and self.LastMasteryGunM1Tool.Parent.Name
+                or "none"
+            table.insert(
+                lines,
+                "Gun M1 last: " .. tostring(self.LastMasteryGunM1Result or "not attempted")
+                    .. "; tool="
+                    .. tostring(self.LastMasteryGunM1Tool and self.LastMasteryGunM1Tool.Name or "none")
+                    .. "; parent=" .. tostring(gunParent)
+                    .. "; age="
+                    .. string.format(
+                        "%.2f",
+                        math.max(0, os.clock() - (self.LastMasteryGunM1At or os.clock()))
+                    )
+            )
+        end
         local diagnosticOk, diagnostic = pcall(
             self.CombatService.BuildFarmSkillDiagnostic,
             self.CombatService,
             farmSettings,
-            category
+            category,
+            farmSettings.FarmMastery == true
         )
         table.insert(
             lines,
@@ -8384,6 +8478,71 @@ function MainFarm:_GetMasteryCategory(target, farmSettings, allowMastery)
     return nil
 end
 
+function MainFarm:_SyncFarmSkillContext(
+    target,
+    weaponCategory,
+    farmSettings,
+    allowMastery,
+    masteryCategory
+)
+    local masteryIsAllowed = farmSettings
+        and farmSettings.FarmMastery == true
+        and allowMastery ~= false
+    local skillCategory = masteryCategory
+    if not skillCategory and farmSettings and farmSettings.UseFarmSkills == true then
+        skillCategory = weaponCategory
+    end
+    local contextWeaponCategory
+    if not masteryCategory then
+        contextWeaponCategory = weaponCategory
+    end
+    local selectedTool = skillCategory and self.CombatService
+        and self.CombatService:FindSkillWeapon(skillCategory, true)
+    local nextContext = {
+        Target = target,
+        WeaponCategory = contextWeaponCategory,
+        FarmSkillsEnabled = masteryCategory == nil
+            and farmSettings
+            and farmSettings.UseFarmSkills == true,
+        MasteryEnabled = masteryIsAllowed == true,
+        MasteryMethod = masteryIsAllowed and farmSettings.MasteryCategory,
+        MasteryThreshold = masteryIsAllowed and farmSettings.MasteryHealthPercent,
+        AllowMastery = allowMastery ~= false,
+        ActiveMasteryCategory = masteryCategory,
+        SkillCategory = skillCategory,
+        Tool = selectedTool,
+    }
+    local oldContext = self.FarmSkillContext
+    local changed = not oldContext
+        or oldContext.Target ~= nextContext.Target
+        or oldContext.WeaponCategory ~= nextContext.WeaponCategory
+        or oldContext.FarmSkillsEnabled ~= nextContext.FarmSkillsEnabled
+        or oldContext.MasteryEnabled ~= nextContext.MasteryEnabled
+        or oldContext.MasteryMethod ~= nextContext.MasteryMethod
+        or oldContext.MasteryThreshold ~= nextContext.MasteryThreshold
+        or oldContext.AllowMastery ~= nextContext.AllowMastery
+        or oldContext.ActiveMasteryCategory ~= nextContext.ActiveMasteryCategory
+        or oldContext.SkillCategory ~= nextContext.SkillCategory
+        or oldContext.Tool ~= nextContext.Tool
+
+    if changed then
+        if self.FarmSkillActive and self.CombatService then
+            self.CombatService:Cancel()
+        end
+        self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+        self.FarmSkillActive = false
+        self.FarmSkillTarget = nil
+        self.FarmSkillPreparing = nil
+        self.FarmSkillIgnoredTools = {}
+        self.NextFarmSkillScanAt = 0
+        if self.CombatService then
+            self.CombatService:ClearFarmSkillAimTarget()
+        end
+    end
+    self.FarmSkillContext = nextContext
+    return changed
+end
+
 function MainFarm:_TryStartFarmSkill(
     target,
     session,
@@ -8396,6 +8555,13 @@ function MainFarm:_TryStartFarmSkill(
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    self:_SyncFarmSkillContext(
+        target,
+        weaponCategory,
+        farmSettings,
+        allowMastery,
+        masteryCategory
+    )
     local masteryGunM1Result
     local masteryGunM1Error
     if masteryCategory == "Gun" and self.CombatService then
@@ -8407,9 +8573,19 @@ function MainFarm:_TryStartFarmSkill(
                 masteryGunM1Result = inputResult
             elseif inputResult ~= "Gun is reloading"
                 and inputResult ~= "Gun M1 is cooling down"
+                and inputResult ~= "Gun is disabled"
+                and inputResult ~= "Selected mastery Gun is no longer equipped"
+                and inputResult ~= "Gun M1 weapon did not equip"
             then
                 masteryGunM1Error = inputResult
             end
+            self.LastMasteryGunM1Tool = equippedGun
+            self.LastMasteryGunM1Result = inputResult
+            self.LastMasteryGunM1At = os.clock()
+        else
+            self.LastMasteryGunM1Tool = nil
+            self.LastMasteryGunM1Result = "Waiting for the selected Gun to equip"
+            self.LastMasteryGunM1At = os.clock()
         end
     end
     if self.FarmSkillActive then
@@ -8488,6 +8664,7 @@ function MainFarm:_TryStartFarmSkill(
         local preparation = self.FarmSkillPreparing
         local refreshAttempts = preparation
             and preparation.Target == target
+            and preparation.ToolName == preparingTool.Name
             and preparation.TotalRefreshAttempts
             or 0
         if not preparation
@@ -8543,6 +8720,30 @@ function MainFarm:_TryStartFarmSkill(
                 "Mastery skill UI refresh failed: " .. tostring(refreshResult),
                 "warning"
             )
+            return true
+        end
+        if masteryCategory then
+            if not preparation.RetryAt then
+                preparation.RetryAt = now + FARM_SKILL_UNAVAILABLE_RETRY
+                self:_SetStatus(
+                    "Mastery waiting: skill UI did not recover; will retry refresh",
+                    "warning"
+                )
+                return true
+            elseif now < preparation.RetryAt then
+                self:_SetStatus(
+                    "Mastery waiting: retrying skill UI refresh in "
+                        .. string.format("%.1f", preparation.RetryAt - now)
+                        .. "s",
+                    "info"
+                )
+                return true
+            end
+            preparation.TotalRefreshAttempts = 0
+            preparation.StartedAt = now
+            preparation.Deadline = now + FARM_SKILL_PREPARE_TIMEOUT
+            preparation.RetryAt = nil
+            self:_SetStatus("Mastery retrying skill UI recovery", "info")
             return true
         end
         self:_SetStatus(
