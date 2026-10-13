@@ -717,6 +717,16 @@ tiki_action = function_body(
     "function MainFarm:_UseTikiPuzzleAction",
     "\nfunction MainFarm:_StepTikiEventPhase",
 )
+status_report = function_body(
+    MAIN_FARM,
+    "function MainFarm:CopyStatusReport",
+    "\nfunction MainFarm:_PrintSpawnDiagnosticReport",
+)
+tiki_diagnostic = function_body(
+    MAIN_FARM,
+    "function MainFarm:_BuildTikiPuzzleDiagnosticReport",
+    "\nfunction MainFarm:CopyStatusReport",
+)
 require(
     "FindReadyTikiSkill()" in tiki_action
     and "UseSkill(" in tiki_action
@@ -724,6 +734,15 @@ require(
     and "farmSettings" not in tiki_action
     and "any ready skill" in tiki_action,
     "Tiki puzzle skills must ignore regular-farm skill settings and use any ready skill",
+)
+require(
+    "local tikiDiagnostic = self.TikiPuzzleActive == true" in status_report
+    and "if tikiDiagnostic then" in status_report
+    and "self:_BuildTikiPuzzleDiagnosticReport()" in status_report
+    and "does not control Tiki puzzle attacks" in tiki_diagnostic
+    and "Last puzzle action:" in tiki_diagnostic
+    and "Ready puzzle skill:" in tiki_diagnostic,
+    "Copy status must report Tiki puzzle state instead of unrelated Farm Mastery target data",
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")

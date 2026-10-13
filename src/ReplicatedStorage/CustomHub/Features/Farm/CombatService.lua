@@ -1008,7 +1008,8 @@ function CombatService:TapSkullGuitar(targetPosition)
     )
     return true, shotStateChanged
         and "Skull Guitar client firing state changed; puzzle progress is unconfirmed"
-        or "Skull Guitar input sent; firing and puzzle progress are unconfirmed"
+        or "Skull Guitar input sent; no client firing-state change was observed",
+        shotStateChanged
 end
 
 function CombatService:_FindBladeHitParts(character, root, range)

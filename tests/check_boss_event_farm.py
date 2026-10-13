@@ -185,6 +185,11 @@ require(
     and "TapSkullGuitar(targetPosition)" in event_action
     and "FindReadyTikiSkill()" in event_action
     and "UseSkill(" in event_action
+    and "local tapped, tapResult, shotStateChanged" in event_action
+    and "if tapped and shotStateChanged == true then" in event_action
+    and "Skull Guitar input had no client firing-state change" in event_action
+    and event_action.index("Skull Guitar input had no client firing-state change")
+        < event_action.index("FindReadyTikiSkill()")
     and "Tiki puzzle waiting for any ready skill" in event_action
     and 'ownershipError = "Skull Guitar is reloading"' in event_action
     and event_action.index('ownershipError = "Skull Guitar is reloading"')
@@ -204,6 +209,9 @@ require(
     and "self:_InvokeGunShootInput(tool, targetPart)" in skull_tap
     and "FireServer" not in skull_tap
     and "IsGunReloading" in skull_tap
+    and "shotStateChanged" in skull_tap
+    and "no client firing-state change was observed" in skull_tap
+    and 'no client firing-state change was observed",\n        shotStateChanged' in skull_tap
     and "function CombatService:UseTikiSkill" in COMBAT
     and "function CombatService:UseSkill" in COMBAT
     and "SendKeyEvent(true, keyName" in COMBAT

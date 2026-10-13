@@ -432,14 +432,129 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
     return text
 end
 
+function MainFarm:_BuildTikiPuzzleDiagnosticReport()
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings or {}
+    local lines = {
+        "===== [TikiPuzzleDiagnostic] REPORT BEGIN =====",
+        "Farm mode: " .. tostring(farmSettings.FarmMode),
+        "Puzzle phase active: " .. tostring(self.TikiPuzzleActive == true),
+        "Farm Mastery setting: " .. tostring(farmSettings.FarmMastery == true)
+            .. " (independent; does not control Tiki puzzle attacks)",
+        "Status: " .. tostring(self.LastStatus or "unavailable"),
+        "Status age: " .. string.format("%.2f", math.max(0, os.clock() - (self.LastStatusAt or os.clock()))),
+    }
+
+    local target = self.TikiEventTarget
+    local targetPosition
+    if target then
+        local pivotOk, pivot = pcall(function()
+            if target:IsA("Model") then
+                return target:GetPivot()
+            elseif target:IsA("BasePart") then
+                return target.CFrame
+            end
+            return nil
+        end)
+        if pivotOk and typeof(pivot) == "CFrame" then
+            targetPosition = pivot.Position
+        end
+        table.insert(
+            lines,
+            "Puzzle object: " .. target.Name
+                .. "; parent=" .. tostring(target.Parent and target.Parent.Name or "none")
+                .. "; AlreadyDestroyedClient="
+                .. tostring(target:GetAttribute("AlreadyDestroyedClient") == true)
+        )
+    else
+        table.insert(lines, "Puzzle object: none")
+    end
+
+    local playerRoot
+    if self.Context and self.Context.Compatibility then
+        local _, _, currentRoot = self.Context.Compatibility:GetCharacterParts()
+        playerRoot = currentRoot
+    end
+    local distance = playerRoot and targetPosition
+        and (playerRoot.Position - targetPosition).Magnitude
+    table.insert(
+        lines,
+        "Object distance: " .. (distance and string.format("%.1f", distance) or "n/a")
+            .. "; movement_active=" .. tostring(
+                self.MovementService and self.MovementService.Active ~= nil
+            )
+    )
+
+    local combatReady = self.CombatService ~= nil
+    if not combatReady then
+        combatReady = self:_EnsureCombatService() == true
+    end
+    if combatReady and self.CombatService then
+        local guitar = self.CombatService:FindToolByName("Skull Guitar")
+        local player = self.Context and self.Context.Compatibility
+            and self.Context.Compatibility.Player
+        local character = player and player.Character
+        local backpack = player and player:FindFirstChild("Backpack")
+        local parent = guitar and guitar.Parent == character and "Character"
+            or (guitar and guitar.Parent == backpack and "Backpack")
+            or (guitar and guitar.Parent and guitar.Parent.Name)
+            or "none"
+        table.insert(
+            lines,
+            "Skull Guitar: " .. tostring(guitar and guitar.Name or "not loaded")
+                .. "; parent=" .. tostring(parent)
+                .. "; enabled=" .. tostring(guitar and guitar.Enabled)
+        )
+
+        local readyOk, readySkill, readyError = pcall(
+            self.CombatService.FindReadyTikiSkill,
+            self.CombatService
+        )
+        table.insert(
+            lines,
+            readyOk and readySkill
+                and ("Ready puzzle skill: " .. readySkill.Category .. " "
+                    .. readySkill.Key .. "; tool=" .. readySkill.Tool.Name)
+                or ("Ready puzzle skill: none; reason="
+                    .. tostring(readyOk and readyError or readySkill))
+        )
+    else
+        table.insert(lines, "Combat service: unavailable")
+    end
+
+    local action = self.LastTikiAction
+    if action then
+        table.insert(
+            lines,
+            "Last puzzle action: " .. tostring(action.Action)
+                .. "; object=" .. tostring(action.ObjectName)
+                .. "; tool=" .. tostring(action.ToolName)
+                .. "; result=" .. tostring(action.Result)
+                .. "; client_firing_state="
+                .. tostring(action.ClientFiringState)
+                .. "; age="
+                .. string.format("%.2f", math.max(0, os.clock() - (action.At or os.clock())))
+        )
+    else
+        table.insert(lines, "Last puzzle action: none")
+    end
+
+    table.insert(lines, "===== [TikiPuzzleDiagnostic] REPORT END =====")
+    return table.concat(lines, "\n")
+end
+
 function MainFarm:CopyStatusReport()
     local farmSettings = self.Context and self.Context.Config
         and self.Context.Config.FarmSettings
+    local tikiDiagnostic = self.TikiPuzzleActive == true
     local masteryDiagnostic = farmSettings
         and farmSettings.FarmMastery == true
         or self.FarmSkillPreparing ~= nil
     local text
-    if masteryDiagnostic then
+    if tikiDiagnostic then
+        text = self:_BuildTikiPuzzleDiagnosticReport()
+        self.LastTikiPuzzleDiagnosticReportText = text
+    elseif masteryDiagnostic then
         text = self:_BuildFarmMasteryDiagnosticReport()
         self.LastFarmMasteryDiagnosticReportText = text
     else
@@ -458,9 +573,14 @@ function MainFarm:CopyStatusReport()
         end
     end)
     if clipboardCallOk and copied then
+        local copiedMessage = "Complete quest status report copied to clipboard."
+        if tikiDiagnostic then
+            copiedMessage = "Tiki puzzle diagnostic copied to clipboard."
+        elseif masteryDiagnostic then
+            copiedMessage = "Farm Mastery diagnostic copied to clipboard."
+        end
         self:_SetStatus(
-            masteryDiagnostic and "Farm Mastery diagnostic copied to clipboard."
-                or "Complete quest status report copied to clipboard.",
+            copiedMessage,
             "success"
         )
     else
@@ -1833,16 +1953,31 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
         return true
     end
 
+    local tapStateChanged = false
     if ownsGuitar and guitar then
-        local tapped, tapResult = self.CombatService:TapSkullGuitar(targetPosition)
-        if tapped then
+        local tapped, tapResult, shotStateChanged =
+            self.CombatService:TapSkullGuitar(targetPosition)
+        tapStateChanged = shotStateChanged == true
+        self.LastTikiAction = {
+            At = now,
+            ObjectName = eventTarget and eventTarget.Name or "unknown",
+            Action = "Skull Guitar TAP",
+            ToolName = guitar.Name,
+            Result = tostring(tapResult),
+            ClientFiringState = tapStateChanged,
+        }
+        if tapped and shotStateChanged == true then
             self:_SetStatus(
                 "Sent owned Skull Guitar puzzle request; waiting for event update",
                 "success"
             )
             return true
+        elseif tapped then
+            ownershipError = "Skull Guitar input had no client firing-state change"
         elseif tapResult == "Skull Guitar is reloading" then
             ownershipError = "Skull Guitar is reloading"
+        elseif tapResult == "Skull Guitar is cooling down" then
+            ownershipError = "Skull Guitar is cooling down"
         else
             ownershipError = "Skull Guitar unavailable for puzzle action: " .. tostring(tapResult)
         end
@@ -1856,10 +1991,26 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
         elseif ownershipError ~= nil then
             reason = "Skull Guitar ownership could not be verified; " .. reason
         end
+        self.LastTikiAction = {
+            At = now,
+            ObjectName = eventTarget and eventTarget.Name or "unknown",
+            Action = "Waiting for ready puzzle skill",
+            ToolName = "",
+            Result = reason,
+            ClientFiringState = tapStateChanged,
+        }
         self:_SetStatus("Tiki puzzle waiting for any ready skill: " .. reason, "info")
         return true
     end
 
+    self.LastTikiAction = {
+        At = now,
+        ObjectName = eventTarget and eventTarget.Name or "unknown",
+        Action = "Puzzle skill " .. skill.Category .. " " .. skill.Key,
+        ToolName = skill.Tool and skill.Tool.Name or "none",
+        Result = "dispatching",
+        ClientFiringState = false,
+    }
     local activated, activationResult = self.CombatService:UseSkill(
         skill.Tool,
         skill.Key,
@@ -1872,6 +2023,7 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
                 and eventTarget:GetAttribute("AlreadyDestroyedClient") ~= true
         end
     )
+    self.LastTikiAction.Result = tostring(activationResult)
     if activated then
         self:_SetStatus(
             "Tiki puzzle: sent available " .. skill.Category .. " " .. skill.Key
