@@ -112,6 +112,19 @@ require(
     and "GetDescendants" not in ready_skill,
     "Mastery readiness must match BNN's two cooldown states while reporting incomplete controls distinctly",
 )
+refresh_equipped_tool = function_body(
+    COMBAT,
+    "function CombatService:RefreshEquippedTool",
+    "\nfunction CombatService:EquipWeapon",
+)
+require(
+    "humanoid:UnequipTools()" in refresh_equipped_tool
+    and "humanoid:EquipTool(tool)" in refresh_equipped_tool
+    and "tool.Parent ~= character" in refresh_equipped_tool
+    and "Remote" not in refresh_equipped_tool
+    and "InvokeServer" not in refresh_equipped_tool,
+    "A missing skill UI may trigger a bounded local re-equip refresh, not a guessed remote",
+)
 require(
     "for _, frame in ipairs(toolSkills:GetChildren()) do" in ready_skill
     and "if isReady then" in ready_skill
@@ -366,6 +379,10 @@ require(
     and "self.NextFarmSkillScanAt = os.clock() + skillScanInterval" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
+    and "MASTERY_SKILL_UI_REFRESH_LIMIT = 2" in MAIN_FARM
+    and "preparation.TotalRefreshAttempts < MASTERY_SKILL_UI_REFRESH_LIMIT" in farm_skill
+    and "self.CombatService:RefreshEquippedTool(preparingTool)" in farm_skill
+    and "tool UI refresh limit reached" in farm_skill
     and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
     and farm_skill.count("task.spawn(function()") == 1
     and "finishSkillAttempt(runSkillAttempt())" in skill_dispatch

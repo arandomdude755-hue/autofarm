@@ -6048,6 +6048,29 @@ function CombatService:EquipTool(tool)
     return true, tool
 end
 
+function CombatService:RefreshEquippedTool(tool)
+    if not tool or not tool:IsA("Tool") then
+        return false, "Selected tool is unavailable"
+    end
+    local character, humanoid = self.Compatibility:GetCharacterParts()
+    local player = self.Compatibility.Player
+    local backpack = player and player:FindFirstChild("Backpack")
+    if not character or not humanoid or not backpack or humanoid.Sit then
+        return false, "Character cannot refresh the selected tool"
+    end
+    if tool.Parent == character then
+        humanoid:UnequipTools()
+    end
+    if tool.Parent ~= backpack then
+        return false, "Selected tool could not be returned to Backpack"
+    end
+    humanoid:EquipTool(tool)
+    if tool.Parent ~= character then
+        return false, "Selected tool did not re-equip"
+    end
+    return true, tool
+end
+
 function CombatService:EquipWeapon(category)
     local tool, findError = self:FindWeapon(category)
     if not tool then
@@ -6888,6 +6911,7 @@ local TIKI_SKILL_HOLD_SECONDS = 0.5
 local FARM_SKILL_SCAN_INTERVAL = 0.4
 local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
+local MASTERY_SKILL_UI_REFRESH_LIMIT = 2
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
@@ -7745,11 +7769,20 @@ function MainFarm:_TryStartFarmSkill(
     )
     if preparingTool then
         local preparation = self.FarmSkillPreparing
-        if not preparation or preparation.ToolName ~= preparingTool.Name then
+        local refreshAttempts = preparation
+            and preparation.Target == target
+            and preparation.TotalRefreshAttempts
+            or 0
+        if not preparation
+            or preparation.Target ~= target
+            or preparation.ToolName ~= preparingTool.Name
+        then
             preparation = {
+                Target = target,
                 ToolName = preparingTool.Name,
                 StartedAt = now,
                 Deadline = now + FARM_SKILL_PREPARE_TIMEOUT,
+                TotalRefreshAttempts = refreshAttempts,
             }
             self.FarmSkillPreparing = preparation
         end
@@ -7772,8 +7805,32 @@ function MainFarm:_TryStartFarmSkill(
             )
             return false
         end
+        if masteryCategory
+            and preparation.TotalRefreshAttempts < MASTERY_SKILL_UI_REFRESH_LIMIT
+        then
+            preparation.TotalRefreshAttempts += 1
+            local refreshed, refreshResult =
+                self.CombatService:RefreshEquippedTool(preparingTool)
+            if refreshed then
+                preparation.StartedAt = now
+                preparation.Deadline = now + FARM_SKILL_PREPARE_TIMEOUT
+                self:_SetStatus(
+                    "Refreshing mastery skill UI for " .. preparingTool.Name
+                        .. " (" .. preparation.TotalRefreshAttempts .. "/"
+                        .. MASTERY_SKILL_UI_REFRESH_LIMIT .. ")",
+                    "info"
+                )
+                return true
+            end
+            self:_SetStatus(
+                "Mastery skill UI refresh failed: " .. tostring(refreshResult),
+                "warning"
+            )
+            return true
+        end
         self:_SetStatus(
-            "Mastery waiting: " .. tostring(skillError),
+            "Mastery waiting: " .. tostring(skillError)
+                .. " (tool UI refresh limit reached)",
             "warning"
         )
         return true

@@ -189,6 +189,29 @@ function CombatService:EquipTool(tool)
     return true, tool
 end
 
+function CombatService:RefreshEquippedTool(tool)
+    if not tool or not tool:IsA("Tool") then
+        return false, "Selected tool is unavailable"
+    end
+    local character, humanoid = self.Compatibility:GetCharacterParts()
+    local player = self.Compatibility.Player
+    local backpack = player and player:FindFirstChild("Backpack")
+    if not character or not humanoid or not backpack or humanoid.Sit then
+        return false, "Character cannot refresh the selected tool"
+    end
+    if tool.Parent == character then
+        humanoid:UnequipTools()
+    end
+    if tool.Parent ~= backpack then
+        return false, "Selected tool could not be returned to Backpack"
+    end
+    humanoid:EquipTool(tool)
+    if tool.Parent ~= character then
+        return false, "Selected tool did not re-equip"
+    end
+    return true, tool
+end
+
 function CombatService:EquipWeapon(category)
     local tool, findError = self:FindWeapon(category)
     if not tool then
