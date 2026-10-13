@@ -447,9 +447,12 @@ function MovementService:MoveTo(destination, options)
     end
 
     local active = self.Active
+    -- A reached destination is not a reusable "already moving" goal: let the
+    -- retained-session branch below refresh it, even for a small target shift.
     if active
         and active.Character == character
         and active.RouteName == (route and route.Name)
+        and not active.Holding
         and not active.HoldingForSearch
         and (active.Goal.Position - goal.Position).Magnitude <= 12
     then

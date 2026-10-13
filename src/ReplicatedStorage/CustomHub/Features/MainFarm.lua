@@ -886,8 +886,18 @@ function MainFarm:_GetFarmAttackPosition(target, weaponCategory)
     return targetRoot.CFrame * targetOffset
 end
 
-function MainFarm:_MoveToFarmAttackPosition(target, weaponCategory, session, threshold, keepSession)
-    if self.FarmSkillActive and self.FarmSkillTarget == target then
+function MainFarm:_MoveToFarmAttackPosition(
+    target,
+    weaponCategory,
+    session,
+    threshold,
+    keepSession,
+    allowRetargetDuringSkill
+)
+    if self.FarmSkillActive
+        and self.FarmSkillTarget == target
+        and not allowRetargetDuringSkill
+    then
         return true, "holding position for active skill"
     end
     local destination = self:_GetFarmAttackPosition(target, weaponCategory)
@@ -911,10 +921,8 @@ function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
     end
 
     local movement = self.MovementService and self.MovementService.Active
-    -- The character's actual position is authoritative. A moving NPC can shift
-    -- the desired offset while MovementService retains a nearby held goal.
-    -- Keep skills blocked during travel, but don't reject a held character
-    -- already within the attack-position tolerance because that goal is stale.
+    -- Ordinary farm skills stay blocked during travel. The character's actual
+    -- position is authoritative when movement holds a nearby, stale goal.
     if movement and movement.Holding ~= true then
         return false
     end
@@ -977,12 +985,13 @@ function MainFarm:_TryStartFarmSkill(
         end
     end
     local skillCategory = masteryCategory or weaponCategory
-    if not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory) then
+    -- Ordinary farm skills wait for their attack position. Mastery follows the
+    -- reference flow and may send a ready skill while approaching.
+    if not masteryCategory
+        and not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)
+    then
         self.FarmSkillPreparing = nil
-        if masteryCategory then
-            self:_SetStatus("Mastery waiting: moving into skill attack position", "info")
-        end
-        return masteryCategory ~= nil
+        return false
     end
     if masteryCategory == nil
         and (not farmSettings or farmSettings.UseFarmSkills ~= true)
@@ -1154,7 +1163,14 @@ function MainFarm:_TryStartFarmSkill(
                                 and currentSettings.UseFarmSkills == true
                             )
                         )
-                        and self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
+                        and (
+                            masteryCategory ~= nil
+                            or self:_IsAtFarmAttackPosition(
+                                target,
+                                currentRoot,
+                                skillCategory
+                            )
+                        )
                 end
             )
         end)
@@ -1264,8 +1280,8 @@ function MainFarm:_StepAura(session, root)
     self.EnemyService:PrepareTarget(target, root)
     self:_BringMobsIfEnabled(target, root, false)
     local weaponCategory = farmSettings.WeaponCategory or "Melee"
-    local attackCategory = self:_GetMasteryCategory(target, farmSettings, true)
-        or weaponCategory
+    local masteryCategory = self:_GetMasteryCategory(target, farmSettings, true)
+    local attackCategory = masteryCategory or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
         if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root, true) then
@@ -1293,7 +1309,14 @@ function MainFarm:_StepAura(session, root)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)
+            self:_MoveToFarmAttackPosition(
+                target,
+                attackCategory,
+                session,
+                2.5,
+                true,
+                masteryCategory ~= nil
+            )
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching aura target: " .. target.Name, "info")
             end
@@ -1384,11 +1407,12 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     self:_BringMobsIfEnabled(target, root, targetIsBoss)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
-    local attackCategory = self:_GetMasteryCategory(
+    local masteryCategory = self:_GetMasteryCategory(
         target,
         farmSettings,
         targetIsBoss ~= true
-    ) or weaponCategory
+    )
+    local attackCategory = masteryCategory or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
         if not self:_TryStartFarmSkill(
@@ -1423,7 +1447,14 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)
+            self:_MoveToFarmAttackPosition(
+                target,
+                attackCategory,
+                session,
+                2.5,
+                true,
+                masteryCategory ~= nil
+            )
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching mode target: " .. target.Name, "info")
             end
@@ -2390,8 +2421,8 @@ function MainFarm:_Step(session)
     self:_BringMobsIfEnabled(target, root, false)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     local weaponCategory = farmSettings and farmSettings.WeaponCategory or "Melee"
-    local attackCategory = self:_GetMasteryCategory(target, farmSettings, true)
-        or weaponCategory
+    local masteryCategory = self:_GetMasteryCategory(target, farmSettings, true)
+    local attackCategory = masteryCategory or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
     if combatReady then
         if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root, true) then
@@ -2419,7 +2450,14 @@ function MainFarm:_Step(session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)
+            self:_MoveToFarmAttackPosition(
+                target,
+                attackCategory,
+                session,
+                2.5,
+                true,
+                masteryCategory ~= nil
+            )
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end

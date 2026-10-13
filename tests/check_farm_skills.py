@@ -367,15 +367,17 @@ skill_movement = function_body(
     "\nfunction MainFarm:_IsAtFarmAttackPosition",
 )
 require(
-    "self.FarmSkillActive and self.FarmSkillTarget == target" in skill_movement
+    "self.FarmSkillActive" in skill_movement
+    and "self.FarmSkillTarget == target" in skill_movement
+    and "not allowRetargetDuringSkill" in skill_movement
     and "holding position for active skill" in skill_movement
     and "self:_MoveTo(destination, session, threshold, keepSession)" in skill_movement
     and MAIN_FARM.count(
-        "self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)"
+        "masteryCategory ~= nil\n            )"
     ) == 3
     and "self.FarmSkillTarget = target" in MAIN_FARM
     and "self.FarmSkillTarget = nil" in MAIN_FARM,
-    "All farm modes must share attack-position movement and hold it steady during the shared skill input",
+    "All farm modes share movement; ordinary skills hold position while Mastery may retarget during input",
 )
 
 mastery_category = function_body(
@@ -421,9 +423,9 @@ mastery_no_skill_branch = farm_skill.split("if not skill then", 1)[1].split(
     1,
 )[0]
 require(
-    "self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)" in farm_skill
+    "if not masteryCategory\n        and not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
-    and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
+    and "masteryCategory ~= nil\n                            or self:_IsAtFarmAttackPosition(" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
     and "local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)" in farm_skill
     and "local skillCategory = masteryCategory or weaponCategory" in farm_skill
@@ -464,7 +466,7 @@ require(
     and "self.CombatService:EquipWeapon(masteryCategory)" not in farm_skill
     and "self.CombatService:FindReadyFarmSkill(\n        farmSettings,\n        skillCategory,\n        skillIgnoredTools,\n        masteryCategory\n    )" in farm_skill
     and "self.CombatService:FindEquippedWeapon(masteryCategory)" not in farm_skill
-    and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
+    and "currentRoot,\n                                skillCategory" in farm_skill
     and "MASTERY_M1_FALLBACK_INTERVAL" not in farm_skill
     and "skillIgnoredTools," in farm_skill
     and "if masteryCategory then\n            return true" in farm_skill
@@ -474,6 +476,21 @@ require(
     and "local masteryCategoryNow = currentSettings" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
     "Mastery must reuse the farm skill flow, allow normal skills above threshold, and wait without wrong-weapon fallback",
+)
+
+
+def can_dispatch_skill(is_mastery, distance, tolerance, movement_holding):
+    if is_mastery:
+        return True
+    return distance <= tolerance and movement_holding
+
+
+require(
+    can_dispatch_skill(True, 6.7, 6, False)
+    and can_dispatch_skill(False, 5.9, 6, True)
+    and not can_dispatch_skill(False, 6.7, 6, False)
+    and not can_dispatch_skill(False, 5.9, 6, False),
+    "Mastery must scan while approaching at the reported distance; ordinary skills must still require attack position",
 )
 preparing_branch = farm_skill.split("if preparingTool then", 1)[1].split(
     "self.FarmSkillPreparing = nil\n    if not skill then",
@@ -549,6 +566,7 @@ print("PASS: Mastery and regular skills share category-filtered cooldown readine
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
 print("PASS: skill weapon lookup follows BNN's Backpack-first flow; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
+print("PASS: Mastery skills may fire during approach; ordinary skills retain the attack-position gate")
 print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")
 print("PASS: ordinary farm attacks restore Farm Weapon after asynchronous skill use")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")

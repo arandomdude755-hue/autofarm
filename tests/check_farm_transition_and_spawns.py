@@ -150,6 +150,12 @@ require("active.KeepSession" in move_to and "options.KeepSession == true" in mov
         "movement service must retarget the retained session")
 require("active.Holding = true" in move_to,
         "retained movement must hold at the reached destination during quest retrieval")
+require(
+    "and not active.Holding\n        and not active.HoldingForSearch" in move_to
+    and "local wasHolding = active.Holding or active.HoldingForSearch" in move_to
+    and "if wasHolding or destinationShift > 12 then" in move_to,
+    "a held movement goal must reach the retarget path even when the replacement goal is nearby",
+)
 require("self:_Finish(active, true)" in move_to,
         "explicit movement cancellation/error paths must still finish and clean up")
 
