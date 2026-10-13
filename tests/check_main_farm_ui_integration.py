@@ -191,8 +191,20 @@ copy_report = function_body(
 require("self.LastQuestDiagnosticReportText" in copy_report
         and "setclipboard(text)" in copy_report
         and "Complete quest status report copied to clipboard." in copy_report
+        and "self:_BuildFarmMasteryDiagnosticReport()" in copy_report
+        and "Farm Mastery diagnostic copied to clipboard." in copy_report
         and "complete report printed to output" in copy_report,
-        "the copy action must reuse the complete cached report and handle clipboard unavailability")
+        "the copy action must include live Mastery diagnostics and handle clipboard unavailability")
+mastery_report = function_body(
+    MAIN_FARM,
+    "function MainFarm:_BuildFarmMasteryDiagnosticReport",
+    "\nfunction MainFarm:CopyStatusReport",
+)
+require("FarmMasteryDiagnostic" in mastery_report
+        and "Preparation:" in mastery_report
+        and "self.CombatService.BuildFarmSkillDiagnostic" in mastery_report
+        and "self.LastStatus" in mastery_report,
+        "the live Mastery report must explain preparation, current status, and CombatService GUI findings")
 require("self:Start()" in handle and "self:Stop()" in handle,
         "The Main Farm toggle must start and stop the existing MainFarm instance")
 start = function_body(MAIN_FARM, "function MainFarm:Start()", "\nfunction MainFarm:Stop")

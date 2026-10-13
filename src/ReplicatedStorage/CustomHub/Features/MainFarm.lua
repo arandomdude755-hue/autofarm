@@ -283,10 +283,89 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
     end)
 end
 
+function MainFarm:_BuildFarmMasteryDiagnosticReport()
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings or {}
+    local category = farmSettings.MasteryCategory
+    local lines = {
+        "===== [FarmMasteryDiagnostic] REPORT BEGIN =====",
+        "Enabled: " .. tostring(farmSettings.FarmMastery == true),
+        "Method: " .. tostring(category),
+        "Health threshold: " .. tostring(farmSettings.MasteryHealthPercent),
+        "Status: " .. tostring(self.LastStatus or "unavailable"),
+    }
+
+    local target = self.Target
+    if target then
+        local healthPercent = "unavailable"
+        local humanoid = target:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.MaxHealth > 0 then
+            healthPercent = string.format("%.1f%%", humanoid.Health / humanoid.MaxHealth * 100)
+        end
+        table.insert(lines, "Target: " .. target.Name .. "; health=" .. healthPercent)
+    else
+        table.insert(lines, "Target: none")
+    end
+
+    local preparation = self.FarmSkillPreparing
+    if preparation then
+        table.insert(
+            lines,
+            "Preparation: tool=" .. tostring(preparation.ToolName)
+                .. "; refresh_attempts=" .. tostring(preparation.TotalRefreshAttempts or 0)
+                .. "; deadline_remaining="
+                .. string.format("%.2f", math.max(0, (preparation.Deadline or 0) - os.clock()))
+        )
+    else
+        table.insert(lines, "Preparation: none")
+    end
+
+    if not self.CombatService then
+        local servicesReady, servicesError = self:_EnsureBaseServices()
+        if servicesReady then
+            self:_EnsureCombatService()
+        else
+            table.insert(lines, "Combat service: unavailable; " .. tostring(servicesError))
+        end
+    end
+    if self.CombatService then
+        local diagnosticOk, diagnostic = pcall(
+            self.CombatService.BuildFarmSkillDiagnostic,
+            self.CombatService,
+            farmSettings,
+            category
+        )
+        table.insert(
+            lines,
+            diagnosticOk and diagnostic or ("Combat diagnostic failed: " .. tostring(diagnostic))
+        )
+    else
+        table.insert(lines, "Combat service: unavailable")
+    end
+
+    table.insert(lines, "===== [FarmMasteryDiagnostic] REPORT END =====")
+    local text = table.concat(lines, "\n")
+    if #text > 6000 then
+        text = text:sub(1, 5980) .. "\n...[truncated]"
+    end
+    return text
+end
+
 function MainFarm:CopyStatusReport()
-    local text = self.LastQuestDiagnosticReportText
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    local masteryDiagnostic = farmSettings
+        and farmSettings.FarmMastery == true
+        or self.FarmSkillPreparing ~= nil
+    local text
+    if masteryDiagnostic then
+        text = self:_BuildFarmMasteryDiagnosticReport()
+        self.LastFarmMasteryDiagnosticReportText = text
+    else
+        text = self.LastQuestDiagnosticReportText
+    end
     if type(text) ~= "string" or text == "" then
-        self:_SetStatus("No completed quest status report is available yet.", "warning")
+        self:_SetStatus("No status report is available yet.", "warning")
         return true
     end
 
@@ -298,7 +377,11 @@ function MainFarm:CopyStatusReport()
         end
     end)
     if clipboardCallOk and copied then
-        self:_SetStatus("Complete quest status report copied to clipboard.", "success")
+        self:_SetStatus(
+            masteryDiagnostic and "Farm Mastery diagnostic copied to clipboard."
+                or "Complete quest status report copied to clipboard.",
+            "success"
+        )
     else
         print(text)
         self:_SetStatus("Clipboard unavailable; complete report printed to output.", "warning")

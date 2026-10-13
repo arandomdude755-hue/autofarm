@@ -5898,6 +5898,19 @@ local function listSkillUiToolNames(skills)
     return table.concat(names, ", ")
 end
 
+local function listCategoryToolNames(container, categoryName)
+    if not container then
+        return "missing"
+    end
+    local names = {}
+    for _, item in ipairs(container:GetChildren()) do
+        if item:IsA("Tool") and item.ToolTip == categoryName then
+            table.insert(names, item.Name)
+        end
+    end
+    return #names > 0 and table.concat(names, ", ") or "none"
+end
+
 function CombatService.new(compatibility, enemyService)
     local dependencies, dependencyError = compatibility:GetCombatDependencies()
     if not dependencies then
@@ -6222,6 +6235,117 @@ function CombatService:FindReadyFarmSkill(
     return self:_FindReadySkill(function(category, keyName)
         return farmSettings["FarmSkill_" .. category.Token .. "_" .. keyName] == true
     end, preferredCategory, ignoredTools, onlyCategory)
+end
+
+function CombatService:BuildFarmSkillDiagnostic(farmSettings, categoryName)
+    local player = self.Compatibility.Player
+    local character = player and player.Character
+    local backpack = player and player:FindFirstChild("Backpack")
+    local playerGui = self.Compatibility:GetPlayerGui()
+    local main = playerGui and playerGui:FindFirstChild("Main")
+    local skills = main and main:FindFirstChild("Skills")
+    local tool = self:FindSkillWeapon(categoryName)
+    local toolParent = "none"
+    if tool then
+        if tool.Parent == character then
+            toolParent = "Character"
+        elseif tool.Parent == backpack then
+            toolParent = "Backpack"
+        else
+            toolParent = tool.Parent and tool.Parent.Name or "unparented"
+        end
+    end
+
+    local mainEnabled = "n/a"
+    if main and main:IsA("ScreenGui") then
+        mainEnabled = tostring(main.Enabled)
+    end
+    local skillsVisible = "n/a"
+    if skills and skills:IsA("GuiObject") then
+        skillsVisible = tostring(skills.Visible)
+    end
+    local entry = skills and tool and skills:FindFirstChild(tool.Name)
+    local categoryDefinition
+    for _, category in ipairs(skillCategories) do
+        if category.Name == categoryName then
+            categoryDefinition = category
+            break
+        end
+    end
+
+    local lines = {
+        "Category: " .. tostring(categoryName),
+        "Tool: " .. (tool and tool.Name or "none")
+            .. "; parent=" .. toolParent
+            .. "; character matches=" .. listCategoryToolNames(character, categoryName)
+            .. "; backpack matches=" .. listCategoryToolNames(backpack, categoryName),
+        "GUI: PlayerGui=" .. (playerGui and "present" or "missing")
+            .. "; Main=" .. (main and main.ClassName or "missing")
+            .. "; Main.Enabled=" .. mainEnabled
+            .. "; Skills=" .. (skills and skills.ClassName or "missing")
+            .. "; Skills.Visible=" .. skillsVisible,
+        "Skills entries: " .. listSkillUiToolNames(skills),
+        "Selected tool entry: " .. (entry and "present" or "missing"),
+    }
+
+    if categoryDefinition then
+        local enabledKeys = {}
+        for _, keyName in ipairs(categoryDefinition.Keys) do
+            local settingName = "FarmSkill_" .. categoryDefinition.Token .. "_" .. keyName
+            if farmSettings and farmSettings[settingName] == true then
+                table.insert(enabledKeys, keyName)
+                local frame = entry and entry:FindFirstChild(keyName)
+                local title = frame and frame:FindFirstChild("Title")
+                local cooldown = frame and frame:FindFirstChild("Cooldown")
+                local titleText = title
+                    and title:IsA("TextLabel")
+                    and title.Text
+                    or "missing"
+                if #titleText > 48 then
+                    titleText = titleText:sub(1, 48)
+                end
+                local titleReady = title
+                    and title:IsA("TextLabel")
+                    and title.TextColor3 == Color3.new(1, 1, 1)
+                local cooldownEmpty = cooldown
+                    and cooldown:IsA("GuiObject")
+                    and cooldown.Size == UDim2.new(0, 0, 1, -1)
+                local cooldownFull = cooldown
+                    and cooldown:IsA("GuiObject")
+                    and cooldown.Size == UDim2.new(1, 0, 1, -1)
+                local hasControls = frame
+                    and frame:IsA("Frame")
+                    and title
+                    and title:IsA("TextLabel")
+                    and cooldown
+                    and cooldown:IsA("GuiObject")
+                local ready = frame
+                    and frame.Name ~= "Template"
+                    and hasControls
+                    and ((titleReady and cooldownEmpty) or cooldownFull)
+                table.insert(
+                    lines,
+                    keyName .. ": frame=" .. (frame and frame.ClassName or "missing")
+                        .. "; visible=" .. tostring(frame and frame.Visible or "n/a")
+                        .. "; controls=" .. tostring(hasControls == true)
+                        .. "; title=" .. tostring(titleText)
+                        .. "; titleReady=" .. tostring(titleReady == true)
+                        .. "; cooldownEmpty=" .. tostring(cooldownEmpty == true)
+                        .. "; cooldownFull=" .. tostring(cooldownFull == true)
+                        .. "; ready=" .. tostring(ready == true)
+                )
+            end
+        end
+        table.insert(
+            lines,
+            2,
+            "Selected keys: " .. (#enabledKeys > 0 and table.concat(enabledKeys, ", ") or "none")
+        )
+    else
+        table.insert(lines, 2, "Selected keys: no matching skill category")
+    end
+
+    return table.concat(lines, "\n")
 end
 
 function CombatService:FindReadyTikiSkill()
@@ -7171,10 +7295,89 @@ function MainFarm:_PrintQuestDiagnosticReport(report, reason, elapsed)
     end)
 end
 
+function MainFarm:_BuildFarmMasteryDiagnosticReport()
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings or {}
+    local category = farmSettings.MasteryCategory
+    local lines = {
+        "===== [FarmMasteryDiagnostic] REPORT BEGIN =====",
+        "Enabled: " .. tostring(farmSettings.FarmMastery == true),
+        "Method: " .. tostring(category),
+        "Health threshold: " .. tostring(farmSettings.MasteryHealthPercent),
+        "Status: " .. tostring(self.LastStatus or "unavailable"),
+    }
+
+    local target = self.Target
+    if target then
+        local healthPercent = "unavailable"
+        local humanoid = target:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.MaxHealth > 0 then
+            healthPercent = string.format("%.1f%%", humanoid.Health / humanoid.MaxHealth * 100)
+        end
+        table.insert(lines, "Target: " .. target.Name .. "; health=" .. healthPercent)
+    else
+        table.insert(lines, "Target: none")
+    end
+
+    local preparation = self.FarmSkillPreparing
+    if preparation then
+        table.insert(
+            lines,
+            "Preparation: tool=" .. tostring(preparation.ToolName)
+                .. "; refresh_attempts=" .. tostring(preparation.TotalRefreshAttempts or 0)
+                .. "; deadline_remaining="
+                .. string.format("%.2f", math.max(0, (preparation.Deadline or 0) - os.clock()))
+        )
+    else
+        table.insert(lines, "Preparation: none")
+    end
+
+    if not self.CombatService then
+        local servicesReady, servicesError = self:_EnsureBaseServices()
+        if servicesReady then
+            self:_EnsureCombatService()
+        else
+            table.insert(lines, "Combat service: unavailable; " .. tostring(servicesError))
+        end
+    end
+    if self.CombatService then
+        local diagnosticOk, diagnostic = pcall(
+            self.CombatService.BuildFarmSkillDiagnostic,
+            self.CombatService,
+            farmSettings,
+            category
+        )
+        table.insert(
+            lines,
+            diagnosticOk and diagnostic or ("Combat diagnostic failed: " .. tostring(diagnostic))
+        )
+    else
+        table.insert(lines, "Combat service: unavailable")
+    end
+
+    table.insert(lines, "===== [FarmMasteryDiagnostic] REPORT END =====")
+    local text = table.concat(lines, "\n")
+    if #text > 6000 then
+        text = text:sub(1, 5980) .. "\n...[truncated]"
+    end
+    return text
+end
+
 function MainFarm:CopyStatusReport()
-    local text = self.LastQuestDiagnosticReportText
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    local masteryDiagnostic = farmSettings
+        and farmSettings.FarmMastery == true
+        or self.FarmSkillPreparing ~= nil
+    local text
+    if masteryDiagnostic then
+        text = self:_BuildFarmMasteryDiagnosticReport()
+        self.LastFarmMasteryDiagnosticReportText = text
+    else
+        text = self.LastQuestDiagnosticReportText
+    end
     if type(text) ~= "string" or text == "" then
-        self:_SetStatus("No completed quest status report is available yet.", "warning")
+        self:_SetStatus("No status report is available yet.", "warning")
         return true
     end
 
@@ -7186,7 +7389,11 @@ function MainFarm:CopyStatusReport()
         end
     end)
     if clipboardCallOk and copied then
-        self:_SetStatus("Complete quest status report copied to clipboard.", "success")
+        self:_SetStatus(
+            masteryDiagnostic and "Farm Mastery diagnostic copied to clipboard."
+                or "Complete quest status report copied to clipboard.",
+            "success"
+        )
     else
         print(text)
         self:_SetStatus("Clipboard unavailable; complete report printed to output.", "warning")

@@ -150,7 +150,27 @@ require(
     and "farmSettings" not in tiki_skill_lookup,
     "Farm skill lookup must lock to an optional category without pinning an equipped tool",
 )
-
+skill_diagnostic = function_body(
+    COMBAT,
+    "function CombatService:BuildFarmSkillDiagnostic",
+    "\nfunction CombatService:FindReadyTikiSkill",
+)
+require(
+    "PlayerGui" in skill_diagnostic
+    and 'FindFirstChild("Main")' in skill_diagnostic
+    and 'FindFirstChild("Skills")' in skill_diagnostic
+    and "Main.Enabled=" in skill_diagnostic
+    and "Skills entries:" in skill_diagnostic
+    and "Selected tool entry:" in skill_diagnostic
+    and "Selected keys:" in skill_diagnostic
+    and "controls=" in skill_diagnostic
+    and "visible=" in skill_diagnostic
+    and "cooldownEmpty=" in skill_diagnostic
+    and "cooldownFull=" in skill_diagnostic
+    and "listCategoryToolNames(character" in skill_diagnostic
+    and "listCategoryToolNames(backpack" in skill_diagnostic,
+    "Farm skill diagnostic must report the selected tool, GUI rows, selected keys, and cooldown evidence",
+)
 find_weapon = function_body(
     COMBAT,
     "function CombatService:FindWeapon",
