@@ -339,8 +339,8 @@ require(
     and 'CFrame.new(-7, 20, 0)' in attack_position
     and 'CFrame.new(7, 20, 0)' in attack_position
     and "movement.Holding ~= true" in attack_position
-    and "movement.Goal.Position - attackPosition" in attack_position,
-    "Farm skills must wait until movement is holding at the target's attack position",
+    and "movement.Goal.Position - attackPosition" not in attack_position,
+    "Farm skills must wait until the character is physically in attack range and movement is holding",
 )
 
 mastery_category = function_body(

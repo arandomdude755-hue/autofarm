@@ -202,6 +202,8 @@ mastery_report = function_body(
 )
 require("FarmMasteryDiagnostic" in mastery_report
         and "Preparation:" in mastery_report
+        and "Skill gate:" in mastery_report
+        and "FarmSkillActive" in mastery_report
         and "self.CombatService.BuildFarmSkillDiagnostic" in mastery_report
         and "self.LastStatus" in mastery_report,
         "the live Mastery report must explain preparation, current status, and CombatService GUI findings")

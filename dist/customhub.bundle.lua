@@ -7305,6 +7305,10 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
         "Method: " .. tostring(category),
         "Health threshold: " .. tostring(farmSettings.MasteryHealthPercent),
         "Status: " .. tostring(self.LastStatus or "unavailable"),
+        "Status age: " .. string.format("%.2f", math.max(0, os.clock() - (self.LastStatusAt or os.clock()))),
+        "Skill active: " .. tostring(self.FarmSkillActive == true),
+        "Next skill scan in: "
+            .. string.format("%.2f", math.max(0, (self.NextFarmSkillScanAt or 0) - os.clock())),
     }
 
     local target = self.Target
@@ -7318,6 +7322,39 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
     else
         table.insert(lines, "Target: none")
     end
+
+    local playerRoot
+    if self.Context and self.Context.Compatibility then
+        local _, _, currentRoot = self.Context.Compatibility:GetCharacterParts()
+        playerRoot = currentRoot
+    end
+    local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
+    local attackPosition
+    if targetRoot and (category == "Blox Fruit" or category == "Gun") then
+        local offset = category == "Blox Fruit"
+            and CFrame.new(-7, 20, 0)
+            or CFrame.new(7, 20, 0)
+        attackPosition = (targetRoot.CFrame * offset).Position
+    end
+    local playerDistance = playerRoot and attackPosition
+        and (playerRoot.Position - attackPosition).Magnitude
+    local movement = self.MovementService and self.MovementService.Active
+    local movementGoalDistance = movement and movement.Goal and attackPosition
+        and (movement.Goal.Position - attackPosition).Magnitude
+    local inSkillPosition = target
+        and playerRoot
+        and self:_IsAtFarmAttackPosition(target, playerRoot, category)
+        or false
+    table.insert(
+        lines,
+        "Skill gate: in_attack_position=" .. tostring(inSkillPosition == true)
+            .. "; player_distance=" .. (playerDistance and string.format("%.1f", playerDistance) or "n/a")
+            .. "; tolerance=" .. tostring(FARM_SKILL_ATTACK_POSITION_TOLERANCE)
+            .. "; movement_active=" .. tostring(movement ~= nil)
+            .. "; movement_holding=" .. tostring(movement and movement.Holding or false)
+            .. "; movement_goal_distance="
+            .. (movementGoalDistance and string.format("%.1f", movementGoalDistance) or "n/a")
+    )
 
     local preparation = self.FarmSkillPreparing
     if preparation then
@@ -7870,11 +7907,11 @@ function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
     end
 
     local movement = self.MovementService and self.MovementService.Active
-    if movement and (
-        movement.Holding ~= true
-            or not movement.Goal
-            or (movement.Goal.Position - attackPosition).Magnitude > FARM_SKILL_ATTACK_POSITION_TOLERANCE
-    ) then
+    -- The character's actual position is authoritative. A moving NPC can shift
+    -- the desired offset while MovementService retains a nearby held goal.
+    -- Keep skills blocked during travel, but don't reject a held character
+    -- already within the attack-position tolerance because that goal is stale.
+    if movement and movement.Holding ~= true then
         return false
     end
     return true
@@ -7938,6 +7975,9 @@ function MainFarm:_TryStartFarmSkill(
     local skillCategory = masteryCategory or weaponCategory
     if not self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory) then
         self.FarmSkillPreparing = nil
+        if masteryCategory then
+            self:_SetStatus("Mastery waiting: moving into skill attack position", "info")
+        end
         return masteryCategory ~= nil
     end
     if masteryCategory == nil
