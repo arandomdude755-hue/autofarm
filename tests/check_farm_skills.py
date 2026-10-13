@@ -130,11 +130,13 @@ find_weapon = function_body(
     "\nfunction CombatService:FindToolByName",
 )
 require(
-    find_weapon.index("if character then") < find_weapon.index("if backpack then")
-    and 'category == "Gun" and item.Name == "Skull Guitar"' in find_weapon
-    and "foundUnequippedSkullGuitar = true" in find_weapon
-    and "Skull Guitar is in the Backpack; it will not be equipped for farming" in find_weapon,
-    "Gun selection must preserve an equipped Skull Guitar but never auto-equip one from Backpack",
+    find_weapon.index('if category == "Gun"') < find_weapon.index("if character then")
+    and 'item.Name == "Skull Guitar"' in find_weapon
+    and find_weapon.index('item.Name == "Skull Guitar"')
+        < find_weapon.index('item.ToolTip == category')
+    and "foundUnequippedSkullGuitar" not in find_weapon
+    and "Skull Guitar is in the Backpack; it will not be equipped for farming" not in find_weapon,
+    "Gun selection must prioritize Skull Guitar from Character or Player.Backpack",
 )
 equipped_weapon = function_body(
     COMBAT,
@@ -147,7 +149,7 @@ require(
     and "Backpack" not in equipped_weapon
     and "FindWeapon(" not in equipped_weapon
     and "EquipTool(" not in equipped_weapon,
-    "Mastery may select from Character or Player.Backpack while excluding Backpack-only Skull Guitar",
+    "Mastery weapon lookup must remain separate from equipped-only validation",
 )
 
 gun_m1 = function_body(
@@ -250,14 +252,16 @@ require(
     and "SendKeyEvent(true," in BNN
     and "SendKeyEvent(false," in BNN
     and "self.ActiveInputRelease = releaseInput" in use_skill
-    and "requireEquipped" in use_skill
+    and "pinEquippedTool" in use_skill
+    and "self:EquipTool(tool)" in use_skill
+    and use_skill.index("self:EquipTool(tool)") < use_skill.index("SendKeyEvent(true, keyName")
     and "tool.Parent ~= character" in use_skill
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
-    "Skill use must match reference key down/hold/up behavior, keep target aim, and release safely",
+    "Normal and mastery skills must share equip/input/aim behavior while mastery pins its tool",
 )
 
 attack_position = function_body(
@@ -395,7 +399,7 @@ require(
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: ready skills use BNN cooldown states, VIM key input, and cancellation-safe release")
-print("PASS: Mastery equips matching hotbar tools, pins the selected tool, and excludes Backpack-only Skull Guitar")
+print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Gun Mastery uses regular-gun input and TAP only for an equipped Skull Guitar")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")

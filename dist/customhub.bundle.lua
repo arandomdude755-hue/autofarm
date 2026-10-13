@@ -5918,8 +5918,31 @@ function CombatService:FindWeapon(category)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
     local character = player and player.Character
-    -- Keep an already-equipped tool selected. In particular, an equipped
-    -- Skull Guitar may be used, but one in the Backpack must not be auto-equipped.
+    -- Prefer Skull Guitar for the Gun category wherever it is currently loaded:
+    -- AttackGunM1 selects TAP only after this tool is actually equipped.
+    if category == "Gun" then
+        if character then
+            for _, item in ipairs(character:GetChildren()) do
+                if item:IsA("Tool")
+                    and item.ToolTip == "Gun"
+                    and item.Name == "Skull Guitar"
+                then
+                    return item
+                end
+            end
+        end
+        if backpack then
+            for _, item in ipairs(backpack:GetChildren()) do
+                if item:IsA("Tool")
+                    and item.ToolTip == "Gun"
+                    and item.Name == "Skull Guitar"
+                then
+                    return item
+                end
+            end
+        end
+    end
+    -- Otherwise prefer any matching equipped tool before a hotbar tool.
     if character then
         for _, item in ipairs(character:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
@@ -5927,20 +5950,12 @@ function CombatService:FindWeapon(category)
             end
         end
     end
-    local foundUnequippedSkullGuitar = false
     if backpack then
         for _, item in ipairs(backpack:GetChildren()) do
             if item:IsA("Tool") and item.ToolTip == category then
-                if category == "Gun" and item.Name == "Skull Guitar" then
-                    foundUnequippedSkullGuitar = true
-                else
-                    return item
-                end
+                return item
             end
         end
-    end
-    if foundUnequippedSkullGuitar then
-        return nil, "Skull Guitar is in the Backpack; it will not be equipped for farming"
     end
     return nil
 end
@@ -6237,7 +6252,7 @@ function CombatService:_RestoreTemporaryAim(aimContext)
     end)
 end
 
-function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue, requireEquipped)
+function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue, pinEquippedTool)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
         return false, "Skill input is invalid"
     end
@@ -6246,15 +6261,15 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     end
 
     local character = self.Compatibility.Player and self.Compatibility.Player.Character
-    if requireEquipped then
-        if not character or tool.Parent ~= character then
-            return false, "Selected mastery weapon is no longer equipped"
-        end
-    else
-        local equipped, equipResult = self:EquipTool(tool)
-        if not equipped then
-            return false, tostring(equipResult)
-        end
+    local equipped, equipResult = self:EquipTool(tool)
+    if not equipped then
+        return false, tostring(equipResult)
+    end
+    character = self.Compatibility.Player and self.Compatibility.Player.Character
+    if not character or tool.Parent ~= character then
+        return false, pinEquippedTool
+            and "Selected mastery weapon is no longer equipped"
+            or "Selected skill weapon did not equip"
     end
 
     local aimContext, aimError = self:_SetTemporaryAim(target)
@@ -6298,7 +6313,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     local weaponChanged = false
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
-            if requireEquipped and tool.Parent ~= character then
+            if pinEquippedTool and tool.Parent ~= character then
                 weaponChanged = true
                 break
             end
