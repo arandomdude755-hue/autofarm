@@ -37,7 +37,9 @@ Changing the target, Mastery method, or selected tool during a farm must not lea
 
 **Why:** the user explicitly wants switching weapons or modes mid-farm to recover rather than break any farm function.
 
-**How to apply:** track target/method/tool identity, cancel held input on context changes, clear cached readiness/preparation, then reacquire the current tool and skill UI before continuing.
+**How to apply:** track target/method/tool identity and parent changes, cancel held input on context changes, and clear cached readiness/preparation before reacquiring the current tool and skill UI. For Gun Mastery, briefly pause dispatch after a hotbar/equip handoff and clear only the local M1 throttle for the incoming Tool; keep the game's own reload checks intact.
+
+**Why:** switching a normal Gun during active farming can leave the gun unable to fire even manually until the character is reset. The handoff needs a short settle window; bypassing the game's reload state would hide rather than safely resolve that condition.
 
 For Gun M1 knockback, pause target-chasing briefly after the game reports a client firing-state change. Hold the player’s current position during that interval, then resume normal target tracking. Do not extend an active pause for every rapid shot, and do not change NPC physics or skill aiming.
 

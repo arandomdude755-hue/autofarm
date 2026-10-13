@@ -6280,6 +6280,14 @@ function CombatService:FindEquippedWeapon(category)
     return nil, "No equipped " .. tostring(category) .. " tool is available"
 end
 
+function CombatService:ResetGunM1Cooldown(tool)
+    if tool and self.NextGunM1At then
+        self.NextGunM1At[tool] = nil
+        return true
+    end
+    return false
+end
+
 function CombatService:FindWeapon(category)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
@@ -7457,6 +7465,7 @@ local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local GUN_KNOCKBACK_HOLD_SECONDS = 0.3
+local FARM_GUN_SWAP_SETTLE_SECONDS = 0.6
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
@@ -7780,6 +7789,17 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
         )
     else
         table.insert(lines, "Preparation: none")
+    end
+    local gunSettleRemaining = math.max(
+        0,
+        (self.FarmGunToolSettleUntil or 0) - os.clock()
+    )
+    if gunSettleRemaining > 0 then
+        table.insert(
+            lines,
+            "Gun hotbar swap: settling; remaining="
+                .. string.format("%.2f", gunSettleRemaining)
+        )
     end
 
     if not self.CombatService then
@@ -8479,6 +8499,7 @@ function MainFarm:_SyncFarmSkillContext(
         ActiveMasteryCategory = masteryCategory,
         SkillCategory = skillCategory,
         Tool = selectedTool,
+        ToolParent = selectedTool and selectedTool.Parent,
     }
     local oldContext = self.FarmSkillContext
     local changed = not oldContext
@@ -8492,9 +8513,27 @@ function MainFarm:_SyncFarmSkillContext(
         or oldContext.ActiveMasteryCategory ~= nextContext.ActiveMasteryCategory
         or oldContext.SkillCategory ~= nextContext.SkillCategory
         or oldContext.Tool ~= nextContext.Tool
+        or oldContext.ToolParent ~= nextContext.ToolParent
 
     if changed then
         self.GunKnockbackHold = nil
+        local gunToolChanged = nextContext.ActiveMasteryCategory == "Gun"
+            and oldContext
+            and (
+                oldContext.ActiveMasteryCategory == "Gun"
+                or oldContext.MasteryMethod == "Gun"
+            )
+            and (
+                oldContext.Tool ~= nextContext.Tool
+                or oldContext.ToolParent ~= nextContext.ToolParent
+            )
+        if gunToolChanged then
+            self.FarmGunToolSettleUntil =
+                os.clock() + FARM_GUN_SWAP_SETTLE_SECONDS
+            if self.CombatService then
+                self.CombatService:ResetGunM1Cooldown(nextContext.Tool)
+            end
+        end
         if self.FarmSkillActive and self.CombatService then
             self.CombatService:Cancel()
         end
@@ -8620,6 +8659,11 @@ function MainFarm:_TryStartFarmSkill(
     end
 
     local now = os.clock()
+    if masteryCategory == "Gun" and now < (self.FarmGunToolSettleUntil or 0) then
+        self.FarmSkillPreparing = nil
+        self:_SetStatus("Mastery waiting: Gun hotbar swap settling", "info")
+        return true
+    end
     if now < (self.NextFarmSkillScanAt or 0) then
         if masteryCategory then
             return true
@@ -10245,6 +10289,7 @@ function MainFarm:Initialize(context)
     self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
     self.TikiPuzzleActive = false
     self.TikiPuzzleRestorePending = false
@@ -10348,6 +10393,7 @@ function MainFarm:Start()
     self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
     self:_ResetSpawnSearch(nil)
     local session = self.Session
@@ -10373,6 +10419,7 @@ function MainFarm:Stop()
     self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
     self.TikiEventComplete = false
     self.NextTikiBossSearchAt = 0

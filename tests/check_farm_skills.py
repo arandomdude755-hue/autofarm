@@ -478,13 +478,45 @@ skill_context = function_body(
 )
 require(
     "oldContext.Tool ~= nextContext.Tool" in skill_context
+    and "ToolParent = selectedTool and selectedTool.Parent" in skill_context
+    and "oldContext.ToolParent ~= nextContext.ToolParent" in skill_context
     and "oldContext.MasteryMethod ~= nextContext.MasteryMethod" in skill_context
     and "oldContext.ActiveMasteryCategory ~= nextContext.ActiveMasteryCategory" in skill_context
     and "self.CombatService:Cancel()" in skill_context
+    and "FARM_GUN_SWAP_SETTLE_SECONDS" in skill_context
+    and "self.CombatService:ResetGunM1Cooldown(nextContext.Tool)" in skill_context
     and "self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1" in skill_context
     and "self.FarmSkillPreparing = nil" in skill_context
     and "self.NextFarmSkillScanAt = 0" in skill_context,
-    "Changing the selected method, target, or tool must cancel stale input and reset farm-skill preparation",
+    "Changing methods or tools must cancel stale input, clear the local Gun M1 throttle, and reset preparation",
+)
+gun_swap_farm_skill = function_body(
+    MAIN_FARM,
+    "function MainFarm:_TryStartFarmSkill",
+    "\nfunction MainFarm:_StepAura",
+)
+gun_swap_gate = gun_swap_farm_skill.split("    local now = os.clock()", 1)[1].split(
+    "    if now < (self.NextFarmSkillScanAt or 0) then",
+    1,
+)[0]
+require(
+    "masteryCategory == \"Gun\"" in gun_swap_gate
+    and "self.FarmGunToolSettleUntil" in gun_swap_gate
+    and "Gun hotbar swap settling" in gun_swap_gate
+    and "return true" in gun_swap_gate
+    and gun_swap_farm_skill.index("Gun hotbar swap settling")
+    < gun_swap_farm_skill.index("self.CombatService:FindReadyFarmSkill"),
+    "Gun Mastery must pause skills and M1 during a hotbar/equip handoff",
+)
+gun_m1_cooldown_reset = function_body(
+    COMBAT,
+    "function CombatService:ResetGunM1Cooldown",
+    "\nfunction CombatService:FindWeapon",
+)
+require(
+    "self.NextGunM1At[tool] = nil" in gun_m1_cooldown_reset
+    and "NextFruitM1At" not in gun_m1_cooldown_reset,
+    "A Gun swap must clear only the local Gun M1 throttle for the incoming tool",
 )
 
 require(

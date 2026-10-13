@@ -83,6 +83,14 @@ function CombatService:FindEquippedWeapon(category)
     return nil, "No equipped " .. tostring(category) .. " tool is available"
 end
 
+function CombatService:ResetGunM1Cooldown(tool)
+    if tool and self.NextGunM1At then
+        self.NextGunM1At[tool] = nil
+        return true
+    end
+    return false
+end
+
 function CombatService:FindWeapon(category)
     local player = self.Compatibility.Player
     local backpack = player and player:FindFirstChild("Backpack")
