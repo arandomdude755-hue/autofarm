@@ -38,6 +38,7 @@ function CombatService.new(compatibility, enemyService)
         FruitAttackIndex = 1,
         NextGunM1At = {},
         NextFruitM1At = {},
+        LastMasterySkillKey = setmetatable({}, { __mode = "k" }),
     }, CombatService)
 end
 
@@ -202,6 +203,24 @@ function CombatService:_FindReadySkill(
                     table.insert(selectedKeys, keyName)
                 end
             end
+            if equippedTool and #selectedKeys > 1 then
+                local lastKey = self.LastMasterySkillKey[equippedTool]
+                local lastIndex
+                for index, keyName in ipairs(selectedKeys) do
+                    if keyName == lastKey then
+                        lastIndex = index
+                        break
+                    end
+                end
+                if lastIndex then
+                    local rotatedKeys = {}
+                    for offset = 1, #selectedKeys do
+                        local index = ((lastIndex + offset - 1) % #selectedKeys) + 1
+                        table.insert(rotatedKeys, selectedKeys[index])
+                    end
+                    selectedKeys = rotatedKeys
+                end
+            end
             selectedKeyCount += #selectedKeys
             if #selectedKeys > 0 and not tool then
                 missingToolCategory = missingToolCategory or category.Name
@@ -230,7 +249,7 @@ function CombatService:_FindReadySkill(
                     local cooldownEmpty = cooldown
                         and cooldown:IsA("GuiObject")
                         and cooldown.Size.X.Offset == 0
-                        and math.abs(cooldown.Size.X.Scale) <= 0.001
+                        and cooldown.Size.X.Scale <= 0.005
                     local cooldownFull = cooldown
                         and cooldown:IsA("GuiObject")
                         and cooldown.Size.X.Offset == 0
@@ -258,7 +277,12 @@ function CombatService:_FindReadySkill(
                         local titleIsReady = titleColor.R >= 0.98
                             and titleColor.G >= 0.98
                             and titleColor.B >= 0.98
-                        local isReady = (titleIsReady and cooldownEmpty) or cooldownFull
+                        local isReady
+                        if equippedTool then
+                            isReady = titleIsReady and cooldownEmpty
+                        else
+                            isReady = (titleIsReady and cooldownEmpty) or cooldownFull
+                        end
                         if isReady then
                             return {
                                 Tool = tool,
@@ -434,6 +458,9 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     if not pressed then
         self:_RestoreTemporaryAim(aimContext)
         return false, "Skill key press failed: " .. tostring(pressError)
+    end
+    if pinEquippedTool then
+        self.LastMasterySkillKey[tool] = keyName
     end
     local inputReleased = false
     local function releaseInput()

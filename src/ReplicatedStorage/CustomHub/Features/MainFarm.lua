@@ -964,10 +964,12 @@ function MainFarm:_TryStartFarmSkill(
     if farmSettings.FarmSkillFastRelease == true then
         skillHold = 0.05
     end
-    self:_SetStatus(
-        "Using " .. skill.Category .. " " .. skill.Key .. " skill",
-        "success"
-    )
+    local usingSkillStatus = "Using " .. skill.Category .. " " .. skill.Key .. " skill"
+    if masteryCategory then
+        usingSkillStatus = "Using Mastery " .. skill.Category .. " " .. skill.Key
+            .. " (" .. string.format("%.2fs hold", skillHold) .. ")"
+    end
+    self:_SetStatus(usingSkillStatus, "success")
     task.spawn(function()
         local callOk, activated, activationResult = pcall(function()
             return combatService:UseSkill(

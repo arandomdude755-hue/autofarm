@@ -88,8 +88,11 @@ require(
     and 'FindFirstChild("Skills")' in ready_skill
     and 'FindFirstChild("Cooldown")' in ready_skill
     and "titleIsReady and cooldownEmpty" in ready_skill
+    and "isReady = titleIsReady and cooldownEmpty" in ready_skill
     and "cooldownFull" in ready_skill
     and "cooldown.Size.X.Scale" in ready_skill
+    and "self.LastMasterySkillKey[equippedTool]" in ready_skill
+    and "rotatedKeys" in ready_skill
     and "frame.Visible" not in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
@@ -258,6 +261,7 @@ require(
     and "tool.Parent ~= character" in use_skill
     and "farmStateChanged = true" in use_skill
     and '"Skill input cancelled because farm state changed"' in use_skill
+    and "self.LastMasterySkillKey[tool] = keyName" in use_skill
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
@@ -343,6 +347,7 @@ require(
     and "Mastery waiting: enable a selected skill key" in farm_skill
     and "Mastery skill controls unavailable:" in farm_skill
     and "Mastery skill input failed:" in farm_skill
+    and 'string.format("%.2fs hold", skillHold)' in farm_skill
     and "return true\n        end\n        if skillError" in mastery_no_skill_branch
     and "AttackGunM1(" not in farm_skill
     and "AttackM1(" not in farm_skill
@@ -408,7 +413,8 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: ready skills use BNN cooldown states, VIM key input, and cancellation-safe release")
+print("PASS: Mastery cooldown checks are strict and skill keys rotate after each sent input")
+print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
 print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
