@@ -262,11 +262,14 @@ skull_guitar_tap = function_body(
     "\nfunction CombatService:_FindBladeHitParts",
 )
 require(
-    "self:EquipTool(tool)" in skull_guitar_tap
+    'FindEquippedWeapon("Gun")' in skull_guitar_tap
+    and 'tool.Name ~= "Skull Guitar"' in skull_guitar_tap
+    and "self:EquipTool(tool)" not in skull_guitar_tap
+    and "must already be equipped" in skull_guitar_tap
     and "self:_InvokeGunShootInput(tool, targetPart)" in skull_guitar_tap
     and "FireServer" not in skull_guitar_tap
     and "TAP" not in skull_guitar_tap,
-    "Skull Guitar must use the game's client gun-input path, not the known-unconfirmed direct TAP remote",
+    "Skull Guitar TAP must use the already-equipped Guitar through the game's client gun-input path",
 )
 fruit_m1 = function_body(
     COMBAT,

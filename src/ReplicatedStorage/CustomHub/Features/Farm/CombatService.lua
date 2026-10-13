@@ -962,13 +962,9 @@ function CombatService:TapSkullGuitar(targetPosition)
     if typeof(targetPosition) ~= "Vector3" then
         return false, "Skull Guitar target position is invalid"
     end
-    local tool = self:FindToolByName("Skull Guitar")
-    if not tool then
-        return false, "Owned Skull Guitar is not loaded into the character or Backpack"
-    end
-    local equipped, equipResult = self:EquipTool(tool)
-    if not equipped then
-        return false, tostring(equipResult)
+    local tool, equippedError = self:FindEquippedWeapon("Gun")
+    if not tool or tool.Name ~= "Skull Guitar" then
+        return false, "Skull Guitar must already be equipped: " .. tostring(equippedError)
     end
 
     local combatUtil = self.Dependencies.CombatUtil

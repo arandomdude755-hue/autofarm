@@ -183,24 +183,20 @@ event_action = function_body(
     "\nfunction MainFarm:_StepTikiEventPhase",
 )
 require(
-    "HasOwnedInventoryItem(\"Skull Guitar\")" in event_action
-    and 'InvokeServer("LoadItem", "Skull Guitar")' in event_action
+    'FindEquippedWeapon("Gun")' in event_action
+    and "if guitarEquipped then" in event_action
+    and event_action.index("if guitarEquipped then")
+        < event_action.index("local skill, skillError = self.CombatService:FindReadyTikiSkill()")
     and "TapSkullGuitar(targetPosition)" in event_action
     and "FindReadyTikiSkill()" in event_action
     and "UseSkill(" in event_action
-    and "local tapped, tapResult, shotStateChanged" in event_action
     and "if tapped and shotStateChanged == true then" in event_action
-    and "Skull Guitar input had no client firing-state change" in event_action
-    and event_action.index("Skull Guitar input had no client firing-state change")
-        < event_action.index("FindReadyTikiSkill()")
+    and "without firing-state confirmation; retrying TAP" in event_action
     and "Tiki puzzle waiting for any ready skill" in event_action
-    and 'ownershipError = "Skull Guitar is reloading"' in event_action
-    and event_action.index('ownershipError = "Skull Guitar is reloading"')
-        < event_action.index("FindReadyTikiSkill()")
     and '"Buy"' not in event_action
     and "ServerHop" not in event_action
     and "self.TikiPuzzleActive = true" in event_step,
-    "Tiki automation must use owned Skull Guitar or selected skills only while the puzzle is active",
+    "Tiki must use TAP only for an equipped Skull Guitar and otherwise use ready skills",
 )
 skull_tap = function_body(
     COMBAT,
@@ -208,7 +204,10 @@ skull_tap = function_body(
     "\nfunction CombatService:_FindBladeHitParts",
 )
 require(
-    'FindToolByName("Skull Guitar")' in skull_tap
+    'FindEquippedWeapon("Gun")' in skull_tap
+    and 'tool.Name ~= "Skull Guitar"' in skull_tap
+    and "self:EquipTool(tool)" not in skull_tap
+    and "must already be equipped" in skull_tap
     and "self:_InvokeGunShootInput(tool, targetPart)" in skull_tap
     and "FireServer" not in skull_tap
     and "IsGunReloading" in skull_tap
