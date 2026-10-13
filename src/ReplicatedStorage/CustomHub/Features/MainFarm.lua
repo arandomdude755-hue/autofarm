@@ -971,13 +971,30 @@ function MainFarm:_TryStartFarmSkill(
     playerRoot,
     allowMastery
 )
-    if self.FarmSkillActive then
-        return true
-    end
     local masteryEnabled = farmSettings
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    local masteryGunM1Result
+    local masteryGunM1Error
+    if masteryCategory == "Gun" and self.CombatService then
+        local equippedGun = self.CombatService:FindEquippedWeapon("Gun")
+        if equippedGun then
+            local inputSent, inputResult =
+                self.CombatService:AttackGunM1(target, equippedGun)
+            if inputSent then
+                masteryGunM1Result = inputResult
+            elseif inputResult ~= "Gun is reloading"
+                and inputResult ~= "Gun M1 is cooling down"
+            then
+                masteryGunM1Error = inputResult
+            end
+        end
+    end
+    if self.FarmSkillActive then
+        return true
+    end
+
     local skillScanInterval = FARM_SKILL_SCAN_INTERVAL
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
@@ -1117,7 +1134,14 @@ function MainFarm:_TryStartFarmSkill(
     self.FarmSkillPreparing = nil
     if not skill then
         if masteryCategory then
-            if skillError == "All selected skill keys are on cooldown" then
+            if masteryGunM1Result then
+                self:_SetStatus(masteryGunM1Result, "info")
+            elseif masteryGunM1Error then
+                self:_SetStatus(
+                    "Mastery Gun M1 unavailable: " .. tostring(masteryGunM1Error),
+                    "warning"
+                )
+            elseif skillError == "All selected skill keys are on cooldown" then
                 self:_SetStatus("Mastery waiting: selected skills cooling down", "info")
             elseif skillError == "No selected skill keys are enabled" then
                 self:_SetStatus("Mastery waiting: enable a selected skill key", "warning")

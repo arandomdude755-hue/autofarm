@@ -227,22 +227,44 @@ require(
     and "IsGunReloading" in gun_m1
     and "NextGunM1At[tool]" in gun_m1
     and "self:_GetToolCooldown(tool)" in gun_m1
-    and 'if tool.Name == "Skull Guitar" then' in gun_m1
-    and 'remote:FireServer("TAP", targetRoot.Position)' in gun_m1
-    and "server damage is unconfirmed" in gun_m1
-    and "self.Compatibility:GetGunShootFunction()" in gun_m1
+    and "self:_InvokeGunShootInput(tool, targetRoot)" in gun_m1
+    and "shotStateChanged" in gun_m1
     and "TapSkullGuitar" not in gun_m1
-    and "self:_SetTemporaryAim(target)" in gun_m1
-    and "WorldToViewportPoint(targetRoot.Position)" in gun_m1
-    and "Enum.UserInputType.Touch" in gun_m1
-    and "SendMouseButtonEvent" in gun_m1
-    and "tool:Activate()" not in gun_m1
-    and "Heartbeat:Wait()" in gun_m1
-    and gun_m1.index("Heartbeat:Wait()") < gun_m1.index("self:_RestoreTemporaryAim(aimContext)")
+    and "FireServer" not in gun_m1
     and "validator2:FireServer" not in gun_m1
-    and "ShootGunEvent" not in gun_m1
-    and "debugLibrary" not in gun_m1,
-    "Gun M1 must use validated screen-targeted input for regular guns and TAP only an already-equipped Skull Guitar",
+    and "ShootGunEvent" not in gun_m1,
+    "Gun M1 must call the game's target-directed gun handler without manually forging remotes",
+)
+gun_input = function_body(
+    COMBAT,
+    "function CombatService:_InvokeGunShootInput",
+    "\nfunction CombatService:AttackGunM1",
+)
+require(
+    "self.Compatibility:GetGunShootFunction()" in gun_input
+    and "targetAssist.getTargetInfo = overrideTargetInfo" in gun_input
+    and "return { Part = targetPart }" in gun_input
+    and "Enum.UserInputType.Touch" in gun_input
+    and "Enum.UserInputType.MouseButton1" in gun_input
+    and "LocalShotsLeft" in gun_input
+    and "LocalTotalShots" in gun_input
+    and "Heartbeat:Wait()" in gun_input
+    and "FireServer" not in gun_input
+    and "validator2" not in gun_input
+    and "ShootGunEvent" not in gun_input,
+    "Gun input must temporarily target the chosen enemy and separate client firing evidence from server damage",
+)
+skull_guitar_tap = function_body(
+    COMBAT,
+    "function CombatService:TapSkullGuitar",
+    "\nfunction CombatService:_FindBladeHitParts",
+)
+require(
+    "self:EquipTool(tool)" in skull_guitar_tap
+    and "self:_InvokeGunShootInput(tool, targetPart)" in skull_guitar_tap
+    and "FireServer" not in skull_guitar_tap
+    and "TAP" not in skull_guitar_tap,
+    "Skull Guitar must use the game's client gun-input path, not the known-unconfirmed direct TAP remote",
 )
 fruit_m1 = function_body(
     COMBAT,
@@ -272,13 +294,15 @@ gun_shoot_lookup = function_body(
     "\nfunction Compatibility:IsTouchEnabled",
 )
 require(
-    "upvalues[9]" in gun_shoot_lookup
-    and 'pcall(debugInfo, shootGun, "n")' in gun_shoot_lookup
-    and 'functionName ~= "shootGun"' in gun_shoot_lookup
-    and "pcall(getUpvalues, attack)" in gun_shoot_lookup
+    "pcall(getGc, false)" in gun_shoot_lookup
+    and 'value == "LocalShotsLeft"' in gun_shoot_lookup
+    and 'value == "LocalTotalShots"' in gun_shoot_lookup
+    and 'pcall(rawget, value, "getTargetInfo")' in gun_shoot_lookup
+    and "pcall(getUpvalues, candidate)" in gun_shoot_lookup
+    and "upvalues[9]" not in gun_shoot_lookup
     and "GetSignalConnections" not in COMBAT
     and "GetSignalConnections" not in COMPATIBILITY,
-    "Optional gun internals are validated and mobile skills avoid synthetic GUI connection firing",
+    "Optional gun internals are located by client shoot markers and target lookup, without fixed upvalue indices",
 )
 
 aim_target = function_body(
@@ -371,9 +395,10 @@ gun_m1 = function_body(
     "\nfunction CombatService:TapSkullGuitar",
 )
 require(
-    "self:_SetTemporaryAim(target)" in gun_m1
-    and "self:_SetTemporaryAim(target, true)" not in gun_m1,
-    "The BNN-style skill remote redirect must not change the separate Gun M1 path",
+    "self:_InvokeGunShootInput(tool, targetRoot)" in gun_m1
+    and "self:_SetTemporaryAim(target)" not in gun_m1
+    and "FireServer" not in gun_m1,
+    "The Gun M1 path must use the game's target lookup separately from skill aiming",
 )
 
 attack_position = function_body(
@@ -443,8 +468,10 @@ require(
 require(
     "_TryMasteryM1Fallback" not in MAIN_FARM
     and "LastMasteryM1Result" not in MAIN_FARM
-    and "AttackGunM1(" not in MAIN_FARM,
-    "Farm Mastery must not dispatch any M1 attack while it is skills-only",
+    and 'if masteryCategory == "Gun" and self.CombatService then' in MAIN_FARM
+    and 'self.CombatService:FindEquippedWeapon("Gun")' in MAIN_FARM
+    and "self.CombatService:AttackGunM1(target, equippedGun)" in MAIN_FARM,
+    "Gun Mastery may send M1 with the already equipped Gun without changing the skill path or equipping Skull Guitar",
 )
 
 farm_skill = function_body(
@@ -495,6 +522,9 @@ require(
     and farm_skill.count("task.spawn(function()") == 1
     and "finishSkillAttempt(runSkillAttempt())" in skill_dispatch
     and "combatService:UseSkill(" in farm_skill
+    and "self.CombatService:AttackGunM1(target, equippedGun)" in farm_skill
+    and farm_skill.index("self.CombatService:AttackGunM1(target, equippedGun)")
+        < farm_skill.index("if self.FarmSkillActive then")
     and "self:_IsCurrent(session)" in farm_skill
     and "self.Target == target" in farm_skill
     and "currentSettings.UseFarmSkills == true" in farm_skill
@@ -511,7 +541,6 @@ require(
     and "Mastery skill input failed:" in farm_skill
     and '"Using Mastery "' not in farm_skill
     and "return true\n        end\n        if skillError" in mastery_no_skill_branch
-    and "AttackGunM1(" not in farm_skill
     and "AttackM1(" not in farm_skill
     and "masteryCategory" in farm_skill
     and "masteryTool" not in farm_skill
@@ -622,8 +651,8 @@ require(
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: Mastery and regular skills share category-filtered cooldown readiness without tool pinning or key rotation")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
-print("PASS: skill weapon lookup follows BNN's Backpack-first flow; Skull Guitar TAP is chosen only while equipped")
-print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
+print("PASS: skill weapon lookup follows BNN's Backpack-first flow while Gun M1 uses only an already equipped tool")
+print("PASS: Gun Mastery fires through the game gun handler without interrupting skill dispatch")
 print("PASS: Mastery skills may fire during approach; ordinary skills retain the attack-position gate")
 print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")
 print("PASS: ordinary farm attacks restore Farm Weapon after asynchronous skill use")

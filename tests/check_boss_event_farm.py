@@ -201,7 +201,8 @@ skull_tap = function_body(
 )
 require(
     'FindToolByName("Skull Guitar")' in skull_tap
-    and 'remote:FireServer("TAP", targetPosition)' in skull_tap
+    and "self:_InvokeGunShootInput(tool, targetPart)" in skull_tap
+    and "FireServer" not in skull_tap
     and "IsGunReloading" in skull_tap
     and "function CombatService:UseTikiSkill" in COMBAT
     and "function CombatService:UseSkill" in COMBAT

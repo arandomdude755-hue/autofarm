@@ -46,63 +46,135 @@ function Compatibility:GetUnparentedInstances()
 end
 
 function Compatibility:GetGunShootFunction()
-    if type(self.GunShootFunction) == "function" then
-        return self.GunShootFunction
+    if type(self.GunShootFunction) == "function"
+        and type(self.GunShootTargetAssist) == "table"
+        and type(self.GunShootTargetAssist.getTargetInfo) == "function"
+    then
+        return self.GunShootFunction, self.GunShootTargetAssist
     end
 
-    local controllers = self.ReplicatedStorage:FindFirstChild("Controllers")
-    local controllerModule = controllers and controllers:FindFirstChild("CombatController")
-    if not controllerModule then
-        return nil, "CombatController is unavailable"
+    local now = os.clock()
+    if now < (self.GunShootNextScanAt or 0) then
+        return nil, nil, self.GunShootResolveError or "Gun shoot function scan is cooling down"
     end
+    self.GunShootNextScanAt = now + 2
 
-    local requireOk, combatController = pcall(require, controllerModule)
-    local attack = requireOk and type(combatController) == "table"
-        and combatController.Attack
-    if type(attack) ~= "function" then
-        return nil, "CombatController.Attack is unavailable"
-    end
-
-    local shootGun
-    local getterOk, getUpvalues = pcall(function()
-        return getupvalues
+    local getterOk, getGc = pcall(function()
+        return getgc
     end)
-    if getterOk and type(getUpvalues) == "function" then
-        local upvaluesOk, upvalues = pcall(getUpvalues, attack)
-        if upvaluesOk and type(upvalues) == "table" then
-            shootGun = upvalues[9]
-        end
+    if not getterOk or type(getGc) ~= "function" then
+        self.GunShootResolveError = "Executor getgc is unavailable"
+        return nil, nil, self.GunShootResolveError
     end
 
-    if type(shootGun) ~= "function" then
-        local debugOk, debugLibrary = pcall(function()
-            return debug
-        end)
-        local getUpvalue = debugOk and debugLibrary and debugLibrary.getupvalue
-        if type(getUpvalue) == "function" then
-            local upvalueOk, _, value = pcall(getUpvalue, attack, 9)
-            if upvalueOk then
-                shootGun = value
+    local debugOk, debugLibrary = pcall(function()
+        return debug
+    end)
+    local getInfo = debugOk and debugLibrary and debugLibrary.getinfo
+    local getConstants = debugOk and debugLibrary and debugLibrary.getconstants
+    if type(getInfo) ~= "function" or type(getConstants) ~= "function" then
+        self.GunShootResolveError = "Gun shoot function inspection is unavailable"
+        return nil, nil, self.GunShootResolveError
+    end
+
+    local getGcOk, objects = pcall(getGc, false)
+    if not getGcOk or type(objects) ~= "table" then
+        self.GunShootResolveError = "Executor could not enumerate client functions"
+        return nil, nil, self.GunShootResolveError
+    end
+
+    local isLuaClosure
+    pcall(function()
+        isLuaClosure = islclosure
+    end)
+    local getUpvalues
+    pcall(function()
+        getUpvalues = getupvalues
+    end)
+
+    local function hasRequiredConstants(constants)
+        if type(constants) ~= "table" then
+            return false
+        end
+        local foundShotsLeft = false
+        local foundTotalShots = false
+        for _, value in pairs(constants) do
+            if value == "LocalShotsLeft" then
+                foundShotsLeft = true
+            elseif value == "LocalTotalShots" then
+                foundTotalShots = true
+            end
+            if foundShotsLeft and foundTotalShots then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function findTargetAssist(candidate)
+        local values
+        if type(getUpvalues) == "function" then
+            local valuesOk, result = pcall(getUpvalues, candidate)
+            if valuesOk and type(result) == "table" then
+                values = result
+            end
+        end
+        if not values and type(debugLibrary.getupvalue) == "function" then
+            values = {}
+            for index = 1, 40 do
+                local valueOk, first, second =
+                    pcall(debugLibrary.getupvalue, candidate, index)
+                if not valueOk or first == nil then
+                    break
+                end
+                table.insert(values, second ~= nil and second or first)
+            end
+        end
+        for _, value in pairs(values or {}) do
+            if type(value) == "table" then
+                local targetInfo
+                local readOk, result = pcall(rawget, value, "getTargetInfo")
+                if readOk then
+                    targetInfo = result
+                end
+                if type(targetInfo) == "function" then
+                    return value
+                end
+            end
+        end
+        return nil
+    end
+
+    for _, candidate in pairs(objects) do
+        if type(candidate) == "function" then
+            local closureAllowed = true
+            if type(isLuaClosure) == "function" then
+                local closureOk, isClosure = pcall(isLuaClosure, candidate)
+                closureAllowed = closureOk and isClosure == true
+            end
+            if closureAllowed then
+                local infoOk, info = pcall(getInfo, candidate)
+                local parameterCount = info
+                    and (info.numparams or info.nparams)
+                if infoOk and parameterCount == 2 then
+                    local constantsOk, constants = pcall(getConstants, candidate)
+                    if constantsOk and hasRequiredConstants(constants) then
+                        local targetAssist = findTargetAssist(candidate)
+                        if targetAssist then
+                            self.GunShootFunction = candidate
+                            self.GunShootTargetAssist = targetAssist
+                            self.GunShootResolveError = nil
+                            return candidate, targetAssist
+                        end
+                    end
+                end
             end
         end
     end
 
-    if type(shootGun) ~= "function" then
-        return nil, "CombatController shootGun input is unavailable"
-    end
-
-    local infoOk, debugInfo = pcall(function()
-        return debug.info
-    end)
-    if not infoOk or type(debugInfo) ~= "function" then
-        return nil, "CombatController shootGun cannot be validated"
-    end
-    local nameOk, functionName = pcall(debugInfo, shootGun, "n")
-    if not nameOk or functionName ~= "shootGun" then
-        return nil, "CombatController attack input did not match shootGun"
-    end
-    self.GunShootFunction = shootGun
-    return shootGun
+    self.GunShootResolveError =
+        "Could not find the client gun handler with a target lookup"
+    return nil, nil, self.GunShootResolveError
 end
 
 function Compatibility:IsTouchEnabled()

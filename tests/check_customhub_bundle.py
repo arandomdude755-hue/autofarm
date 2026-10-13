@@ -93,7 +93,6 @@ expected_external_require_arguments = {
     "netModule",
     "itemServiceModule",
     "itemConfigModule",
-    "controllerModule",
 }
 require(
     external_require_arguments == expected_external_require_arguments,

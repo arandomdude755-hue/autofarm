@@ -599,63 +599,135 @@ function Compatibility:GetUnparentedInstances()
 end
 
 function Compatibility:GetGunShootFunction()
-    if type(self.GunShootFunction) == "function" then
-        return self.GunShootFunction
+    if type(self.GunShootFunction) == "function"
+        and type(self.GunShootTargetAssist) == "table"
+        and type(self.GunShootTargetAssist.getTargetInfo) == "function"
+    then
+        return self.GunShootFunction, self.GunShootTargetAssist
     end
 
-    local controllers = self.ReplicatedStorage:FindFirstChild("Controllers")
-    local controllerModule = controllers and controllers:FindFirstChild("CombatController")
-    if not controllerModule then
-        return nil, "CombatController is unavailable"
+    local now = os.clock()
+    if now < (self.GunShootNextScanAt or 0) then
+        return nil, nil, self.GunShootResolveError or "Gun shoot function scan is cooling down"
     end
+    self.GunShootNextScanAt = now + 2
 
-    local requireOk, combatController = pcall(require, controllerModule)
-    local attack = requireOk and type(combatController) == "table"
-        and combatController.Attack
-    if type(attack) ~= "function" then
-        return nil, "CombatController.Attack is unavailable"
-    end
-
-    local shootGun
-    local getterOk, getUpvalues = pcall(function()
-        return getupvalues
+    local getterOk, getGc = pcall(function()
+        return getgc
     end)
-    if getterOk and type(getUpvalues) == "function" then
-        local upvaluesOk, upvalues = pcall(getUpvalues, attack)
-        if upvaluesOk and type(upvalues) == "table" then
-            shootGun = upvalues[9]
-        end
+    if not getterOk or type(getGc) ~= "function" then
+        self.GunShootResolveError = "Executor getgc is unavailable"
+        return nil, nil, self.GunShootResolveError
     end
 
-    if type(shootGun) ~= "function" then
-        local debugOk, debugLibrary = pcall(function()
-            return debug
-        end)
-        local getUpvalue = debugOk and debugLibrary and debugLibrary.getupvalue
-        if type(getUpvalue) == "function" then
-            local upvalueOk, _, value = pcall(getUpvalue, attack, 9)
-            if upvalueOk then
-                shootGun = value
+    local debugOk, debugLibrary = pcall(function()
+        return debug
+    end)
+    local getInfo = debugOk and debugLibrary and debugLibrary.getinfo
+    local getConstants = debugOk and debugLibrary and debugLibrary.getconstants
+    if type(getInfo) ~= "function" or type(getConstants) ~= "function" then
+        self.GunShootResolveError = "Gun shoot function inspection is unavailable"
+        return nil, nil, self.GunShootResolveError
+    end
+
+    local getGcOk, objects = pcall(getGc, false)
+    if not getGcOk or type(objects) ~= "table" then
+        self.GunShootResolveError = "Executor could not enumerate client functions"
+        return nil, nil, self.GunShootResolveError
+    end
+
+    local isLuaClosure
+    pcall(function()
+        isLuaClosure = islclosure
+    end)
+    local getUpvalues
+    pcall(function()
+        getUpvalues = getupvalues
+    end)
+
+    local function hasRequiredConstants(constants)
+        if type(constants) ~= "table" then
+            return false
+        end
+        local foundShotsLeft = false
+        local foundTotalShots = false
+        for _, value in pairs(constants) do
+            if value == "LocalShotsLeft" then
+                foundShotsLeft = true
+            elseif value == "LocalTotalShots" then
+                foundTotalShots = true
+            end
+            if foundShotsLeft and foundTotalShots then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function findTargetAssist(candidate)
+        local values
+        if type(getUpvalues) == "function" then
+            local valuesOk, result = pcall(getUpvalues, candidate)
+            if valuesOk and type(result) == "table" then
+                values = result
+            end
+        end
+        if not values and type(debugLibrary.getupvalue) == "function" then
+            values = {}
+            for index = 1, 40 do
+                local valueOk, first, second =
+                    pcall(debugLibrary.getupvalue, candidate, index)
+                if not valueOk or first == nil then
+                    break
+                end
+                table.insert(values, second ~= nil and second or first)
+            end
+        end
+        for _, value in pairs(values or {}) do
+            if type(value) == "table" then
+                local targetInfo
+                local readOk, result = pcall(rawget, value, "getTargetInfo")
+                if readOk then
+                    targetInfo = result
+                end
+                if type(targetInfo) == "function" then
+                    return value
+                end
+            end
+        end
+        return nil
+    end
+
+    for _, candidate in pairs(objects) do
+        if type(candidate) == "function" then
+            local closureAllowed = true
+            if type(isLuaClosure) == "function" then
+                local closureOk, isClosure = pcall(isLuaClosure, candidate)
+                closureAllowed = closureOk and isClosure == true
+            end
+            if closureAllowed then
+                local infoOk, info = pcall(getInfo, candidate)
+                local parameterCount = info
+                    and (info.numparams or info.nparams)
+                if infoOk and parameterCount == 2 then
+                    local constantsOk, constants = pcall(getConstants, candidate)
+                    if constantsOk and hasRequiredConstants(constants) then
+                        local targetAssist = findTargetAssist(candidate)
+                        if targetAssist then
+                            self.GunShootFunction = candidate
+                            self.GunShootTargetAssist = targetAssist
+                            self.GunShootResolveError = nil
+                            return candidate, targetAssist
+                        end
+                    end
+                end
             end
         end
     end
 
-    if type(shootGun) ~= "function" then
-        return nil, "CombatController shootGun input is unavailable"
-    end
-
-    local infoOk, debugInfo = pcall(function()
-        return debug.info
-    end)
-    if not infoOk or type(debugInfo) ~= "function" then
-        return nil, "CombatController shootGun cannot be validated"
-    end
-    local nameOk, functionName = pcall(debugInfo, shootGun, "n")
-    if not nameOk or functionName ~= "shootGun" then
-        return nil, "CombatController attack input did not match shootGun"
-    end
-    self.GunShootFunction = shootGun
-    return shootGun
+    self.GunShootResolveError =
+        "Could not find the client gun handler with a target lookup"
+    return nil, nil, self.GunShootResolveError
 end
 
 function Compatibility:IsTouchEnabled()
@@ -6883,6 +6955,107 @@ function CombatService:_GetToolCooldown(tool)
     return nil
 end
 
+function CombatService:_InvokeGunShootInput(tool, targetPart)
+    if self.GunM1Active then
+        return false, false, "Another gun input is still being processed"
+    end
+    if type(targetPart) ~= "table"
+        and (typeof(targetPart) ~= "Instance" or not targetPart:IsA("BasePart"))
+    then
+        return false, false, "Gun target is not a usable part"
+    end
+
+    local shootGun, targetAssist, resolveError =
+        self.Compatibility:GetGunShootFunction()
+    if type(shootGun) ~= "function" or type(targetAssist) ~= "table"
+        or type(targetAssist.getTargetInfo) ~= "function"
+    then
+        return false, false, tostring(resolveError or "Gun target lookup is unavailable")
+    end
+
+    local inputService = game:GetService("UserInputService")
+    local touchOnly = inputService.TouchEnabled and not inputService.MouseEnabled
+    local input = {
+        UserInputType = touchOnly
+            and Enum.UserInputType.Touch
+            or Enum.UserInputType.MouseButton1,
+        Position = Vector3.zero,
+    }
+
+    local beforeShotsLeft = tonumber(tool:GetAttribute("LocalShotsLeft"))
+    local beforeTotalShots = tonumber(tool:GetAttribute("LocalTotalShots"))
+    local beforeEnabled = tool.Enabled
+    local previousTargetInfo = targetAssist.getTargetInfo
+    local overrideTargetInfo = function()
+        return { Part = targetPart }
+    end
+
+    local overrideOk, overrideError = pcall(function()
+        targetAssist.getTargetInfo = overrideTargetInfo
+    end)
+    if not overrideOk then
+        return false, false, "Could not direct gun aim to the selected target: "
+            .. tostring(overrideError)
+    end
+
+    self.GunM1Active = true
+    local callOk, callError = pcall(shootGun, tool, input)
+    local restoreOk, restoreError = pcall(function()
+        targetAssist.getTargetInfo = previousTargetInfo
+    end)
+
+    if not restoreOk then
+        self.GunM1Active = false
+        return false, false, "Gun target lookup could not be restored: "
+            .. tostring(restoreError)
+    end
+    if not callOk then
+        self.GunM1Active = false
+        return false, false, "Game gun input failed: " .. tostring(callError)
+    end
+
+    local waitOk, waitError = pcall(function()
+        local runService = self.Compatibility.RunService
+        if runService and runService.Heartbeat then
+            runService.Heartbeat:Wait()
+        else
+            task.wait()
+        end
+    end)
+    if not waitOk then
+        self.GunM1Active = false
+        return true, false, "Gun input was invoked, but shot-state check failed: "
+            .. tostring(waitError)
+    end
+
+    local afterShotsLeft = tonumber(tool:GetAttribute("LocalShotsLeft"))
+    local afterTotalShots = tonumber(tool:GetAttribute("LocalTotalShots"))
+    local reloadObserved = false
+    local combatUtil = self.Dependencies.CombatUtil
+    if combatUtil and type(combatUtil.IsGunReloading) == "function" then
+        local reloadOk, isReloading =
+            pcall(combatUtil.IsGunReloading, combatUtil, tool)
+        reloadObserved = reloadOk and isReloading == true
+    end
+
+    local shotStateChanged = (
+        beforeShotsLeft ~= nil
+            and afterShotsLeft ~= nil
+            and afterShotsLeft < beforeShotsLeft
+    ) or (
+        beforeTotalShots ~= nil
+            and afterTotalShots ~= nil
+            and afterTotalShots ~= beforeTotalShots
+    ) or (
+        beforeEnabled == true and tool.Enabled == false
+    ) or reloadObserved
+
+    self.GunM1Active = false
+    return true, shotStateChanged, shotStateChanged
+        and "Gun client firing state changed; server damage is unconfirmed"
+        or "Gun input sent, but no client firing-state change was observed"
+end
+
 function CombatService:AttackGunM1(target, requiredTool)
     if not self.EnemyService:IsAlive(target) then
         return false, "Gun M1 target is no longer alive"
@@ -6924,6 +7097,13 @@ function CombatService:AttackGunM1(target, requiredTool)
     if character:FindFirstChild(tool.Name) ~= tool then
         return false, "Gun M1 weapon did not equip"
     end
+    if not tool.Enabled then
+        return false, "Gun is disabled"
+    end
+    local localShotsLeft = tonumber(tool:GetAttribute("LocalShotsLeft"))
+    if localShotsLeft and localShotsLeft < 1 then
+        return false, "Gun has no shots left"
+    end
 
     local combatUtil = self.Dependencies.CombatUtil
     if not combatUtil or type(combatUtil.IsGunReloading) ~= "function" then
@@ -6943,121 +7123,17 @@ function CombatService:AttackGunM1(target, requiredTool)
         return false, "Gun M1 is cooling down"
     end
 
-    local cooldown = self:_GetToolCooldown(tool) or 0.25
-
-    if tool.Name == "Skull Guitar" then
-        local remote = tool:FindFirstChild("RemoteEvent")
-        if not remote or not remote:IsA("RemoteEvent") then
-            return false, "Equipped Skull Guitar has no supported RemoteEvent"
-        end
-        local fireOk, fireError = pcall(function()
-            remote:FireServer("TAP", targetRoot.Position)
-        end)
-        if not fireOk then
-            return false, "Equipped Skull Guitar TAP failed: " .. tostring(fireError)
-        end
-        self.NextGunM1At[tool] = now + cooldown
-        return true, "Equipped Skull Guitar TAP sent; server damage is unconfirmed"
-    end
-
-    local camera = self.Compatibility.Workspace.CurrentCamera
-    if not camera then
-        return false, "Gun M1 camera is unavailable"
-    end
-    local screenPoint = camera:WorldToViewportPoint(targetRoot.Position)
-    local insetOk, inset = pcall(function()
-        return game:GetService("GuiService"):GetGuiInset()
-    end)
-    if not insetOk or typeof(inset) ~= "Vector2" then
-        inset = Vector2.zero
-    end
-    local touchEnabled = self.Compatibility:IsTouchEnabled()
-    local inputPosition = touchEnabled
-        and Vector3.new(screenPoint.X - inset.X, screenPoint.Y - inset.Y, 0)
-        or Vector3.new(screenPoint.X, screenPoint.Y, 0)
-
-    local aimContext, aimError = self:_SetTemporaryAim(target)
-    if not aimContext then
-        return false, tostring(aimError)
-    end
-
-    local shootGun, shootGunError = self.Compatibility:GetGunShootFunction()
-    local inputIssued = false
-    local inputResult
-    if shootGun then
-        local inputType = touchEnabled
-            and Enum.UserInputType.Touch
-            or Enum.UserInputType.MouseButton1
-        local callOk, callError = pcall(shootGun, tool, {
-            UserInputType = inputType,
-            Position = inputPosition,
-        })
-        if callOk then
-            inputIssued = true
-            inputResult = "CombatController shootGun input sent"
-        else
-            inputResult = "CombatController shootGun failed: " .. tostring(callError)
-        end
-    else
-        inputResult = tostring(shootGunError)
-    end
-
-    if not inputIssued then
-        local inputOk, inputService = pcall(function()
-            return game:GetService("VirtualInputManager")
-        end)
-        if inputOk and inputService then
-            local downOk, downError = pcall(function()
-                inputService:SendMouseButtonEvent(
-                    screenPoint.X,
-                    screenPoint.Y,
-                    0,
-                    true,
-                    game,
-                    0
-                )
-            end)
-            if downOk then
-                task.wait(0.05)
-                local upOk, upError = pcall(function()
-                    inputService:SendMouseButtonEvent(
-                        screenPoint.X,
-                        screenPoint.Y,
-                        0,
-                        false,
-                        game,
-                        0
-                    )
-                end)
-                inputIssued = upOk
-                inputResult = upOk
-                    and "Virtual mouse click sent"
-                    or ("Virtual mouse release failed: " .. tostring(upError))
-            else
-                inputResult = "Virtual mouse click failed: " .. tostring(downError)
-            end
-        else
-            inputResult = inputResult .. "; VirtualInputManager is unavailable"
-        end
-    end
-
-    local aimWaitOk, aimWaitError = pcall(function()
-        local runService = self.Compatibility.RunService
-        if runService and runService.Heartbeat then
-            runService.Heartbeat:Wait()
-        else
-            task.wait()
-        end
-    end)
-    self:_RestoreTemporaryAim(aimContext)
-    if not inputIssued then
+    local inputSent, shotStateChanged, inputResult =
+        self:_InvokeGunShootInput(tool, targetRoot)
+    if not inputSent then
         return false, tostring(inputResult)
     end
-    if not aimWaitOk then
-        return false, "Gun aim release wait failed: " .. tostring(aimWaitError)
-    end
-    self.NextGunM1At[tool] = now + cooldown
-    return true, tostring(inputResult) .. "; server damage is not confirmed"
+
+    local cooldown = self:_GetToolCooldown(tool) or 0.25
+    self.NextGunM1At[tool] = now + (
+        shotStateChanged and cooldown or math.min(cooldown, 0.25)
+    )
+    return true, tostring(inputResult)
 end
 
 function CombatService:TapSkullGuitar(targetPosition)
@@ -7085,17 +7161,32 @@ function CombatService:TapSkullGuitar(targetPosition)
         return false, "Skull Guitar is reloading"
     end
 
-    local remote = tool:FindFirstChild("RemoteEvent")
-    if not remote or not remote:IsA("RemoteEvent") then
-        return false, "Loaded Skull Guitar has no supported RemoteEvent"
+    if not tool.Enabled then
+        return false, "Skull Guitar is disabled"
     end
-    local fireOk, fireError = pcall(function()
-        remote:FireServer("TAP", targetPosition)
-    end)
-    if not fireOk then
-        return false, "Skull Guitar puzzle request failed: " .. tostring(fireError)
+    local now = os.clock()
+    self.NextGunM1At = self.NextGunM1At or {}
+    if now < (self.NextGunM1At[tool] or 0) then
+        return false, "Skull Guitar is cooling down"
     end
-    return true, "Owned Skull Guitar puzzle request issued"
+
+    local targetPart = {
+        CFrame = CFrame.new(targetPosition),
+        Position = targetPosition,
+    }
+    local inputSent, shotStateChanged, inputResult =
+        self:_InvokeGunShootInput(tool, targetPart)
+    if not inputSent then
+        return false, "Skull Guitar input failed: " .. tostring(inputResult)
+    end
+
+    local cooldown = self:_GetToolCooldown(tool) or 0.25
+    self.NextGunM1At[tool] = now + (
+        shotStateChanged and cooldown or math.min(cooldown, 0.25)
+    )
+    return true, shotStateChanged
+        and "Skull Guitar client firing state changed; puzzle progress is unconfirmed"
+        or "Skull Guitar input sent; firing and puzzle progress are unconfirmed"
 end
 
 function CombatService:_FindBladeHitParts(character, root, range)
@@ -8301,13 +8392,30 @@ function MainFarm:_TryStartFarmSkill(
     playerRoot,
     allowMastery
 )
-    if self.FarmSkillActive then
-        return true
-    end
     local masteryEnabled = farmSettings
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    local masteryGunM1Result
+    local masteryGunM1Error
+    if masteryCategory == "Gun" and self.CombatService then
+        local equippedGun = self.CombatService:FindEquippedWeapon("Gun")
+        if equippedGun then
+            local inputSent, inputResult =
+                self.CombatService:AttackGunM1(target, equippedGun)
+            if inputSent then
+                masteryGunM1Result = inputResult
+            elseif inputResult ~= "Gun is reloading"
+                and inputResult ~= "Gun M1 is cooling down"
+            then
+                masteryGunM1Error = inputResult
+            end
+        end
+    end
+    if self.FarmSkillActive then
+        return true
+    end
+
     local skillScanInterval = FARM_SKILL_SCAN_INTERVAL
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
@@ -8447,7 +8555,14 @@ function MainFarm:_TryStartFarmSkill(
     self.FarmSkillPreparing = nil
     if not skill then
         if masteryCategory then
-            if skillError == "All selected skill keys are on cooldown" then
+            if masteryGunM1Result then
+                self:_SetStatus(masteryGunM1Result, "info")
+            elseif masteryGunM1Error then
+                self:_SetStatus(
+                    "Mastery Gun M1 unavailable: " .. tostring(masteryGunM1Error),
+                    "warning"
+                )
+            elseif skillError == "All selected skill keys are on cooldown" then
                 self:_SetStatus("Mastery waiting: selected skills cooling down", "info")
             elseif skillError == "No selected skill keys are enabled" then
                 self:_SetStatus("Mastery waiting: enable a selected skill key", "warning")
