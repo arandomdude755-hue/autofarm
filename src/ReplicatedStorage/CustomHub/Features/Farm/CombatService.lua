@@ -1,5 +1,6 @@
 local CombatService = {}
 CombatService.__index = CombatService
+local SkillAimRedirect = require(script.Parent.SkillAimRedirect)
 
 local validHitPartNames = {
     RightUpperArm = true,
@@ -495,7 +496,7 @@ function CombatService:FindReadyTikiSkill()
     end)
 end
 
-function CombatService:_GetAimTarget(target)
+function CombatService:_GetAimTarget(target, preferRoot)
     if not target then
         return nil, nil
     end
@@ -506,7 +507,10 @@ function CombatService:_GetAimTarget(target)
         return nil, nil
     end
 
-    for _, partName in ipairs({ "UpperTorso", "Torso", "HumanoidRootPart", "Head" }) do
+    local preferredParts = preferRoot
+        and { "HumanoidRootPart", "UpperTorso", "Torso", "Head" }
+        or { "UpperTorso", "Torso", "HumanoidRootPart", "Head" }
+    for _, partName in ipairs(preferredParts) do
         local part = target:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
             return part, target
@@ -523,7 +527,8 @@ function CombatService:_GetAimTarget(target)
 end
 
 function CombatService:_UpdateTemporaryAim(aimContext, target)
-    local targetPart, mouseTarget = self:_GetAimTarget(target)
+    local targetPart, mouseTarget =
+        self:_GetAimTarget(target, aimContext.PreferRoot)
     if not targetPart then
         return false, "Skill target has no aimable BasePart"
     end
@@ -541,11 +546,18 @@ function CombatService:_UpdateTemporaryAim(aimContext, target)
     then
         return false, "ReplicatedStorage.Mouse rejected the temporary target-model aim"
     end
+    if aimContext.RemoteAim then
+        local redirectUpdated, redirectError =
+            SkillAimRedirect:Update(aimContext.RemoteAim, targetPart)
+        if not redirectUpdated then
+            return false, tostring(redirectError)
+        end
+    end
     aimContext.TargetPart = targetPart
     return true
 end
 
-function CombatService:_SetTemporaryAim(target)
+function CombatService:_SetTemporaryAim(target, redirectSkillRemote)
     local mouse = self.Dependencies.Mouse
     if type(mouse) ~= "table" then
         return nil, "ReplicatedStorage.Mouse did not expose the BNN aim table"
@@ -557,10 +569,25 @@ function CombatService:_SetTemporaryAim(target)
         return nil, "ReplicatedStorage.Mouse aim state is unreadable"
     end
 
+    local targetPart, mouseTarget = self:_GetAimTarget(target, redirectSkillRemote == true)
+    if not targetPart then
+        return nil, "Skill target has no aimable BasePart"
+    end
+    local remoteAim
+    if redirectSkillRemote then
+        local redirectError
+        remoteAim, redirectError = SkillAimRedirect:Begin(targetPart)
+        if not remoteAim then
+            return nil, tostring(redirectError)
+        end
+    end
+
     local aimContext = {
         Mouse = mouse,
         OldHit = oldHit,
         OldTarget = oldTarget,
+        RemoteAim = remoteAim,
+        PreferRoot = redirectSkillRemote == true,
     }
     local aimOk, aimError = self:_UpdateTemporaryAim(aimContext, target)
     if not aimOk then
@@ -571,7 +598,11 @@ function CombatService:_SetTemporaryAim(target)
 end
 
 function CombatService:_RestoreTemporaryAim(aimContext)
-    if not aimContext or not aimContext.Mouse then
+    if not aimContext then
+        return
+    end
+    SkillAimRedirect:End(aimContext.RemoteAim)
+    if not aimContext.Mouse then
         return
     end
     pcall(function()
@@ -598,7 +629,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         return false, "Selected skill weapon did not equip"
     end
 
-    local aimContext, aimError = self:_SetTemporaryAim(target)
+    local aimContext, aimError = self:_SetTemporaryAim(target, true)
     if not aimContext then
         return false, tostring(aimError)
     end
@@ -626,7 +657,14 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
             return true
         end
         inputReleased = true
-        inputService:SendKeyEvent(false, keyName, false, game)
+        local releaseOk, releaseError = pcall(function()
+            inputService:SendKeyEvent(false, keyName, false, game)
+        end)
+        SkillAimRedirect:End(aimContext.RemoteAim)
+        aimContext.RemoteAim = nil
+        if not releaseOk then
+            error(releaseError)
+        end
         return true
     end
     self.ActiveInputRelease = releaseInput

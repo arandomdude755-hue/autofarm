@@ -19,11 +19,11 @@ For now, Farm Mastery is skills-only: the selected Farm Weapon lowers NPC health
 
 **How to apply:** for Mastery, keep target/session/category/threshold checks and aim/input cleanup, but allow dispatch during approach and continue refreshing its movement goal. For ordinary farm skills, preserve the in-position check and pause movement retargeting while the skill is being sent. A held movement goal must enter the retarget branch when its destination changes, even if the new destination is within the normal near-goal threshold.
 
-Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary and target-scoped through the game's Mouse module, verify that the aim assignment works before sending a key, and release the key on cancellation.
+All farm skills, including travel skills, should aim at the current NPC through one shared target context. Use BNN-style outgoing-position replacement only during an active skill cast; do not rewrite unrelated remote calls. When ordinary farming and Farm Mastery are both enabled, Mastery takes priority at or below its health threshold and cancels an ordinary skill hold.
 
-**Why:** the user sees no value in configuring skills used only for the Tiki puzzle and requested that it use any available skill automatically. They approved normal farming skill settings separately. The user did not approve purchases or server hopping. BNN also relies on executor-specific persistence and remote-interception APIs that are not portable or safely scoped.
+**Why:** the user tested BNN's aim behavior in-game and confirmed it works, and wants every skill aimed at the current target. Its remote rewrite is broad, so limit it to skill input windows. Mastery must deliver the last hit without competing with ordinary farm skills.
 
-**How to apply:** for future BNN farming migrations, keep the tested Level Farm path intact, implement each mode with its related settings, and keep unimplemented modes out of the UI. Keep Tiki automation event-scoped and automatic, avoid global remote hooks, keep normal-farm skill controls independent, and resume the selected Farm Weapon after temporary equipment changes.
+**How to apply:** route ordinary, Mastery, and Tiki skill inputs through the same target-scoped aim context; update the target while the key is held and clear the override immediately on release or cancellation. Keep Mastery's category/threshold rules separate from the general skill toggle, and stop an ordinary cast if the target crosses into Mastery range.
 
 If Gun M1 is proposed again, first isolate it from skill dispatch and validate the reference-style target-aimed Gun input; do not manually fire validator or ShootGunEvent remotes. Fruit M1 remains lower priority. For skills on desktop and touch, use the reference-style VirtualInputManager key down/hold/up path; recognize both reference-ready cooldown bar sizes and do not require skill frames to be Visible.
 

@@ -41,9 +41,16 @@ MODULES = (
         {},
     ),
     (
+        "CustomHub.Features.Farm.SkillAimRedirect",
+        "src/ReplicatedStorage/CustomHub/Features/Farm/SkillAimRedirect.lua",
+        {},
+    ),
+    (
         "CustomHub.Features.Farm.CombatService",
         "src/ReplicatedStorage/CustomHub/Features/Farm/CombatService.lua",
-        {},
+        {
+            "require(script.Parent.SkillAimRedirect)": '__bundleLoad("CustomHub.Features.Farm.SkillAimRedirect")',
+        },
     ),
     (
         "CustomHub.Features.MainFarm",

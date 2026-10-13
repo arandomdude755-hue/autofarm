@@ -5858,10 +5858,207 @@ return MovementService
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua
 end
 
+__bundleFactories["CustomHub.Features.Farm.SkillAimRedirect"] = function()
+-- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/Farm/SkillAimRedirect.lua
+local SkillAimRedirect = {}
+
+local STATE_KEY = "__CustomHubSkillAimRedirectV1"
+
+local function getSharedState()
+    local environment = _G
+    local getterOk, getEnvironment = pcall(function()
+        return getgenv
+    end)
+    if getterOk and type(getEnvironment) == "function" then
+        local environmentOk, executorEnvironment = pcall(getEnvironment)
+        if environmentOk and type(executorEnvironment) == "table" then
+            environment = executorEnvironment
+        end
+    end
+
+    local stateOk, existingState = pcall(function()
+        return environment[STATE_KEY]
+    end)
+    if stateOk and type(existingState) == "table" and existingState.Version == 1 then
+        return existingState
+    end
+
+    local newState = {
+        Version = 1,
+        ActiveContext = nil,
+        Installed = false,
+        InstallError = nil,
+    }
+    pcall(function()
+        environment[STATE_KEY] = newState
+    end)
+    return newState
+end
+
+local state = getSharedState()
+
+local function clearExpiredContext()
+    local context = state.ActiveContext
+    if context and context.ExpiresAt and os.clock() > context.ExpiresAt then
+        context.Active = false
+        state.ActiveContext = nil
+        return nil
+    end
+    return context
+end
+
+local function installNamecallHook()
+    if state.Installed then
+        return true
+    end
+
+    local getterOk, getRawMetatable = pcall(function()
+        return getrawmetatable
+    end)
+    local readonlyOk, setReadonly = pcall(function()
+        return setreadonly
+    end)
+    local closureOk, newClosure = pcall(function()
+        return newcclosure
+    end)
+    local methodOk, getNamecallMethod = pcall(function()
+        return getnamecallmethod
+    end)
+    if not getterOk or type(getRawMetatable) ~= "function"
+        or not readonlyOk or type(setReadonly) ~= "function"
+        or not closureOk or type(newClosure) ~= "function"
+        or not methodOk or type(getNamecallMethod) ~= "function"
+    then
+        state.InstallError = "Executor remote-aim hooks are unavailable"
+        return false, state.InstallError
+    end
+
+    local metatableOk, gameMetatable = pcall(getRawMetatable, game)
+    if not metatableOk or type(gameMetatable) ~= "table"
+        or type(gameMetatable.__namecall) ~= "function"
+    then
+        state.InstallError = "Game remote-aim hook target is unavailable"
+        return false, state.InstallError
+    end
+
+    local oldNamecall = gameMetatable.__namecall
+    local wrapperOk, replacement = pcall(newClosure, function(remote, ...)
+        local context = clearExpiredContext()
+        if context and context.Active then
+            local currentMethodOk, currentMethod = pcall(getNamecallMethod)
+            if currentMethodOk and currentMethod == "FireServer" then
+                local nameOk, remoteName = pcall(function()
+                    return remote.Name
+                end)
+                if nameOk and remoteName == "RemoteEvent" then
+                    local arguments = table.pack(...)
+                    if arguments.n == 1 then
+                        local argument = arguments[1]
+                        if typeof(argument) == "Vector3" then
+                            arguments[1] = context.Position
+                            return oldNamecall(
+                                remote,
+                                table.unpack(arguments, 1, arguments.n)
+                            )
+                        elseif typeof(argument) == "CFrame" then
+                            arguments[1] = context.CFrame
+                            return oldNamecall(
+                                remote,
+                                table.unpack(arguments, 1, arguments.n)
+                            )
+                        end
+                    end
+                end
+            end
+        end
+        return oldNamecall(remote, ...)
+    end)
+    if not wrapperOk or type(replacement) ~= "function" then
+        state.InstallError = "Could not create the skill aim redirect"
+        return false, state.InstallError
+    end
+
+    local writable, writableError = pcall(setReadonly, gameMetatable, false)
+    if not writable then
+        state.InstallError = "Could not enable the skill aim redirect: "
+            .. tostring(writableError)
+        return false, state.InstallError
+    end
+
+    local assigned, assignError = pcall(function()
+        gameMetatable.__namecall = replacement
+    end)
+    pcall(setReadonly, gameMetatable, true)
+    if not assigned then
+        state.InstallError = "Could not install the skill aim redirect: "
+            .. tostring(assignError)
+        return false, state.InstallError
+    end
+
+    state.Installed = true
+    state.InstallError = nil
+    return true
+end
+
+function SkillAimRedirect:Begin(targetPart)
+    if not targetPart or not targetPart:IsA("BasePart") then
+        return nil, "Skill aim target is unavailable"
+    end
+    if clearExpiredContext() then
+        return nil, "Another skill aim redirect is already active"
+    end
+
+    local installed, installError = installNamecallHook()
+    if not installed then
+        return nil, installError
+    end
+
+    local context = {
+        Active = true,
+        ExpiresAt = os.clock() + 7,
+    }
+    state.ActiveContext = context
+    local updated, updateError = self:Update(context, targetPart)
+    if not updated then
+        self:End(context)
+        return nil, updateError
+    end
+    return context
+end
+
+function SkillAimRedirect:Update(context, targetPart)
+    if not context or context.Active ~= true or state.ActiveContext ~= context then
+        return false, "Skill aim redirect is no longer active"
+    end
+    if not targetPart or not targetPart:IsA("BasePart") or not targetPart.Parent then
+        return false, "Skill aim target part is unavailable"
+    end
+
+    context.Position = targetPart.Position
+    context.CFrame = targetPart.CFrame
+    context.ExpiresAt = os.clock() + 7
+    return true
+end
+
+function SkillAimRedirect:End(context)
+    if not context then
+        return
+    end
+    context.Active = false
+    if state.ActiveContext == context then
+        state.ActiveContext = nil
+    end
+end
+
+return SkillAimRedirect
+-- END SOURCE: src/ReplicatedStorage/CustomHub/Features/Farm/SkillAimRedirect.lua
+end
+
 __bundleFactories["CustomHub.Features.Farm.CombatService"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/Farm/CombatService.lua
 local CombatService = {}
 CombatService.__index = CombatService
+local SkillAimRedirect = __bundleLoad("CustomHub.Features.Farm.SkillAimRedirect")
 
 local validHitPartNames = {
     RightUpperArm = true,
@@ -6357,7 +6554,7 @@ function CombatService:FindReadyTikiSkill()
     end)
 end
 
-function CombatService:_GetAimTarget(target)
+function CombatService:_GetAimTarget(target, preferRoot)
     if not target then
         return nil, nil
     end
@@ -6368,7 +6565,10 @@ function CombatService:_GetAimTarget(target)
         return nil, nil
     end
 
-    for _, partName in ipairs({ "UpperTorso", "Torso", "HumanoidRootPart", "Head" }) do
+    local preferredParts = preferRoot
+        and { "HumanoidRootPart", "UpperTorso", "Torso", "Head" }
+        or { "UpperTorso", "Torso", "HumanoidRootPart", "Head" }
+    for _, partName in ipairs(preferredParts) do
         local part = target:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
             return part, target
@@ -6385,7 +6585,8 @@ function CombatService:_GetAimTarget(target)
 end
 
 function CombatService:_UpdateTemporaryAim(aimContext, target)
-    local targetPart, mouseTarget = self:_GetAimTarget(target)
+    local targetPart, mouseTarget =
+        self:_GetAimTarget(target, aimContext.PreferRoot)
     if not targetPart then
         return false, "Skill target has no aimable BasePart"
     end
@@ -6403,11 +6604,18 @@ function CombatService:_UpdateTemporaryAim(aimContext, target)
     then
         return false, "ReplicatedStorage.Mouse rejected the temporary target-model aim"
     end
+    if aimContext.RemoteAim then
+        local redirectUpdated, redirectError =
+            SkillAimRedirect:Update(aimContext.RemoteAim, targetPart)
+        if not redirectUpdated then
+            return false, tostring(redirectError)
+        end
+    end
     aimContext.TargetPart = targetPart
     return true
 end
 
-function CombatService:_SetTemporaryAim(target)
+function CombatService:_SetTemporaryAim(target, redirectSkillRemote)
     local mouse = self.Dependencies.Mouse
     if type(mouse) ~= "table" then
         return nil, "ReplicatedStorage.Mouse did not expose the BNN aim table"
@@ -6419,10 +6627,25 @@ function CombatService:_SetTemporaryAim(target)
         return nil, "ReplicatedStorage.Mouse aim state is unreadable"
     end
 
+    local targetPart, mouseTarget = self:_GetAimTarget(target, redirectSkillRemote == true)
+    if not targetPart then
+        return nil, "Skill target has no aimable BasePart"
+    end
+    local remoteAim
+    if redirectSkillRemote then
+        local redirectError
+        remoteAim, redirectError = SkillAimRedirect:Begin(targetPart)
+        if not remoteAim then
+            return nil, tostring(redirectError)
+        end
+    end
+
     local aimContext = {
         Mouse = mouse,
         OldHit = oldHit,
         OldTarget = oldTarget,
+        RemoteAim = remoteAim,
+        PreferRoot = redirectSkillRemote == true,
     }
     local aimOk, aimError = self:_UpdateTemporaryAim(aimContext, target)
     if not aimOk then
@@ -6433,7 +6656,11 @@ function CombatService:_SetTemporaryAim(target)
 end
 
 function CombatService:_RestoreTemporaryAim(aimContext)
-    if not aimContext or not aimContext.Mouse then
+    if not aimContext then
+        return
+    end
+    SkillAimRedirect:End(aimContext.RemoteAim)
+    if not aimContext.Mouse then
         return
     end
     pcall(function()
@@ -6460,7 +6687,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         return false, "Selected skill weapon did not equip"
     end
 
-    local aimContext, aimError = self:_SetTemporaryAim(target)
+    local aimContext, aimError = self:_SetTemporaryAim(target, true)
     if not aimContext then
         return false, tostring(aimError)
     end
@@ -6488,7 +6715,14 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
             return true
         end
         inputReleased = true
-        inputService:SendKeyEvent(false, keyName, false, game)
+        local releaseOk, releaseError = pcall(function()
+            inputService:SendKeyEvent(false, keyName, false, game)
+        end)
+        SkillAimRedirect:End(aimContext.RemoteAim)
+        aimContext.RemoteAim = nil
+        if not releaseOk then
+            error(releaseError)
+        end
         return true
     end
     self.ActiveInputRelease = releaseInput
@@ -8176,6 +8410,11 @@ function MainFarm:_TryStartFarmSkill(
                             or (
                                 not masteryCategory
                                 and currentSettings.UseFarmSkills == true
+                                and self:_GetMasteryCategory(
+                                    target,
+                                    currentSettings,
+                                    allowMastery
+                                ) == nil
                             )
                         )
                         and (

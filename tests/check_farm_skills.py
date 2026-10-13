@@ -7,6 +7,9 @@ CONFIG = (HUB / "Config.lua").read_text(encoding="utf-8")
 COMBAT = (HUB / "Features/Farm/CombatService.lua").read_text(encoding="utf-8")
 MAIN_FARM = (HUB / "Features/MainFarm.lua").read_text(encoding="utf-8")
 COMPATIBILITY = (HUB / "Compatibility.lua").read_text(encoding="utf-8")
+SKILL_AIM_REDIRECT = (
+    HUB / "Features/Farm/SkillAimRedirect.lua"
+).read_text(encoding="utf-8")
 BNN = (ROOT / "attached_assets/3nn_main.lua_(1)_1791763089635.txt").read_text(encoding="utf-8")
 
 
@@ -290,13 +293,33 @@ aim_updater = function_body(
 )
 require(
     all(part_name in aim_target for part_name in ("UpperTorso", "Torso", "HumanoidRootPart"))
+    and 'preferRoot\n        and { "HumanoidRootPart", "UpperTorso", "Torso", "Head" }' in aim_target
+    and 'or { "UpperTorso", "Torso", "HumanoidRootPart", "Head" }' in aim_target
     and "target.PrimaryPart" in aim_target
     and "G.Hit = T.HumanoidRootPart.CFrame" in BNN
     and "G.Target = T" in BNN
     and "aimContext.Mouse.Hit = targetPart.CFrame" in aim_updater
     and "aimContext.Mouse.Target = mouseTarget" in aim_updater
     and "assignedTarget ~= mouseTarget" in aim_updater,
-    "Skill aim must track a body part and set Mouse.Target to the enemy model as BNN does",
+    "Skills must prefer BNN's HumanoidRootPart aim without changing Gun M1's existing torso preference",
+)
+require(
+    'remoteName == "RemoteEvent"' in SKILL_AIM_REDIRECT
+    and 'currentMethod == "FireServer"' in SKILL_AIM_REDIRECT
+    and "arguments.n == 1" in SKILL_AIM_REDIRECT
+    and 'typeof(argument) == "Vector3"' in SKILL_AIM_REDIRECT
+    and 'typeof(argument) == "CFrame"' in SKILL_AIM_REDIRECT
+    and "state.ActiveContext" in SKILL_AIM_REDIRECT
+    and "getgenv" in SKILL_AIM_REDIRECT
+    and 'local STATE_KEY = "__CustomHubSkillAimRedirectV1"' in SKILL_AIM_REDIRECT
+    and "if state.Installed then" in SKILL_AIM_REDIRECT
+    and "arguments[1] = context.Position" in SKILL_AIM_REDIRECT
+    and "arguments[1] = context.CFrame" in SKILL_AIM_REDIRECT
+    and "function SkillAimRedirect:Begin" in SKILL_AIM_REDIRECT
+    and "function SkillAimRedirect:Update" in SKILL_AIM_REDIRECT
+    and "function SkillAimRedirect:End" in SKILL_AIM_REDIRECT
+    and "require(script.Parent.SkillAimRedirect)" in COMBAT,
+    "Skill aiming must apply BNN-style position replacement only during an active, target-scoped skill cast",
 )
 
 use_skill = function_body(
@@ -321,12 +344,22 @@ require(
     and "farmStateChanged = true" in use_skill
     and '"Skill input cancelled because farm state changed"' in use_skill
     and "LastMasterySkillKey" not in COMBAT
-    and "self:_SetTemporaryAim(target)" in use_skill
+    and "self:_SetTemporaryAim(target, true)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
     and "holdSeconds) or 0.5, 0.05, 5" in use_skill
     and "shouldContinue()" in use_skill,
     "Normal and mastery skills must share the same unpinned equip/input/aim lifecycle",
+)
+gun_m1 = function_body(
+    COMBAT,
+    "function CombatService:AttackGunM1",
+    "\nfunction CombatService:TapSkullGuitar",
+)
+require(
+    "self:_SetTemporaryAim(target)" in gun_m1
+    and "self:_SetTemporaryAim(target, true)" not in gun_m1,
+    "The BNN-style skill remote redirect must not change the separate Gun M1 path",
 )
 
 attack_position = function_body(
@@ -447,6 +480,7 @@ require(
     and "self:_IsCurrent(session)" in farm_skill
     and "self.Target == target" in farm_skill
     and "currentSettings.UseFarmSkills == true" in farm_skill
+    and "self:_GetMasteryCategory(\n                                    target,\n                                    currentSettings,\n                                    allowMastery\n                                ) == nil" in farm_skill
     and "currentSettings[skill.Setting] == true" in farm_skill
     and "currentSettings.FarmMastery ~= true" not in farm_skill
     and "currentSettings.FarmMastery == true" in farm_skill
@@ -476,6 +510,12 @@ require(
     and "local masteryCategoryNow = currentSettings" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
     "Mastery must reuse the farm skill flow, allow normal skills above threshold, and wait without wrong-weapon fallback",
+)
+require(
+    "if self.FarmSkillActive then\n        return true\n    end" in farm_skill
+    and "local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)" in farm_skill
+    and "and self:_GetMasteryCategory(\n                                    target,\n                                    currentSettings,\n                                    allowMastery\n                                ) == nil" in farm_skill,
+    "Mastery must take priority at the health threshold, cancel an in-flight ordinary cast, and prevent overlapping skills",
 )
 
 

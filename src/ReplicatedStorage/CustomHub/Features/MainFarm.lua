@@ -1161,6 +1161,11 @@ function MainFarm:_TryStartFarmSkill(
                             or (
                                 not masteryCategory
                                 and currentSettings.UseFarmSkills == true
+                                and self:_GetMasteryCategory(
+                                    target,
+                                    currentSettings,
+                                    allowMastery
+                                ) == nil
                             )
                         )
                         and (
