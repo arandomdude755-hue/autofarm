@@ -87,8 +87,10 @@ require(
     'self.Compatibility:GetPlayerGui()' in ready_skill
     and 'FindFirstChild("Skills")' in ready_skill
     and 'FindFirstChild("Cooldown")' in ready_skill
-    and "titleIsReady and cooldownEmpty" in ready_skill
-    and "isReady = titleIsReady and cooldownEmpty" in ready_skill
+    and "cooldownSize == UDim2.new(0, 0, 1, -1)" in ready_skill
+    and "cooldownSize == UDim2.new(1, 0, 1, -1)" in ready_skill
+    and "title.TextColor3 == Color3.new(1, 1, 1)" in ready_skill
+    and "isReady = (titleIsReady and bnnCooldownEmpty) or bnnCooldownFull" in ready_skill
     and "cooldownFull" in ready_skill
     and "cooldown.Size.X.Scale" in ready_skill
     and "self.LastMasterySkillKey[equippedTool]" in ready_skill
@@ -106,7 +108,7 @@ require(
     and "Skill UI incomplete:" in ready_skill
     and "Selected skill unavailable:" in ready_skill
     and "GetDescendants" not in ready_skill,
-    "Skill readiness must accept approximate ready cooldown states and report incomplete controls distinctly",
+    "Mastery readiness must match BNN's two cooldown states while reporting incomplete controls distinctly",
 )
 farm_skill_lookup = function_body(
     COMBAT,
@@ -326,7 +328,11 @@ require(
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
     and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
-    and "FARM_SKILL_SCAN_INTERVAL" in farm_skill
+    and "skillScanInterval = masteryCategory" in farm_skill
+    and "and FARM_STEP_INTERVAL" in farm_skill
+    and "or FARM_SKILL_SCAN_INTERVAL" in farm_skill
+    and "self.NextFarmSkillScanAt = now + skillScanInterval" in farm_skill
+    and "self.NextFarmSkillScanAt = os.clock() + skillScanInterval" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
     and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
@@ -413,7 +419,7 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: Mastery cooldown checks are strict and skill keys rotate after each sent input")
+print("PASS: Mastery readiness matches BNN cooldown states, scans at farm cadence, and rotates skill keys")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
 print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")

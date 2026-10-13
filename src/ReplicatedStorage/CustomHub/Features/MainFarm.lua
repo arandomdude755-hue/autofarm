@@ -830,6 +830,9 @@ function MainFarm:_TryStartFarmSkill(
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    local skillScanInterval = masteryCategory
+        and FARM_STEP_INTERVAL
+        or FARM_SKILL_SCAN_INTERVAL
     local masteryTool
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
@@ -876,7 +879,7 @@ function MainFarm:_TryStartFarmSkill(
         return self.FarmSkillPreparing ~= nil
             and now < self.FarmSkillPreparing.Deadline
     end
-    self.NextFarmSkillScanAt = now + FARM_SKILL_SCAN_INTERVAL
+    self.NextFarmSkillScanAt = now + skillScanInterval
 
     self.FarmSkillIgnoredTools = self.FarmSkillIgnoredTools or {}
     local skillIgnoredTools = self.FarmSkillIgnoredTools
@@ -1032,7 +1035,7 @@ function MainFarm:_TryStartFarmSkill(
         end
         if self.FarmSkillGeneration == generation then
             self.FarmSkillActive = false
-            self.NextFarmSkillScanAt = os.clock() + FARM_SKILL_SCAN_INTERVAL
+            self.NextFarmSkillScanAt = os.clock() + skillScanInterval
             if activated and self:_IsCurrent(session) and self.Target == target then
                 self:_SetStatus(
                     "Sent " .. skill.Category .. " " .. skill.Key .. " key input",

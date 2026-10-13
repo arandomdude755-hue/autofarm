@@ -6105,6 +6105,10 @@ function CombatService:_FindReadySkill(
                     local title = frame and frame:FindFirstChild("Title")
                     local cooldown = frame and frame:FindFirstChild("Cooldown")
                     local titleText = title and title:IsA("TextLabel") and title.Text or ""
+                    local cooldownSize = cooldown and cooldown:IsA("GuiObject")
+                        and cooldown.Size
+                    local bnnCooldownEmpty = cooldownSize == UDim2.new(0, 0, 1, -1)
+                    local bnnCooldownFull = cooldownSize == UDim2.new(1, 0, 1, -1)
                     local cooldownEmpty = cooldown
                         and cooldown:IsA("GuiObject")
                         and cooldown.Size.X.Offset == 0
@@ -6132,14 +6136,15 @@ function CombatService:_FindReadySkill(
                             tool.Name .. " " .. keyName .. " is not an attack skill"
                         )
                     else
-                        local titleColor = title.TextColor3
-                        local titleIsReady = titleColor.R >= 0.98
-                            and titleColor.G >= 0.98
-                            and titleColor.B >= 0.98
                         local isReady
                         if equippedTool then
-                            isReady = titleIsReady and cooldownEmpty
+                            local titleIsReady = title.TextColor3 == Color3.new(1, 1, 1)
+                            isReady = (titleIsReady and bnnCooldownEmpty) or bnnCooldownFull
                         else
+                            local titleColor = title.TextColor3
+                            local titleIsReady = titleColor.R >= 0.98
+                                and titleColor.G >= 0.98
+                                and titleColor.B >= 0.98
                             isReady = (titleIsReady and cooldownEmpty) or cooldownFull
                         end
                         if isReady then
@@ -7692,6 +7697,9 @@ function MainFarm:_TryStartFarmSkill(
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    local skillScanInterval = masteryCategory
+        and FARM_STEP_INTERVAL
+        or FARM_SKILL_SCAN_INTERVAL
     local masteryTool
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
@@ -7738,7 +7746,7 @@ function MainFarm:_TryStartFarmSkill(
         return self.FarmSkillPreparing ~= nil
             and now < self.FarmSkillPreparing.Deadline
     end
-    self.NextFarmSkillScanAt = now + FARM_SKILL_SCAN_INTERVAL
+    self.NextFarmSkillScanAt = now + skillScanInterval
 
     self.FarmSkillIgnoredTools = self.FarmSkillIgnoredTools or {}
     local skillIgnoredTools = self.FarmSkillIgnoredTools
@@ -7894,7 +7902,7 @@ function MainFarm:_TryStartFarmSkill(
         end
         if self.FarmSkillGeneration == generation then
             self.FarmSkillActive = false
-            self.NextFarmSkillScanAt = os.clock() + FARM_SKILL_SCAN_INTERVAL
+            self.NextFarmSkillScanAt = os.clock() + skillScanInterval
             if activated and self:_IsCurrent(session) and self.Target == target then
                 self:_SetStatus(
                     "Sent " .. skill.Category .. " " .. skill.Key .. " key input",

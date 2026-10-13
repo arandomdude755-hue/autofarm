@@ -9,11 +9,11 @@ For the Tiki Outpost puzzle, automatically use any currently ready skill; do not
 
 The general “Use skills while farming” toggle gates only ordinary farm skill use. Farm Mastery uses the universal skill-key selections for its configured mastery category without requiring that toggle.
 
-For now, Farm Mastery is skills-only: do not send M1 after a skill, while selected skills cool down, or when skill controls are unavailable. Keep the configured Mastery weapon equipped and report why the farm is waiting. Mastery scans require the ready title plus an almost-empty cooldown bar and rotate after the last sent key; ordinary farming retains its existing readiness rule.
+For now, Farm Mastery is skills-only: do not send M1 after a skill, while selected skills cool down, or when skill controls are unavailable. Keep the configured Mastery weapon equipped and report why the farm is waiting. Mastery readiness mirrors BNN's two accepted cooldown-bar states and rotates after the last sent key; ordinary farming retains its existing readiness rule.
 
-**Why:** the user suspects M1 integration is causing Mastery failures and wants skills isolated first; they also reported Mastery repeatedly staying on Z while other keys were available. If M1 is reconsidered, prioritize Gun; fruit M1 is lower priority because some fruits have no M1.
+**Why:** the user wants skills isolated first and reported slow cooldown detection and Mastery getting stuck. A previous stricter readiness check diverged from BNN's working two-state rule; Mastery also needs a responsive scan cadence. If M1 is reconsidered, prioritize Gun; fruit M1 is lower priority because some fruits have no M1.
 
-**How to apply:** preserve the normal skill-ready path and pin the selected tool. Every Mastery path that lacks a usable skill must remain handled without falling through to regular M1; expose cooldown, missing-UI, and activation-failure reasons in status. Keep Mastery key rotation and stricter readiness isolated from ordinary farming.
+**How to apply:** preserve the normal skill-ready path and pin the selected tool. Every Mastery path that lacks a usable skill must remain handled without falling through to regular M1; expose cooldown, missing-UI, and activation-failure reasons in status. Keep Mastery key rotation, BNN-compatible readiness, and responsive skill-UI scans isolated from ordinary farming.
 
 Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary and target-scoped through the game's Mouse module, verify that the aim assignment works before sending a key, and release the key on cancellation.
 
