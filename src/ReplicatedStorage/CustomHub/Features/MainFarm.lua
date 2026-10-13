@@ -1138,9 +1138,36 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillActive = false
             self.NextFarmSkillScanAt = os.clock() + FARM_SKILL_SCAN_INTERVAL
             if activated and self:_IsCurrent(session) and self.Target == target then
+                local statusMessage = "Sent " .. skill.Category .. " " .. skill.Key .. " key input"
+                local statusType = "success"
+                local currentSettings = self.Context and self.Context.Config
+                    and self.Context.Config.FarmSettings
+                if masteryCategory
+                    and currentSettings
+                    and currentSettings.FarmMastery == true
+                    and self:_GetMasteryCategory(
+                        target,
+                        currentSettings,
+                        allowMastery
+                    ) == masteryCategory
+                then
+                    local m1Issued, m1Result = self:_TryMasteryM1Fallback(
+                        target,
+                        masteryCategory,
+                        currentSettings,
+                        masteryTool
+                    )
+                    if m1Issued then
+                        statusMessage = statusMessage .. "; mastery M1 input sent"
+                    else
+                        statusMessage = statusMessage
+                            .. "; mastery M1 not sent: " .. tostring(m1Result)
+                        statusType = "info"
+                    end
+                end
                 self:_SetStatus(
-                    "Sent " .. skill.Category .. " " .. skill.Key .. " skill",
-                    "success"
+                    statusMessage,
+                    statusType
                 )
             elseif not activated and self:_IsCurrent(session) and self.Target == target then
                 local currentSettings = self.Context and self.Context.Config

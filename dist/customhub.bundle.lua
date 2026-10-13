@@ -6311,6 +6311,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     local holdUntil = os.clock() + holdDuration
     local aimUpdateError
     local weaponChanged = false
+    local farmStateChanged = false
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
             if pinEquippedTool and tool.Parent ~= character then
@@ -6318,6 +6319,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
                 break
             end
             if shouldContinue and not shouldContinue() then
+                farmStateChanged = true
                 break
             end
             local aimUpdated, aimResult = self:_UpdateTemporaryAim(aimContext, target)
@@ -6349,6 +6351,9 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     end
     if weaponChanged then
         return false, "Selected mastery weapon changed during skill input"
+    end
+    if farmStateChanged then
+        return false, "Skill input cancelled because farm state changed"
     end
     return true, keyName .. " skill key sent"
 end
@@ -7968,9 +7973,36 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillActive = false
             self.NextFarmSkillScanAt = os.clock() + FARM_SKILL_SCAN_INTERVAL
             if activated and self:_IsCurrent(session) and self.Target == target then
+                local statusMessage = "Sent " .. skill.Category .. " " .. skill.Key .. " key input"
+                local statusType = "success"
+                local currentSettings = self.Context and self.Context.Config
+                    and self.Context.Config.FarmSettings
+                if masteryCategory
+                    and currentSettings
+                    and currentSettings.FarmMastery == true
+                    and self:_GetMasteryCategory(
+                        target,
+                        currentSettings,
+                        allowMastery
+                    ) == masteryCategory
+                then
+                    local m1Issued, m1Result = self:_TryMasteryM1Fallback(
+                        target,
+                        masteryCategory,
+                        currentSettings,
+                        masteryTool
+                    )
+                    if m1Issued then
+                        statusMessage = statusMessage .. "; mastery M1 input sent"
+                    else
+                        statusMessage = statusMessage
+                            .. "; mastery M1 not sent: " .. tostring(m1Result)
+                        statusType = "info"
+                    end
+                end
                 self:_SetStatus(
-                    "Sent " .. skill.Category .. " " .. skill.Key .. " skill",
-                    "success"
+                    statusMessage,
+                    statusType
                 )
             elseif not activated and self:_IsCurrent(session) and self.Target == target then
                 local currentSettings = self.Context and self.Context.Config

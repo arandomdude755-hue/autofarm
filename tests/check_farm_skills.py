@@ -256,6 +256,8 @@ require(
     and "self:EquipTool(tool)" in use_skill
     and use_skill.index("self:EquipTool(tool)") < use_skill.index("SendKeyEvent(true, keyName")
     and "tool.Parent ~= character" in use_skill
+    and "farmStateChanged = true" in use_skill
+    and '"Skill input cancelled because farm state changed"' in use_skill
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
@@ -315,6 +317,10 @@ farm_skill = function_body(
     "function MainFarm:_TryStartFarmSkill",
     "\nfunction MainFarm:_StepAura",
 )
+mastery_skill_success = farm_skill.split(
+    "if activated and self:_IsCurrent(session) and self.Target == target then",
+    1,
+)[1].split("elseif not activated and self:_IsCurrent(session) and self.Target == target then", 1)[0]
 require(
     "self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
@@ -360,6 +366,12 @@ require(
     and "local masteryCategoryNow = currentSettings" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
     "Mastery skills must stay on the pinned equipped tool, retry UI detection, and bypass farm-only movement checks",
+)
+require(
+    "self:_TryMasteryM1Fallback(" in mastery_skill_success
+    and "mastery M1 input sent" in mastery_skill_success
+    and "M1 not sent:" in mastery_skill_success,
+    "After sending a mastery skill key, continue attacking with the selected mastery weapon's M1 path",
 )
 require(
     MAIN_FARM.count("self:_TryStartFarmSkill(") == 3

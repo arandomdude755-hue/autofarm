@@ -9,11 +9,11 @@ For the Tiki Outpost puzzle, automatically use any currently ready skill; do not
 
 The general “Use skills while farming” toggle gates only ordinary farm skill use. Farm Mastery uses the universal skill-key selections for its configured mastery category without requiring that toggle.
 
-When no selected Mastery skill is ready or its controls fail to load, do not suppress all combat: keep the configured Mastery weapon equipped and use a throttled M1 fallback for that category.
+When no selected Mastery skill is ready or its controls fail to load, do not suppress all combat: keep the configured Mastery weapon equipped and use a throttled M1 fallback for that category. After a mastery skill key is sent, continue with that category's M1 path rather than treating the key event as proof the game activated the skill.
 
-**Why:** the user observed the farm idling at the Mastery health threshold while the player could manually change or unequip the weapon.
+**Why:** the user observed the farm idling at the Mastery health threshold while the player could manually change or unequip the weapon, and later reported the farm stalling after a Z skill key was sent.
 
-**How to apply:** preserve the normal skill-ready path, but ensure cooldown, missing-UI, and activation-failure paths still attack with the selected Mastery category and expose failures through status.
+**How to apply:** preserve the normal skill-ready path, pin the selected tool, and continue M1 only after the skill key has been released and the selected category/health threshold still applies. Ensure cooldown, missing-UI, and activation-failure paths still attack with the selected Mastery category and expose failures through status.
 
 Do not label the M1 fallback's rate-limit window as "waiting for a ready skill." Preserve and report the last actual M1 result separately from skill readiness.
 

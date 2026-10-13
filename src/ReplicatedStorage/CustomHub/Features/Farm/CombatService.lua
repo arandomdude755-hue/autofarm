@@ -452,6 +452,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     local holdUntil = os.clock() + holdDuration
     local aimUpdateError
     local weaponChanged = false
+    local farmStateChanged = false
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
             if pinEquippedTool and tool.Parent ~= character then
@@ -459,6 +460,7 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
                 break
             end
             if shouldContinue and not shouldContinue() then
+                farmStateChanged = true
                 break
             end
             local aimUpdated, aimResult = self:_UpdateTemporaryAim(aimContext, target)
@@ -490,6 +492,9 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     end
     if weaponChanged then
         return false, "Selected mastery weapon changed during skill input"
+    end
+    if farmStateChanged then
+        return false, "Skill input cancelled because farm state changed"
     end
     return true, keyName .. " skill key sent"
 end
