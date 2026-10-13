@@ -237,8 +237,7 @@ function CombatService:_FindReadySkill(
     local ignoredToolName
     local incompleteSkillControls
     local unavailableSkillTitle
-    local masterySkillUiMismatch
-    local masterySkillUiTool
+    local masterySkillNotReady
     local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
         if category.Name == preferredCategory then
@@ -346,10 +345,9 @@ function CombatService:_FindReadySkill(
                         elseif onlyCategory and cooldownEmpty and not cooldownFull
                             and not titleIsReady
                         then
-                            masterySkillUiMismatch = masterySkillUiMismatch
+                            masterySkillNotReady = masterySkillNotReady
                                 or (tool.Name .. " " .. keyName
-                                    .. " shows an empty cooldown but is not ready")
-                            masterySkillUiTool = masterySkillUiTool or tool
+                                    .. " is not ready (locked or unavailable)")
                         end
                     end
                 end
@@ -375,9 +373,8 @@ function CombatService:_FindReadySkill(
             "Selected skill unavailable: " .. unavailableSkillTitle,
             onlyCategory and masterySkillUiTool or nil
     end
-    if masterySkillUiMismatch then
-        return nil, "Mastery skill UI needs to resync: " .. masterySkillUiMismatch,
-            masterySkillUiTool
+    if masterySkillNotReady then
+        return nil, "No selected mastery skill is ready: " .. masterySkillNotReady
     end
     return nil, "All selected skill keys are on cooldown"
 end
@@ -914,9 +911,9 @@ function CombatService:AttackGunM1(target, requiredTool)
     if character:FindFirstChild(tool.Name) ~= tool then
         return false, "Gun M1 weapon did not equip"
     end
-    if not tool.Enabled then
-        return false, "Gun is disabled"
-    end
+    -- A newly selected hotbar Gun can retain Enabled=false across the swap.
+    -- Let the native ShootGun handler decide; reload, ammo, and this service's
+    -- per-tool cooldown remain the actual firing gates.
     local localShotsLeft = tonumber(tool:GetAttribute("LocalShotsLeft"))
     if localShotsLeft and localShotsLeft < 1 then
         return false, "Gun has no shots left"

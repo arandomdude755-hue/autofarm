@@ -104,7 +104,9 @@ require(
     and "tool.Parent ~= character" not in ready_skill
     and ready_skill.index("pcall(self.EquipTool, self, tool)")
         < ready_skill.index("local toolSkills = skills:FindFirstChild(tool.Name)")
-    and "Mastery skill UI needs to resync:" in ready_skill
+    and "No selected mastery skill is ready:" in ready_skill
+    and "locked or unavailable" in ready_skill
+    and "masterySkillUiMismatch" not in ready_skill
     and "cooldownEmpty and not cooldownFull" in ready_skill
     and "onlyCategory and masterySkillUiTool or nil" in ready_skill
     and "PlayerGui.Main.Skills entry" in ready_skill
@@ -226,6 +228,7 @@ require(
     and "NextGunM1At[tool]" in gun_m1
     and "self:_GetToolCooldown(tool)" in gun_m1
     and "self:_InvokeGunShootInput(tool, targetRoot)" in gun_m1
+    and "if not tool.Enabled then" not in gun_m1
     and "shotStateChanged" in gun_m1
     and "return true, tostring(inputResult), shotStateChanged" in gun_m1
     and "TapSkullGuitar" not in gun_m1
@@ -527,7 +530,7 @@ require(
     and "local inputSent, inputResult, shotStateChanged" in farm_skill
     and "if shotStateChanged then" in farm_skill
     and "or now >= activeHold.Until" in farm_skill
-    and 'inputResult ~= "Gun is disabled"' in farm_skill
+    and 'inputResult ~= "Gun is disabled"' not in farm_skill
     and "self.LastMasteryGunM1Result = inputResult" in farm_skill
     and "local skillCategory = masteryCategory or weaponCategory" in farm_skill
     and "local shouldTrackSkillAim = masteryCategory ~= nil" in farm_skill
@@ -625,6 +628,9 @@ mastery_timeout = farm_skill.split(
 )[1].split("return true", 1)[0]
 require(
     "skillError" in preparing_branch
+    and 'if masteryCategory == "Gun" then\n            tryMasteryGunM1()' in preparing_branch
+    and "if masteryGunM1Error then" in preparing_branch
+    and '"Mastery Gun M1 unavailable: " .. tostring(masteryGunM1Error)' in preparing_branch
     and "self.FarmSkillPreparing = nil" in normal_timeout
     and "self.FarmSkillPreparing = nil" not in mastery_timeout
     and "Mastery waiting: " in farm_skill
