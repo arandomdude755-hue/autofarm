@@ -147,7 +147,7 @@ require(
     and "Backpack" not in equipped_weapon
     and "FindWeapon(" not in equipped_weapon
     and "EquipTool(" not in equipped_weapon,
-    "Mastery weapon selection must inspect only the currently equipped tool",
+    "Mastery may select from Character or Player.Backpack while excluding Backpack-only Skull Guitar",
 )
 
 gun_m1 = function_body(
@@ -293,10 +293,9 @@ mastery_m1 = function_body(
     "\nfunction MainFarm:_TryStartFarmSkill",
 )
 require(
-    "FindEquippedWeapon(masteryCategory)" in mastery_m1
+    "EquipWeapon(masteryCategory)" in mastery_m1
     and "AttackGunM1(target, tool)" in mastery_m1
     and "tool" in mastery_m1
-    and "EquipWeapon(" not in mastery_m1
     and "MASTERY_M1_FALLBACK_INTERVAL" not in mastery_m1
     and "LastMasteryM1Result" in mastery_m1
     and 'masteryCategory == "Gun"' in mastery_m1
@@ -304,7 +303,7 @@ require(
     and 'AttackM1(' in mastery_m1
     and 'tool\n        )' in mastery_m1
     and '"Blox Fruit"' in mastery_m1,
-    "Mastery fallback must use only the currently equipped mastery tool and leave attack timing to the tool path",
+    "Mastery fallback must select/equip a matching live tool, pin the attack to it, and leave attack timing to the tool path",
 )
 
 farm_skill = function_body(
@@ -339,8 +338,9 @@ require(
     and 'string.find(resultText, "shootGun", 1, true)' in farm_skill
     and 'routeSuffix = " (shootGun)"' in farm_skill
     and "masteryCategory" in farm_skill
+    and "self.CombatService:EquipWeapon(masteryCategory)" in farm_skill
+    and '"Mastery waiting: no usable "' in farm_skill
     and "self.CombatService:FindEquippedWeapon(masteryCategory)" in farm_skill
-    and "self.CombatService:EquipWeapon(masteryCategory)" not in farm_skill
     and "masteryTool ~= nil" in farm_skill
     and "self.CombatService:FindEquippedWeapon(masteryCategory)" in farm_skill
     and "masteryTool.Parent == currentCharacter" in farm_skill
@@ -395,7 +395,7 @@ require(
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: ready skills use BNN cooldown states, VIM key input, and cancellation-safe release")
-print("PASS: mastery stays on the currently equipped tool and never equips from Backpack")
+print("PASS: Mastery equips matching hotbar tools, pins the selected tool, and excludes Backpack-only Skull Guitar")
 print("PASS: Gun Mastery uses regular-gun input and TAP only for an equipped Skull Guitar")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")

@@ -7633,17 +7633,26 @@ end
 function MainFarm:_TryMasteryM1Fallback(target, masteryCategory, farmSettings, requiredTool)
     local now = os.clock()
     local tool, findError
+    local character = self.Context and self.Context.Compatibility
+        and self.Context.Compatibility.Player
+        and self.Context.Compatibility.Player.Character
     if requiredTool then
-        local character = self.Context and self.Context.Compatibility
-            and self.Context.Compatibility.Player
-            and self.Context.Compatibility.Player.Character
         if requiredTool.Parent == character and requiredTool.ToolTip == masteryCategory then
             tool = requiredTool
         else
             findError = "Selected mastery weapon is no longer equipped"
         end
     else
-        tool, findError = self.CombatService:FindEquippedWeapon(masteryCategory)
+        local equipped, equipResult = self.CombatService:EquipWeapon(masteryCategory)
+        if equipped then
+            tool = equipResult
+        else
+            findError = equipResult
+        end
+    end
+    if tool and (tool.Parent ~= character or tool.ToolTip ~= masteryCategory) then
+        tool = nil
+        findError = "Selected mastery weapon did not equip"
     end
     if not tool then
         local reason = tostring(findError or ("No equipped " .. masteryCategory .. " tool"))
@@ -7705,11 +7714,14 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillPreparing = nil
             return false
         end
-        local equipResult
-        masteryTool, equipResult = self.CombatService:FindEquippedWeapon(masteryCategory)
+        local equipped, equipResult =
+            self.CombatService:EquipWeapon(masteryCategory)
+        if equipped then
+            masteryTool = equipResult
+        end
         if not masteryTool then
             self:_SetStatus(
-                "Mastery waiting: equip the " .. masteryCategory .. " weapon to master"
+                "Mastery waiting: no usable " .. masteryCategory .. " tool"
                     .. (equipResult and (" (" .. tostring(equipResult) .. ")") or ""),
                 "warning"
             )
