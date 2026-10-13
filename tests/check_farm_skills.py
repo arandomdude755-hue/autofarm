@@ -334,13 +334,48 @@ attack_position = function_body(
     "function MainFarm:_IsAtFarmAttackPosition",
     "\nfunction MainFarm:_TryStartFarmSkill",
 )
+attack_position_builder = function_body(
+    MAIN_FARM,
+    "function MainFarm:_GetFarmAttackPosition",
+    "\nfunction MainFarm:_MoveToFarmAttackPosition",
+)
 require(
     "FARM_SKILL_ATTACK_POSITION_TOLERANCE" in attack_position
-    and 'CFrame.new(-7, 20, 0)' in attack_position
-    and 'CFrame.new(7, 20, 0)' in attack_position
     and "movement.Holding ~= true" in attack_position
     and "movement.Goal.Position - attackPosition" not in attack_position,
     "Farm skills must wait until the character is physically in attack range and movement is holding",
+)
+require(
+    'CFrame.new(-7, 20, 0)' in attack_position_builder
+    and 'CFrame.new(7, 20, 0)' in attack_position_builder,
+    "All farm modes must derive their attack position through the same category-aware helper",
+)
+ready_skill_scan = function_body(
+    COMBAT,
+    "function CombatService:_FindReadySkill",
+    "\nfunction CombatService:FindReadyFarmSkill",
+)
+require(
+    "for _, frame in ipairs(toolSkills:GetChildren()) do" in ready_skill_scan
+    and "local selectedKey = selectedKeySet[keyName]" in ready_skill_scan
+    and "toolSkills:FindFirstChild(\"V\")" not in ready_skill_scan,
+    "Skill scanning must use available UI entries and not require every fruit to expose a V move",
+)
+skill_movement = function_body(
+    MAIN_FARM,
+    "function MainFarm:_MoveToFarmAttackPosition",
+    "\nfunction MainFarm:_IsAtFarmAttackPosition",
+)
+require(
+    "self.FarmSkillActive and self.FarmSkillTarget == target" in skill_movement
+    and "holding position for active skill" in skill_movement
+    and "self:_MoveTo(destination, session, threshold, keepSession)" in skill_movement
+    and MAIN_FARM.count(
+        "self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)"
+    ) == 3
+    and "self.FarmSkillTarget = target" in MAIN_FARM
+    and "self.FarmSkillTarget = nil" in MAIN_FARM,
+    "All farm modes must share attack-position movement and hold it steady during the shared skill input",
 )
 
 mastery_category = function_body(

@@ -13,7 +13,11 @@ For now, Farm Mastery is skills-only: the selected Farm Weapon lowers NPC health
 
 **Why:** the user wants Mastery to earn credit on the selected Gun or Blox Fruit by using it for the final damage after faster Farm Weapon damage. Ordinary farm skills already work; a separate Mastery execution path caused repeated stalls and wasted in-game testing. If M1 is reconsidered, prioritize Gun; fruit M1 is lower priority because some fruits have no M1.
 
-**How to apply:** use the shared farm skill resolver and sender for both modes. Lock Mastery to its selected category below threshold, retain the general toggle for ordinary skills above threshold, bypass that toggle for selected Mastery skills, and hold safely rather than finish with the wrong weapon while waiting. Do not add separate key ordering or tool pinning.
+**How to apply:** use the shared farm skill resolver and sender for both modes. Lock Mastery to its selected category below threshold, retain the general toggle for ordinary skills above threshold, bypass that toggle for selected Mastery skills, and hold safely rather than finish with the wrong weapon while waiting. While a skill input is active on a target, keep its attack position fixed; do not refresh movement goals until the asynchronous key hold completes. Do not add separate key ordering or tool pinning.
+
+**Why:** farm-skill input runs asynchronously while the farm loop continues; retargeting movement during a key hold can invalidate its attack-position continuation check and interrupt the skill, especially during Mastery’s category/offset handoff.
+
+**How to apply:** pause movement updates only for the target whose skill is currently being sent. Preserve the initial in-position gate so skills are never started while travelling, and resume normal target movement after the input completes or cancels.
 
 Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary and target-scoped through the game's Mouse module, verify that the aim assignment works before sending a key, and release the key on cancellation.
 

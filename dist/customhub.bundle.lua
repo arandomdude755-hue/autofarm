@@ -7328,14 +7328,8 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
         local _, _, currentRoot = self.Context.Compatibility:GetCharacterParts()
         playerRoot = currentRoot
     end
-    local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
-    local attackPosition
-    if targetRoot and (category == "Blox Fruit" or category == "Gun") then
-        local offset = category == "Blox Fruit"
-            and CFrame.new(-7, 20, 0)
-            or CFrame.new(7, 20, 0)
-        attackPosition = (targetRoot.CFrame * offset).Position
-    end
+    local attackCFrame = self:_GetFarmAttackPosition(target, category)
+    local attackPosition = attackCFrame and attackCFrame.Position
     local playerDistance = playerRoot and attackPosition
         and (playerRoot.Position - attackPosition).Magnitude
     local movement = self.MovementService and self.MovementService.Active
@@ -7889,19 +7883,41 @@ function MainFarm:_BringMobsIfEnabled(target, playerRoot, targetIsBoss)
     )
 end
 
-function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
-    if not target or not playerRoot then
-        return false
+function MainFarm:_GetFarmAttackPosition(target, weaponCategory)
+    if not target then
+        return nil
     end
     local targetRoot = target:FindFirstChild("HumanoidRootPart")
     if not targetRoot then
-        return false
+        return nil
     end
 
     local targetOffset = weaponCategory == "Blox Fruit"
         and CFrame.new(-7, 20, 0)
         or CFrame.new(7, 20, 0)
-    local attackPosition = (targetRoot.CFrame * targetOffset).Position
+    return targetRoot.CFrame * targetOffset
+end
+
+function MainFarm:_MoveToFarmAttackPosition(target, weaponCategory, session, threshold, keepSession)
+    if self.FarmSkillActive and self.FarmSkillTarget == target then
+        return true, "holding position for active skill"
+    end
+    local destination = self:_GetFarmAttackPosition(target, weaponCategory)
+    if not destination then
+        return false, "target has no attack-position root"
+    end
+    return self:_MoveTo(destination, session, threshold, keepSession)
+end
+
+function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
+    if not target or not playerRoot then
+        return false
+    end
+    local attackCFrame = self:_GetFarmAttackPosition(target, weaponCategory)
+    if not attackCFrame then
+        return false
+    end
+    local attackPosition = attackCFrame.Position
     if (playerRoot.Position - attackPosition).Magnitude > FARM_SKILL_ATTACK_POSITION_TOLERANCE then
         return false
     end
@@ -8108,6 +8124,7 @@ function MainFarm:_TryStartFarmSkill(
     self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
     local generation = self.FarmSkillGeneration
     self.FarmSkillActive = true
+    self.FarmSkillTarget = target
     local originalCharacter = self.Character
     local combatService = self.CombatService
     local skillHold = tonumber(farmSettings.FarmSkillHoldSeconds) or 0.5
@@ -8162,6 +8179,9 @@ function MainFarm:_TryStartFarmSkill(
     local function finishSkillAttempt(activated, activationResult)
         if self.FarmSkillGeneration == generation then
             self.FarmSkillActive = false
+            if self.FarmSkillTarget == target then
+                self.FarmSkillTarget = nil
+            end
             self.NextFarmSkillScanAt = os.clock() + skillScanInterval
             if activated and self:_IsCurrent(session) and self.Target == target then
                 self:_SetStatus(
@@ -8285,10 +8305,7 @@ function MainFarm:_StepAura(session, root)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            local targetOffset = attackCategory == "Blox Fruit"
-                and CFrame.new(-7, 20, 0)
-                or CFrame.new(7, 20, 0)
-            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
+            self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching aura target: " .. target.Name, "info")
             end
@@ -8418,10 +8435,7 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            local targetOffset = attackCategory == "Blox Fruit"
-                and CFrame.new(-7, 20, 0)
-                or CFrame.new(7, 20, 0)
-            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
+            self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching mode target: " .. target.Name, "info")
             end
@@ -8758,8 +8772,38 @@ function MainFarm:_StepBossEventMode(
         return
     end
 
-    if profile.TikiEventPhase == true and self.TikiPuzzleActive then
-        if self:_StepTikiEventPhase(root, session) then
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    if profile.TikiEventPhase == true then
+        local now = os.clock()
+        local bossTarget = nil
+        local ignoreBoss = profile.IgnoreBossSetting
+            and farmSettings[profile.IgnoreBossSetting] == true
+        if not ignoreBoss and profile.BossName then
+            if self.TargetIsBoss and self.EnemyService:IsAlive(self.Target) then
+                bossTarget = self.Target
+            elseif now >= (self.NextTikiBossSearchAt or 0) then
+                self.NextTikiBossSearchAt = now + NPC_SCAN_INTERVAL
+                bossTarget = self.EnemyService:FindNearest(profile.BossName, root.Position)
+            end
+        end
+
+        if bossTarget then
+            self.TikiEventComplete = true
+            if self.TikiPuzzleActive then
+                self.TikiPuzzleActive = false
+                self.TikiPuzzleRestorePending = true
+            end
+            if self.TikiPuzzleRestorePending then
+                self:_HoldPosition(session)
+                if not self:_RestoreTikiFarmWeapon() then
+                    return
+                end
+            end
+            self:_EngageModeTarget(bossTarget, true, root, session)
+            return
+        end
+
+        if not self.TikiEventComplete and self:_StepTikiEventPhase(root, session) then
             return
         end
     end
@@ -8775,7 +8819,6 @@ function MainFarm:_StepBossEventMode(
         return
     end
 
-    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     if farmSettings.AutoModeQuest == true then
         if questState == "unknown" or questState == "active-unknown" then
             self:_ClearTarget()
@@ -8829,10 +8872,14 @@ function MainFarm:_StepBossEventMode(
     end
 
     if target and targetIsBoss then
+        if profile.TikiEventPhase == true then
+            self.TikiEventComplete = true
+            if self.TikiPuzzleActive then
+                self.TikiPuzzleActive = false
+                self.TikiPuzzleRestorePending = true
+            end
+        end
         self:_EngageModeTarget(target, targetIsBoss, root, session)
-        return
-    end
-    if profile.TikiEventPhase == true and self:_StepTikiEventPhase(root, session) then
         return
     end
     if target then
@@ -8969,6 +9016,8 @@ function MainFarm:_Step(session)
         self.TargetName = nil
         self.TikiPuzzleActive = false
         self.TikiPuzzleRestorePending = false
+        self.TikiEventComplete = false
+        self.NextTikiBossSearchAt = 0
         self:_ResetSpawnSearch(nil)
         self:_SetStatus("Character ready; reacquiring farm state", "info")
     end
@@ -8977,6 +9026,10 @@ function MainFarm:_Step(session)
     local farmMode = farmSettings.FarmMode or "Level Farm"
     local modeProfiles = farmSettings.FarmModeProfiles
     local farmModeProfile = type(modeProfiles) == "table" and modeProfiles[farmMode] or nil
+    if type(farmModeProfile) ~= "table" or farmModeProfile.TikiEventPhase ~= true then
+        self.TikiEventComplete = false
+        self.NextTikiBossSearchAt = 0
+    end
     if self.TikiPuzzleActive
         and (type(farmModeProfile) ~= "table" or farmModeProfile.TikiEventPhase ~= true)
     then
@@ -9378,10 +9431,7 @@ function MainFarm:_Step(session)
     if self.EnemyService:IsAlive(target) then
         local targetRoot = target:FindFirstChild("HumanoidRootPart")
         if targetRoot then
-            local targetOffset = attackCategory == "Blox Fruit"
-                and CFrame.new(-7, 20, 0)
-                or CFrame.new(7, 20, 0)
-            self:_MoveTo(targetRoot.CFrame * targetOffset, session, 2.5, true)
+            self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)
             if (root.Position - targetRoot.Position).Magnitude >= 30 then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end
@@ -9529,10 +9579,13 @@ function MainFarm:Initialize(context)
     self.NextFarmSkillScanAt = 0
     self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
     self.FarmSkillActive = false
+    self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
     self.TikiPuzzleActive = false
     self.TikiPuzzleRestorePending = false
+    self.TikiEventComplete = false
+    self.NextTikiBossSearchAt = 0
     self.NextTikiActionAt = 0
     self.NextTikiLoadItemAt = 0
 
@@ -9557,10 +9610,13 @@ function MainFarm:Initialize(context)
             self.TikiEventTarget = nil
             self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
             self.FarmSkillActive = false
+            self.FarmSkillTarget = nil
             self.FarmSkillPreparing = nil
             self.FarmSkillIgnoredTools = {}
             self.TikiPuzzleActive = false
             self.TikiPuzzleRestorePending = false
+            self.TikiEventComplete = false
+            self.NextTikiBossSearchAt = 0
             self.NextTikiActionAt = 0
             self.NextTikiLoadItemAt = 0
             self:_ResetSpawnSearch(nil)
@@ -9575,6 +9631,7 @@ function MainFarm:Initialize(context)
             end
             self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
             self.FarmSkillActive = false
+            self.FarmSkillTarget = nil
             self.FarmSkillPreparing = nil
             self.QuestDialogueRecovery = nil
             self:_ClearTarget()
@@ -9622,6 +9679,7 @@ function MainFarm:Start()
     self.NextFarmSkillScanAt = 0
     self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
     self.FarmSkillActive = false
+    self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
     self:_ResetSpawnSearch(nil)
@@ -9645,8 +9703,11 @@ function MainFarm:Stop()
     end
     self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
     self.FarmSkillActive = false
+    self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.TikiEventComplete = false
+    self.NextTikiBossSearchAt = 0
     if self.TikiPuzzleActive then
         self.TikiPuzzleActive = false
         self.TikiPuzzleRestorePending = true

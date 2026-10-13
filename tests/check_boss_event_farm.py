@@ -135,12 +135,14 @@ require(
     "Mode targets must use existing spawn availability and retry handling",
 )
 require(
-    mode_step.index("if profile.TikiEventPhase == true and self.TikiPuzzleActive")
+    mode_step.index("local bossTarget = nil")
+    < mode_step.index("if bossTarget then")
+    < mode_step.index("self:_StepTikiEventPhase(root, session)")
     < mode_step.index("local targetNames, targetError")
-    and mode_step.index("if target and targetIsBoss then")
-    < mode_step.rindex("self:_StepTikiEventPhase(root, session)")
-    < mode_step.index("if target then"),
-    "The Tiki event phase must prioritize its objects after a live boss but before regular quest mobs",
+    and "self.NextTikiBossSearchAt = now + NPC_SCAN_INTERVAL" in mode_step
+    and "self.TikiEventComplete = true" in mode_step
+    and "self:_EngageModeTarget(bossTarget, true, root, session)" in mode_step,
+    "Tiki must find and engage its live boss before optional quest-catalog or puzzle-phase handling",
 )
 event_refresh = function_body(
     MAIN_FARM,

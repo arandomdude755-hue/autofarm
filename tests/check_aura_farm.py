@@ -51,7 +51,7 @@ aura_step = function_body(
 require(
     "self.EnemyService:FindNearestInRange(root.Position, radius)" in aura_step
     and "self.CombatService:AttackM1(" in aura_step
-    and "self:_MoveTo(targetRoot.CFrame * targetOffset" in aura_step
+    and "self:_MoveToFarmAttackPosition(target, attackCategory, session, 2.5, true)" in aura_step
     and "GetActiveQuestState" not in aura_step
     and "SelectLevelQuest" not in aura_step
     and "FindSpawn" not in aura_step,
