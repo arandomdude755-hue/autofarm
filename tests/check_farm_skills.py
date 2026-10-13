@@ -87,12 +87,13 @@ require(
     'self.Compatibility:GetPlayerGui()' in ready_skill
     and 'FindFirstChild("Skills")' in ready_skill
     and 'FindFirstChild("Cooldown")' in ready_skill
-    and "cooldownSize == UDim2.new(0, 0, 1, -1)" in ready_skill
-    and "cooldownSize == UDim2.new(1, 0, 1, -1)" in ready_skill
-    and "title.TextColor3 == Color3.new(1, 1, 1)" in ready_skill
-    and "isReady = (titleIsReady and bnnCooldownEmpty) or bnnCooldownFull" in ready_skill
-    and "cooldownFull" in ready_skill
-    and "cooldown.Size.X.Scale" in ready_skill
+    and "titleColor.R >= 0.98" in ready_skill
+    and "titleColor.G >= 0.98" in ready_skill
+    and "titleColor.B >= 0.98" in ready_skill
+    and "cooldown.Size.X.Scale <= 0.005" in ready_skill
+    and "math.abs(cooldown.Size.X.Scale - 1) <= 0.001" in ready_skill
+    and "isReady = (titleIsReady and cooldownEmpty) or cooldownFull" in ready_skill
+    and "bnnCooldown" not in ready_skill
     and "self.LastMasterySkillKey[equippedTool]" in ready_skill
     and "rotatedKeys" in ready_skill
     and "frame.Visible" not in ready_skill
@@ -419,7 +420,7 @@ require(
 )
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
-print("PASS: Mastery readiness matches BNN cooldown states, scans at farm cadence, and rotates skill keys")
+print("PASS: Mastery and regular skills share cooldown readiness; Mastery still pins and rotates its tool's keys")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
 print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")

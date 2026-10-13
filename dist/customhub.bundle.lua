@@ -6107,8 +6107,6 @@ function CombatService:_FindReadySkill(
                     local titleText = title and title:IsA("TextLabel") and title.Text or ""
                     local cooldownSize = cooldown and cooldown:IsA("GuiObject")
                         and cooldown.Size
-                    local bnnCooldownEmpty = cooldownSize == UDim2.new(0, 0, 1, -1)
-                    local bnnCooldownFull = cooldownSize == UDim2.new(1, 0, 1, -1)
                     local cooldownEmpty = cooldown
                         and cooldown:IsA("GuiObject")
                         and cooldown.Size.X.Offset == 0
@@ -6136,17 +6134,11 @@ function CombatService:_FindReadySkill(
                             tool.Name .. " " .. keyName .. " is not an attack skill"
                         )
                     else
-                        local isReady
-                        if equippedTool then
-                            local titleIsReady = title.TextColor3 == Color3.new(1, 1, 1)
-                            isReady = (titleIsReady and bnnCooldownEmpty) or bnnCooldownFull
-                        else
-                            local titleColor = title.TextColor3
-                            local titleIsReady = titleColor.R >= 0.98
-                                and titleColor.G >= 0.98
-                                and titleColor.B >= 0.98
-                            isReady = (titleIsReady and cooldownEmpty) or cooldownFull
-                        end
+                        local titleColor = title.TextColor3
+                        local titleIsReady = titleColor.R >= 0.98
+                            and titleColor.G >= 0.98
+                            and titleColor.B >= 0.98
+                        local isReady = (titleIsReady and cooldownEmpty) or cooldownFull
                         if isReady then
                             return {
                                 Tool = tool,
