@@ -25,6 +25,7 @@ local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
 local MASTERY_SKILL_UI_REFRESH_LIMIT = 2
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
+local GUN_KNOCKBACK_HOLD_SECONDS = 0.3
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
@@ -728,6 +729,7 @@ function MainFarm:_ClearTarget(preserveMovement)
     self.Target = nil
     self.TargetName = nil
     self.TargetIsBoss = nil
+    self.GunKnockbackHold = nil
     if self.CombatService then
         self.CombatService:ClearFarmSkillAimTarget()
     end
@@ -936,6 +938,18 @@ function MainFarm:_MoveToFarmAttackPosition(
     keepSession,
     allowRetargetDuringSkill
 )
+    local knockbackHold = self.GunKnockbackHold
+    if knockbackHold then
+        if knockbackHold.Target == target and os.clock() < knockbackHold.Until then
+            local held = self:_HoldPosition(session)
+            if held then
+                return true, "holding briefly after Gun M1"
+            end
+            self.GunKnockbackHold = nil
+        else
+            self.GunKnockbackHold = nil
+        end
+    end
     if self.FarmSkillActive
         and self.FarmSkillTarget == target
         and not allowRetargetDuringSkill
@@ -1050,6 +1064,7 @@ function MainFarm:_SyncFarmSkillContext(
         or oldContext.Tool ~= nextContext.Tool
 
     if changed then
+        self.GunKnockbackHold = nil
         if self.FarmSkillActive and self.CombatService then
             self.CombatService:Cancel()
         end
@@ -1091,10 +1106,23 @@ function MainFarm:_TryStartFarmSkill(
     if masteryCategory == "Gun" and self.CombatService then
         local equippedGun = self.CombatService:FindEquippedWeapon("Gun")
         if equippedGun then
-            local inputSent, inputResult =
+            local inputSent, inputResult, shotStateChanged =
                 self.CombatService:AttackGunM1(target, equippedGun)
             if inputSent then
                 masteryGunM1Result = inputResult
+                if shotStateChanged then
+                    local now = os.clock()
+                    local activeHold = self.GunKnockbackHold
+                    if not activeHold
+                        or activeHold.Target ~= target
+                        or now >= activeHold.Until
+                    then
+                        self.GunKnockbackHold = {
+                            Target = target,
+                            Until = now + GUN_KNOCKBACK_HOLD_SECONDS,
+                        }
+                    end
+                end
             elseif inputResult ~= "Gun is reloading"
                 and inputResult ~= "Gun M1 is cooling down"
                 and inputResult ~= "Gun is disabled"
@@ -2802,6 +2830,7 @@ function MainFarm:Initialize(context)
     self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.GunKnockbackHold = nil
     self.TikiPuzzleActive = false
     self.TikiPuzzleRestorePending = false
     self.TikiEventComplete = false
@@ -2833,6 +2862,7 @@ function MainFarm:Initialize(context)
             self.FarmSkillTarget = nil
             self.FarmSkillPreparing = nil
             self.FarmSkillIgnoredTools = {}
+            self.GunKnockbackHold = nil
             self.TikiPuzzleActive = false
             self.TikiPuzzleRestorePending = false
             self.TikiEventComplete = false
@@ -2853,6 +2883,7 @@ function MainFarm:Initialize(context)
             self.FarmSkillActive = false
             self.FarmSkillTarget = nil
             self.FarmSkillPreparing = nil
+            self.GunKnockbackHold = nil
             self.QuestDialogueRecovery = nil
             self:_ClearTarget()
             self:_ResetSpawnSearch(nil)
@@ -2902,6 +2933,7 @@ function MainFarm:Start()
     self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.GunKnockbackHold = nil
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
@@ -2926,6 +2958,7 @@ function MainFarm:Stop()
     self.FarmSkillTarget = nil
     self.FarmSkillPreparing = nil
     self.FarmSkillIgnoredTools = {}
+    self.GunKnockbackHold = nil
     self.TikiEventComplete = false
     self.NextTikiBossSearchAt = 0
     if self.TikiPuzzleActive then

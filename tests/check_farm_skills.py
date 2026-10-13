@@ -238,6 +238,7 @@ require(
     and "self:_GetToolCooldown(tool)" in gun_m1
     and "self:_InvokeGunShootInput(tool, targetRoot)" in gun_m1
     and "shotStateChanged" in gun_m1
+    and "return true, tostring(inputResult), shotStateChanged" in gun_m1
     and "TapSkullGuitar" not in gun_m1
     and "FireServer" not in gun_m1
     and "validator2:FireServer" not in gun_m1
@@ -452,6 +453,10 @@ require(
     and "self.FarmSkillTarget == target" in skill_movement
     and "not allowRetargetDuringSkill" in skill_movement
     and "holding position for active skill" in skill_movement
+    and "knockbackHold.Target == target" in skill_movement
+    and "self:_HoldPosition(session)" in skill_movement
+    and "holding briefly after Gun M1" in skill_movement
+    and "GUN_KNOCKBACK_HOLD_SECONDS = 0.3" in MAIN_FARM
     and "self:_MoveTo(destination, session, threshold, keepSession)" in skill_movement
     and MAIN_FARM.count(
         "masteryCategory ~= nil\n            )"
@@ -529,6 +534,9 @@ require(
     and "FindReadyFarmSkill(" in farm_skill
     and "local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)" in farm_skill
     and "self:_SyncFarmSkillContext(" in farm_skill
+    and "local inputSent, inputResult, shotStateChanged" in farm_skill
+    and "if shotStateChanged then" in farm_skill
+    and "or now >= activeHold.Until" in farm_skill
     and 'inputResult ~= "Gun is disabled"' in farm_skill
     and "self.LastMasteryGunM1Result = inputResult" in farm_skill
     and "local skillCategory = masteryCategory or weaponCategory" in farm_skill

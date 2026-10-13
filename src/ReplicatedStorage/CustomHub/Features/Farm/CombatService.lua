@@ -991,7 +991,7 @@ function CombatService:AttackGunM1(target, requiredTool)
     self.NextGunM1At[tool] = now + (
         shotStateChanged and cooldown or math.min(cooldown, 0.25)
     )
-    return true, tostring(inputResult)
+    return true, tostring(inputResult), shotStateChanged
 end
 
 function CombatService:TapSkullGuitar(targetPosition)
