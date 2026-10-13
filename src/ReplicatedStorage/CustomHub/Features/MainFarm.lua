@@ -27,6 +27,7 @@ local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local GUN_KNOCKBACK_HOLD_SECONDS = 0.3
 local FARM_GUN_SWAP_SETTLE_SECONDS = 0.6
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
+local TIKI_PUZZLE_ATTACK_RANGE = 8
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
@@ -439,6 +440,7 @@ function MainFarm:_BuildTikiPuzzleDiagnosticReport()
         "===== [TikiPuzzleDiagnostic] REPORT BEGIN =====",
         "Farm mode: " .. tostring(farmSettings.FarmMode),
         "Puzzle phase active: " .. tostring(self.TikiPuzzleActive == true),
+        "Puzzle event visible: " .. tostring(self.TikiEventActive == true),
         "Farm Mastery setting: " .. tostring(farmSettings.FarmMastery == true)
             .. " (independent; does not control Tiki puzzle attacks)",
         "Status: " .. tostring(self.LastStatus or "unavailable"),
@@ -528,6 +530,7 @@ function MainFarm:_BuildTikiPuzzleDiagnosticReport()
             lines,
             "Last puzzle action: " .. tostring(action.Action)
                 .. "; object=" .. tostring(action.ObjectName)
+                .. "; current_object_match=" .. tostring(action.Target == target)
                 .. "; tool=" .. tostring(action.ToolName)
                 .. "; result=" .. tostring(action.Result)
                 .. "; client_firing_state="
@@ -1960,6 +1963,7 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
         tapStateChanged = shotStateChanged == true
         self.LastTikiAction = {
             At = now,
+            Target = eventTarget,
             ObjectName = eventTarget and eventTarget.Name or "unknown",
             Action = "Skull Guitar TAP",
             ToolName = guitar.Name,
@@ -1993,6 +1997,7 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
         end
         self.LastTikiAction = {
             At = now,
+            Target = eventTarget,
             ObjectName = eventTarget and eventTarget.Name or "unknown",
             Action = "Waiting for ready puzzle skill",
             ToolName = "",
@@ -2005,6 +2010,7 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
 
     self.LastTikiAction = {
         At = now,
+        Target = eventTarget,
         ObjectName = eventTarget and eventTarget.Name or "unknown",
         Action = "Puzzle skill " .. skill.Category .. " " .. skill.Key,
         ToolName = skill.Tool and skill.Tool.Name or "none",
@@ -2090,9 +2096,13 @@ function MainFarm:_StepTikiEventPhase(root, session)
         return true
     end
 
-    if (pivot.Position - root.Position).Magnitude > 10 then
-        self:_MoveTo(pivot * CFrame.new(0, 0, 10), session, 2.5, true)
-        self:_SetStatus("Approaching Tiki puzzle object", "info")
+    local distance = (pivot.Position - root.Position).Magnitude
+    if distance > TIKI_PUZZLE_ATTACK_RANGE then
+        self:_MoveTo(pivot, session, 2.5, true)
+        self:_SetStatus(
+            "Approaching Tiki puzzle object (" .. string.format("%.1f", distance) .. " studs)",
+            "info"
+        )
     else
         self:_HoldPosition(session)
         self:_UseTikiPuzzleAction(eventTarget, pivot.Position, session)

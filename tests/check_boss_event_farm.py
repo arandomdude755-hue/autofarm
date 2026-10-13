@@ -171,8 +171,11 @@ require(
     and "self:_HoldPosition(session)" in event_step
     and "self:_UseTikiPuzzleAction(" in event_step
     and "self:_RestoreTikiFarmWeapon()" in event_step
+    and "distance > TIKI_PUZZLE_ATTACK_RANGE" in event_step
+    and "self:_MoveTo(pivot, session, 2.5, true)" in event_step
+    and "pivot * CFrame.new(0, 0, 10)" not in event_step
     and "activate it manually" not in event_step,
-    "Tiki object tracking must run puzzle actions in-range and restore Farm Weapon after the phase",
+    "Tiki movement must go to the object with a safe action-range margin and restore Farm Weapon",
 )
 event_action = function_body(
     MAIN_FARM,
