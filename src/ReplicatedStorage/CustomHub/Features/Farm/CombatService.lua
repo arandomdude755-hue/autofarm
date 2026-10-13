@@ -210,29 +210,6 @@ function CombatService:EquipTool(tool)
     return true, tool
 end
 
-function CombatService:RefreshEquippedTool(tool)
-    if not tool or not tool:IsA("Tool") then
-        return false, "Selected tool is unavailable"
-    end
-    local character, humanoid = self.Compatibility:GetCharacterParts()
-    local player = self.Compatibility.Player
-    local backpack = player and player:FindFirstChild("Backpack")
-    if not character or not humanoid or not backpack or humanoid.Sit then
-        return false, "Character cannot refresh the selected tool"
-    end
-    if tool.Parent == character then
-        humanoid:UnequipTools()
-    end
-    if tool.Parent ~= backpack then
-        return false, "Selected tool could not be returned to Backpack"
-    end
-    humanoid:EquipTool(tool)
-    if tool.Parent ~= character then
-        return false, "Selected tool did not re-equip"
-    end
-    return true, tool
-end
-
 function CombatService:EquipWeapon(category)
     local tool, findError = self:FindWeapon(category)
     if not tool then
@@ -292,24 +269,17 @@ function CombatService:_FindReadySkill(
             elseif tool and #selectedKeys > 0 then
                 checkedToolCount += 1
                 if onlyCategory then
-                    local character = player and player.Character
-                    if tool.Parent ~= character then
-                        local equipped, equipResult = self:EquipTool(tool)
-                        if not equipped then
-                            return nil, tostring(equipResult), tool
-                        end
-                    if tool.Parent ~= character then
-                        return nil,
-                            "Mastery tool equip requested; waiting for it to enter Character",
-                            tool
-                    end
-                    end
+                    -- BNN equips the selected hotbar tool, then inspects its
+                    -- Skills row in the same pass. The UI row can be ready
+                    -- before Roblox finishes reparenting the Tool, so do not
+                    -- gate skill discovery on Parent changing synchronously.
+                    pcall(self.EquipTool, self, tool)
                 end
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
                     local equipped, equipResult = self:EquipTool(tool)
                     if not equipped then
-                        return nil, tostring(equipResult)
+                        return nil, tostring(equipResult), tool
                     end
                     return nil,
                         "Waiting for PlayerGui.Main.Skills entry '"

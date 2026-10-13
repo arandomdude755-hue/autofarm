@@ -6407,29 +6407,6 @@ function CombatService:EquipTool(tool)
     return true, tool
 end
 
-function CombatService:RefreshEquippedTool(tool)
-    if not tool or not tool:IsA("Tool") then
-        return false, "Selected tool is unavailable"
-    end
-    local character, humanoid = self.Compatibility:GetCharacterParts()
-    local player = self.Compatibility.Player
-    local backpack = player and player:FindFirstChild("Backpack")
-    if not character or not humanoid or not backpack or humanoid.Sit then
-        return false, "Character cannot refresh the selected tool"
-    end
-    if tool.Parent == character then
-        humanoid:UnequipTools()
-    end
-    if tool.Parent ~= backpack then
-        return false, "Selected tool could not be returned to Backpack"
-    end
-    humanoid:EquipTool(tool)
-    if tool.Parent ~= character then
-        return false, "Selected tool did not re-equip"
-    end
-    return true, tool
-end
-
 function CombatService:EquipWeapon(category)
     local tool, findError = self:FindWeapon(category)
     if not tool then
@@ -6489,24 +6466,17 @@ function CombatService:_FindReadySkill(
             elseif tool and #selectedKeys > 0 then
                 checkedToolCount += 1
                 if onlyCategory then
-                    local character = player and player.Character
-                    if tool.Parent ~= character then
-                        local equipped, equipResult = self:EquipTool(tool)
-                        if not equipped then
-                            return nil, tostring(equipResult), tool
-                        end
-                    if tool.Parent ~= character then
-                        return nil,
-                            "Mastery tool equip requested; waiting for it to enter Character",
-                            tool
-                    end
-                    end
+                    -- BNN equips the selected hotbar tool, then inspects its
+                    -- Skills row in the same pass. The UI row can be ready
+                    -- before Roblox finishes reparenting the Tool, so do not
+                    -- gate skill discovery on Parent changing synchronously.
+                    pcall(self.EquipTool, self, tool)
                 end
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
                     local equipped, equipResult = self:EquipTool(tool)
                     if not equipped then
-                        return nil, tostring(equipResult)
+                        return nil, tostring(equipResult), tool
                     end
                     return nil,
                         "Waiting for PlayerGui.Main.Skills entry '"
@@ -7488,7 +7458,6 @@ local TIKI_SKILL_HOLD_SECONDS = 0.5
 local FARM_SKILL_SCAN_INTERVAL = 0.4
 local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
-local MASTERY_SKILL_UI_REFRESH_LIMIT = 2
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local GUN_KNOCKBACK_HOLD_SECONDS = 0.3
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
@@ -7809,7 +7778,6 @@ function MainFarm:_BuildFarmMasteryDiagnosticReport()
         table.insert(
             lines,
             "Preparation: tool=" .. tostring(preparation.ToolName)
-                .. "; refresh_attempts=" .. tostring(preparation.TotalRefreshAttempts or 0)
                 .. "; deadline_remaining="
                 .. string.format("%.2f", math.max(0, (preparation.Deadline or 0) - os.clock()))
         )
@@ -8568,7 +8536,10 @@ function MainFarm:_TryStartFarmSkill(
     )
     local masteryGunM1Result
     local masteryGunM1Error
-    if masteryCategory == "Gun" and self.CombatService then
+    local function tryMasteryGunM1()
+        if masteryCategory ~= "Gun" or not self.CombatService then
+            return
+        end
         local equippedGun = self.CombatService:FindEquippedWeapon("Gun")
         if equippedGun then
             local inputSent, inputResult, shotStateChanged =
@@ -8609,7 +8580,9 @@ function MainFarm:_TryStartFarmSkill(
         return true
     end
 
-    local skillScanInterval = FARM_SKILL_SCAN_INTERVAL
+    local skillScanInterval = masteryCategory
+        and FARM_STEP_INTERVAL
+        or FARM_SKILL_SCAN_INTERVAL
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
         if configuredCategory ~= "Blox Fruit" and configuredCategory ~= "Gun" then
@@ -8679,11 +8652,6 @@ function MainFarm:_TryStartFarmSkill(
     )
     if preparingTool then
         local preparation = self.FarmSkillPreparing
-        local refreshAttempts = preparation
-            and preparation.Target == target
-            and preparation.ToolName == preparingTool.Name
-            and preparation.TotalRefreshAttempts
-            or 0
         if not preparation
             or preparation.Target ~= target
             or preparation.ToolName ~= preparingTool.Name
@@ -8693,7 +8661,6 @@ function MainFarm:_TryStartFarmSkill(
                 ToolName = preparingTool.Name,
                 StartedAt = now,
                 Deadline = now + FARM_SKILL_PREPARE_TIMEOUT,
-                TotalRefreshAttempts = refreshAttempts,
             }
             self.FarmSkillPreparing = preparation
         end
@@ -8716,56 +8683,11 @@ function MainFarm:_TryStartFarmSkill(
             )
             return false
         end
-        if masteryCategory
-            and preparation.TotalRefreshAttempts < MASTERY_SKILL_UI_REFRESH_LIMIT
-        then
-            preparation.TotalRefreshAttempts += 1
-            local refreshed, refreshResult =
-                self.CombatService:RefreshEquippedTool(preparingTool)
-            if refreshed then
-                preparation.StartedAt = now
-                preparation.Deadline = now + FARM_SKILL_PREPARE_TIMEOUT
-                self:_SetStatus(
-                    "Refreshing mastery skill UI for " .. preparingTool.Name
-                        .. " (" .. preparation.TotalRefreshAttempts .. "/"
-                        .. MASTERY_SKILL_UI_REFRESH_LIMIT .. ")",
-                    "info"
-                )
-                return true
-            end
-            self:_SetStatus(
-                "Mastery skill UI refresh failed: " .. tostring(refreshResult),
-                "warning"
-            )
-            return true
-        end
-        if masteryCategory then
-            if not preparation.RetryAt then
-                preparation.RetryAt = now + FARM_SKILL_UNAVAILABLE_RETRY
-                self:_SetStatus(
-                    "Mastery waiting: skill UI did not recover; will retry refresh",
-                    "warning"
-                )
-                return true
-            elseif now < preparation.RetryAt then
-                self:_SetStatus(
-                    "Mastery waiting: retrying skill UI refresh in "
-                        .. string.format("%.1f", preparation.RetryAt - now)
-                        .. "s",
-                    "info"
-                )
-                return true
-            end
-            preparation.TotalRefreshAttempts = 0
-            preparation.StartedAt = now
-            preparation.Deadline = now + FARM_SKILL_PREPARE_TIMEOUT
-            preparation.RetryAt = nil
-            self:_SetStatus("Mastery retrying skill UI recovery", "info")
-            return true
-        end
+        preparation.StartedAt = now
+        preparation.Deadline = now + FARM_SKILL_PREPARE_TIMEOUT
         self:_SetStatus(
             "Mastery waiting: " .. tostring(skillError)
-                .. " (tool UI refresh limit reached)",
+                .. "; retrying without re-equipping",
             "warning"
         )
         return true
@@ -8773,6 +8695,7 @@ function MainFarm:_TryStartFarmSkill(
     self.FarmSkillPreparing = nil
     if not skill then
         if masteryCategory then
+            tryMasteryGunM1()
             if masteryGunM1Result then
                 self:_SetStatus(masteryGunM1Result, "info")
             elseif masteryGunM1Error then
@@ -10111,8 +10034,17 @@ function MainFarm:_Step(session)
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, true)
     local attackCategory = masteryCategory or weaponCategory
     local combatReady, combatError = self:_EnsureCombatService()
+    local skillHandling = false
     if combatReady then
-        if not self:_TryStartFarmSkill(target, session, weaponCategory, farmSettings, root, true) then
+        skillHandling = self:_TryStartFarmSkill(
+            target,
+            session,
+            weaponCategory,
+            farmSettings,
+            root,
+            true
+        )
+        if not skillHandling then
             local equipped, equipResult = self.CombatService:EquipWeapon(weaponCategory)
             if equipped then
                 local attackIssued, attackResult = self.CombatService:AttackM1(
@@ -10145,7 +10077,9 @@ function MainFarm:_Step(session)
                 true,
                 masteryCategory ~= nil
             )
-            if (root.Position - targetRoot.Position).Magnitude >= 30 then
+            if not skillHandling
+                and (root.Position - targetRoot.Position).Magnitude >= 30
+            then
                 self:_SetStatus("Approaching target: " .. activeTarget, "info")
             end
         end

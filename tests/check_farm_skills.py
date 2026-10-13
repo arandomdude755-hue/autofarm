@@ -100,9 +100,10 @@ require(
     and 'selectedKeySet[keyName]' in ready_skill
     and 'frame.Name ~= "Template"' in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
-    and "self:EquipTool(tool)" in ready_skill
-    and "Mastery tool equip requested; waiting for it to enter Character" in ready_skill
-    and ready_skill.index("self:EquipTool(tool)") < ready_skill.index("local toolSkills = skills:FindFirstChild(tool.Name)")
+    and "pcall(self.EquipTool, self, tool)" in ready_skill
+    and "tool.Parent ~= character" not in ready_skill
+    and ready_skill.index("pcall(self.EquipTool, self, tool)")
+        < ready_skill.index("local toolSkills = skills:FindFirstChild(tool.Name)")
     and "Mastery skill UI needs to resync:" in ready_skill
     and "cooldownEmpty and not cooldownFull" in ready_skill
     and "onlyCategory and masterySkillUiTool or nil" in ready_skill
@@ -119,19 +120,6 @@ require(
     and "Selected skill unavailable:" in ready_skill
     and "GetDescendants" not in ready_skill,
     "Mastery readiness must match BNN's two cooldown states while reporting incomplete controls distinctly",
-)
-refresh_equipped_tool = function_body(
-    COMBAT,
-    "function CombatService:RefreshEquippedTool",
-    "\nfunction CombatService:EquipWeapon",
-)
-require(
-    "humanoid:UnequipTools()" in refresh_equipped_tool
-    and "humanoid:EquipTool(tool)" in refresh_equipped_tool
-    and "tool.Parent ~= character" in refresh_equipped_tool
-    and "Remote" not in refresh_equipped_tool
-    and "InvokeServer" not in refresh_equipped_tool,
-    "A missing skill UI may trigger a bounded local re-equip refresh, not a guessed remote",
 )
 require(
     "for _, frame in ipairs(toolSkills:GetChildren()) do" in ready_skill
@@ -499,10 +487,11 @@ require(
 require(
     "_TryMasteryM1Fallback" not in MAIN_FARM
     and "LastMasteryM1Result" not in MAIN_FARM
-    and 'if masteryCategory == "Gun" and self.CombatService then' in MAIN_FARM
+    and "local function tryMasteryGunM1()" in MAIN_FARM
+    and 'if masteryCategory ~= "Gun" or not self.CombatService then' in MAIN_FARM
     and 'self.CombatService:FindEquippedWeapon("Gun")' in MAIN_FARM
     and "self.CombatService:AttackGunM1(target, equippedGun)" in MAIN_FARM,
-    "Gun Mastery may send M1 with an equipped Gun without changing the shared skill path",
+    "Gun Mastery keeps M1 as a separate fallback around the shared skill path",
 )
 
 farm_skill = function_body(
@@ -546,25 +535,25 @@ require(
     and "self.CombatService:ClearFarmSkillAimTarget()" in farm_skill
     and "if masteryCategory == nil\n        and (not farmSettings or farmSettings.UseFarmSkills ~= true)" in farm_skill
     and "if not masteryCategory then\n            self.FarmSkillPreparing = nil\n            return false" not in mastery_policy_setup
-    and "local skillScanInterval = FARM_SKILL_SCAN_INTERVAL" in farm_skill
+    and "local skillScanInterval = masteryCategory\n        and FARM_STEP_INTERVAL\n        or FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "self.NextFarmSkillScanAt = now + skillScanInterval" in farm_skill
     and "self.NextFarmSkillScanAt = os.clock() + skillScanInterval" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
-    and "MASTERY_SKILL_UI_REFRESH_LIMIT = 2" in MAIN_FARM
-    and "preparation.TotalRefreshAttempts < MASTERY_SKILL_UI_REFRESH_LIMIT" in farm_skill
-    and "self.CombatService:RefreshEquippedTool(preparingTool)" in farm_skill
-    and "tool UI refresh limit reached" in farm_skill
-    and "preparation.RetryAt = now + FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
-    and "Mastery retrying skill UI recovery" in farm_skill
-    and "preparation.ToolName == preparingTool.Name" in farm_skill
+    and "MASTERY_SKILL_UI_REFRESH_LIMIT" not in MAIN_FARM
+    and "preparation.TotalRefreshAttempts" not in farm_skill
+    and "RefreshEquippedTool(preparingTool)" not in farm_skill
+    and "retrying without re-equipping" in farm_skill
+    and "preparation.ToolName ~= preparingTool.Name" in farm_skill
     and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
     and farm_skill.count("task.spawn(function()") == 1
     and "finishSkillAttempt(runSkillAttempt())" in skill_dispatch
     and "combatService:UseSkill(" in farm_skill
     and "self.CombatService:AttackGunM1(target, equippedGun)" in farm_skill
-    and farm_skill.index("self.CombatService:AttackGunM1(target, equippedGun)")
-        < farm_skill.index("if self.FarmSkillActive then")
+    and farm_skill.index("if self.FarmSkillActive then")
+        < farm_skill.index("local skill, skillError, preparingTool")
+    and farm_skill.index("local skill, skillError, preparingTool")
+        < farm_skill.index("            tryMasteryGunM1()")
     and "self:_IsCurrent(session)" in farm_skill
     and "self.Target == target" in farm_skill
     and "currentSettings.UseFarmSkills == true" in farm_skill
@@ -661,6 +650,17 @@ require(
     and "self.CombatService:Cancel()" in MAIN_FARM,
     "All farm paths must route selected skills safely and keep bosses out of Mastery mode",
 )
+normal_farm_step = function_body(
+    MAIN_FARM,
+    "function MainFarm:_Step(session)",
+    "\nfunction MainFarm:_Run",
+)
+require(
+    "local skillHandling = false" in normal_farm_step
+    and "skillHandling = self:_TryStartFarmSkill(" in normal_farm_step
+    and "if not skillHandling\n                and (root.Position - targetRoot.Position).Magnitude >= 30" in normal_farm_step,
+    "Movement status must not overwrite an active or waiting farm-skill status",
+)
 require(
     "farmSettings.FarmMastery = payload" in MAIN_FARM
     and "farmSettings.MasteryCategory = selectedMethod" in MAIN_FARM
@@ -693,7 +693,7 @@ print("PASS: Mastery and regular skills share category-filtered cooldown readine
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
 print("PASS: Mastery follows the current hotbar tool for its selected category, including Skull Guitar")
 print("PASS: non-Mastery skill lookup preserves BNN's Backpack-first behavior")
-print("PASS: Gun Mastery fires through the game gun handler without interrupting skill dispatch")
+print("PASS: Gun Mastery prioritizes ready skills and uses M1 between skill casts")
 print("PASS: Mastery skills may fire during approach; ordinary skills retain the attack-position gate")
 print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")
 print("PASS: ordinary farm attacks restore Farm Weapon after asynchronous skill use")
