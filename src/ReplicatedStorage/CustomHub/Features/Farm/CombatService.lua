@@ -139,19 +139,6 @@ function CombatService:FindSkillWeapon(category, preferEquipped)
         if equipped then
             return equipped
         end
-        if category == "Gun" and backpack then
-            for _, item in ipairs(backpack:GetChildren()) do
-                if item:IsA("Tool")
-                    and item.ToolTip == category
-                    and item.Name ~= "Skull Guitar"
-                then
-                    return item
-                end
-            end
-            -- Mastery must not equip Skull Guitar solely because it is in the
-            -- hotbar; it is eligible here only when already equipped.
-            return nil
-        end
     end
 
     local function findMatchingTool(container, exactName)

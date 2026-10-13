@@ -1,5 +1,5 @@
 - [Quest-giver runtime failure](quest-giver-runtime-failure.md) — dismiss visible quest dialogue by leaving range, then revalidate quest state before retrying.
 - [Git branch roles](git-branch-roles.md) — keep `main` as the main hub version and `dev` as the test version.
-- [BNN migration boundaries](bnn-migration-boundaries.md) — Mastery shares farm skills, recovers from tool changes, avoids hotbar Skull Guitar, and briefly pauses Gun M1 chasing after confirmed shots.
+- [BNN migration boundaries](bnn-migration-boundaries.md) — Mastery follows the current hotbar tool per category, recovers from swaps, and briefly pauses Gun M1 chasing after confirmed shots.
 - [Farm frame pacing](farm-frame-pacing.md) — Keep collision suppression event-driven; full character descendant scans on Heartbeat cause client frame drops.
 - [Farm settings terminology](farm-settings-terminology.md) — “Auto turn on aura” means Buso/Haki activation, separate from Aura Farm.

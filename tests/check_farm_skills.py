@@ -199,15 +199,15 @@ find_skill_weapon = function_body(
 )
 require(
     "if preferEquipped then" in find_skill_weapon
-    and 'if category == "Gun" and backpack then' in find_skill_weapon
-    and 'item.Name ~= "Skull Guitar"' in find_skill_weapon
-    and 'return nil' in find_skill_weapon
+    and "local equipped = self:FindEquippedWeapon(category)" in find_skill_weapon
+    and find_skill_weapon.index("return equipped") < find_skill_weapon.index("findMatchingTool(backpack)")
+    and 'item.Name ~= "Skull Guitar"' not in find_skill_weapon
     and 'if category == "Gun" and not preferEquipped then' in find_skill_weapon
     and 'findMatchingTool(backpack, "Skull Guitar")' in find_skill_weapon
     and 'findMatchingTool(character, "Skull Guitar")' in find_skill_weapon
     and find_skill_weapon.index("findMatchingTool(backpack)") < find_skill_weapon.index("findMatchingTool(character)")
     and "item.ToolTip == category" in find_skill_weapon,
-    "Skill weapon lookup must use BNN's Backpack-first category search while retaining Skull Guitar preference",
+    "Mastery must use the equipped category tool first, then the single current hotbar tool including Skull Guitar",
 )
 equipped_weapon = function_body(
     COMBAT,
@@ -501,7 +501,7 @@ require(
     and 'if masteryCategory == "Gun" and self.CombatService then' in MAIN_FARM
     and 'self.CombatService:FindEquippedWeapon("Gun")' in MAIN_FARM
     and "self.CombatService:AttackGunM1(target, equippedGun)" in MAIN_FARM,
-    "Gun Mastery may send M1 with the already equipped Gun without changing the skill path or equipping Skull Guitar",
+    "Gun Mastery may send M1 with an equipped Gun without changing the shared skill path",
 )
 
 farm_skill = function_body(
@@ -690,7 +690,7 @@ require(
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: Mastery and regular skills share category-filtered cooldown readiness without tool pinning or key rotation")
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
-print("PASS: Mastery reuses equipped tools safely and excludes unequipped Skull Guitar")
+print("PASS: Mastery follows the current hotbar tool for its selected category, including Skull Guitar")
 print("PASS: non-Mastery skill lookup preserves BNN's Backpack-first behavior")
 print("PASS: Gun Mastery fires through the game gun handler without interrupting skill dispatch")
 print("PASS: Mastery skills may fire during approach; ordinary skills retain the attack-position gate")
