@@ -6434,8 +6434,7 @@ function CombatService:_FindReadySkill(
     local ignoredToolName
     local incompleteSkillControls
     local unavailableSkillTitle
-    local masterySkillUiMismatch
-    local masterySkillUiTool
+    local masterySkillNotReady
     local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
         if category.Name == preferredCategory then
@@ -6543,10 +6542,9 @@ function CombatService:_FindReadySkill(
                         elseif onlyCategory and cooldownEmpty and not cooldownFull
                             and not titleIsReady
                         then
-                            masterySkillUiMismatch = masterySkillUiMismatch
+                            masterySkillNotReady = masterySkillNotReady
                                 or (tool.Name .. " " .. keyName
-                                    .. " shows an empty cooldown but is not ready")
-                            masterySkillUiTool = masterySkillUiTool or tool
+                                    .. " is not ready (locked or unavailable)")
                         end
                     end
                 end
@@ -6572,9 +6570,8 @@ function CombatService:_FindReadySkill(
             "Selected skill unavailable: " .. unavailableSkillTitle,
             onlyCategory and masterySkillUiTool or nil
     end
-    if masterySkillUiMismatch then
-        return nil, "Mastery skill UI needs to resync: " .. masterySkillUiMismatch,
-            masterySkillUiTool
+    if masterySkillNotReady then
+        return nil, "No selected mastery skill is ready: " .. masterySkillNotReady
     end
     return nil, "All selected skill keys are on cooldown"
 end
@@ -7111,9 +7108,9 @@ function CombatService:AttackGunM1(target, requiredTool)
     if character:FindFirstChild(tool.Name) ~= tool then
         return false, "Gun M1 weapon did not equip"
     end
-    if not tool.Enabled then
-        return false, "Gun is disabled"
-    end
+    -- A newly selected hotbar Gun can retain Enabled=false across the swap.
+    -- Let the native ShootGun handler decide; reload, ammo, and this service's
+    -- per-tool cooldown remain the actual firing gates.
     local localShotsLeft = tonumber(tool:GetAttribute("LocalShotsLeft"))
     if localShotsLeft and localShotsLeft < 1 then
         return false, "Gun has no shots left"
@@ -8561,7 +8558,6 @@ function MainFarm:_TryStartFarmSkill(
                 end
             elseif inputResult ~= "Gun is reloading"
                 and inputResult ~= "Gun M1 is cooling down"
-                and inputResult ~= "Gun is disabled"
                 and inputResult ~= "Selected mastery Gun is no longer equipped"
                 and inputResult ~= "Gun M1 weapon did not equip"
             then
@@ -8651,6 +8647,22 @@ function MainFarm:_TryStartFarmSkill(
         masteryCategory
     )
     if preparingTool then
+        -- A pending or inconsistent Skills row means no skill is ready to
+        -- dispatch. Keep Gun Mastery progressing through M1 while that row
+        -- resyncs; AttackGunM1 still enforces the game's Enabled/reload gates.
+        if masteryCategory == "Gun" then
+            tryMasteryGunM1()
+            if masteryGunM1Result then
+                self:_SetStatus(masteryGunM1Result, "info")
+                return true
+            elseif masteryGunM1Error then
+                self:_SetStatus(
+                    "Mastery Gun M1 unavailable: " .. tostring(masteryGunM1Error),
+                    "warning"
+                )
+                return true
+            end
+        end
         local preparation = self.FarmSkillPreparing
         if not preparation
             or preparation.Target ~= target
@@ -8707,6 +8719,10 @@ function MainFarm:_TryStartFarmSkill(
                 self:_SetStatus("Mastery waiting: selected skills cooling down", "info")
             elseif skillError == "No selected skill keys are enabled" then
                 self:_SetStatus("Mastery waiting: enable a selected skill key", "warning")
+            elseif skillError
+                and string.find(skillError, "No selected mastery skill is ready:", 1, true)
+            then
+                self:_SetStatus("Mastery waiting: " .. tostring(skillError), "info")
             elseif skillError then
                 self:_SetStatus("Mastery skill lookup unavailable: " .. tostring(skillError), "warning")
             else
