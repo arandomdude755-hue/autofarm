@@ -5895,8 +5895,23 @@ function CombatService.new(compatibility, enemyService)
         Dependencies = dependencies,
         AttackIndex = 0,
         FruitAttackIndex = 1,
-        NextGunM1At = 0,
+        NextGunM1At = {},
+        NextFruitM1At = {},
     }, CombatService)
+end
+
+function CombatService:FindEquippedWeapon(category)
+    local player = self.Compatibility.Player
+    local character = player and player.Character
+    if not character then
+        return nil, "Character is unavailable"
+    end
+    for _, item in ipairs(character:GetChildren()) do
+        if item:IsA("Tool") and item.ToolTip == category then
+            return item
+        end
+    end
+    return nil, "No equipped " .. tostring(category) .. " tool is available"
 end
 
 function CombatService:FindWeapon(category)
@@ -5980,7 +5995,14 @@ function CombatService:EquipWeapon(category)
     return self:EquipTool(tool)
 end
 
-function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTools, onlyCategory)
+function CombatService:_FindReadySkill(
+    isEnabled,
+    preferredCategory,
+    ignoredTools,
+    onlyCategory,
+    equippedTool
+)
+    local player = self.Compatibility.Player
     local playerGui = self.Compatibility:GetPlayerGui()
     local main = playerGui and playerGui:FindFirstChild("Main")
     local skills = main and main:FindFirstChild("Skills")
@@ -5992,6 +6014,8 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
     local checkedToolCount = 0
     local missingToolCategory
     local ignoredToolName
+    local incompleteSkillControls
+    local unavailableSkillTitle
     local orderedCategories = {}
     for _, category in ipairs(skillCategories) do
         if category.Name == preferredCategory then
@@ -6002,7 +6026,20 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
     end
     for _, category in ipairs(orderedCategories) do
         if not onlyCategory or category.Name == onlyCategory then
-            local tool = self:FindWeapon(category.Name)
+            local tool
+            if equippedTool then
+                local character = player and player.Character
+                if equippedTool.Parent == character
+                    and equippedTool:IsA("Tool")
+                    and equippedTool.ToolTip == category.Name
+                then
+                    tool = equippedTool
+                end
+            elseif onlyCategory then
+                tool = self:FindEquippedWeapon(category.Name)
+            else
+                tool = self:FindWeapon(category.Name)
+            end
             local selectedKeys = {}
             for _, keyName in ipairs(category.Keys) do
                 if isEnabled(category, keyName) then
@@ -6021,9 +6058,11 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
                 checkedToolCount += 1
                 local toolSkills = skills:FindFirstChild(tool.Name)
                 if not toolSkills then
-                    local equipped, equipResult = self:EquipTool(tool)
-                    if not equipped then
-                        return nil, tostring(equipResult)
+                    if not equippedTool then
+                        local equipped, equipResult = self:EquipTool(tool)
+                        if not equipped then
+                            return nil, tostring(equipResult)
+                        end
                     end
                     return nil, "Waiting for skill UI for " .. tool.Name, tool
                 end
@@ -6034,30 +6073,44 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
                     local titleText = title and title:IsA("TextLabel") and title.Text or ""
                     local cooldownEmpty = cooldown
                         and cooldown:IsA("GuiObject")
-                        and cooldown.Size == UDim2.new(0, 0, 1, -1)
+                        and cooldown.Size.X.Offset == 0
+                        and math.abs(cooldown.Size.X.Scale) <= 0.001
                     local cooldownFull = cooldown
                         and cooldown:IsA("GuiObject")
-                        and cooldown.Size == UDim2.new(1, 0, 1, -1)
-                    local isReady = frame
+                        and cooldown.Size.X.Offset == 0
+                        and math.abs(cooldown.Size.X.Scale - 1) <= 0.001
+                    local hasSkillControls = frame
                         and frame:IsA("Frame")
                         and title
                         and title:IsA("TextLabel")
                         and cooldown
                         and cooldown:IsA("GuiObject")
-                        and (
-                            (title.TextColor3 == Color3.new(1, 1, 1) and cooldownEmpty)
-                            or cooldownFull
+                    if not hasSkillControls then
+                        incompleteSkillControls = incompleteSkillControls or (
+                            tool.Name .. " " .. keyName .. " controls are incomplete"
                         )
-                        and titleText ~= ""
-                        and titleText ~= "???"
-                        and not string.find(titleText, "Transformation", 1, true)
-                    if isReady then
-                        return {
-                            Tool = tool,
-                            Category = category.Name,
-                            Key = keyName,
-                            Setting = "FarmSkill_" .. category.Token .. "_" .. keyName,
-                        }
+                    elseif titleText == "" or titleText == "???" then
+                        unavailableSkillTitle = unavailableSkillTitle or (
+                            tool.Name .. " " .. keyName .. " title is unavailable"
+                        )
+                    elseif string.find(titleText, "Transformation", 1, true) then
+                        unavailableSkillTitle = unavailableSkillTitle or (
+                            tool.Name .. " " .. keyName .. " is not an attack skill"
+                        )
+                    else
+                        local titleColor = title.TextColor3
+                        local titleIsReady = titleColor.R >= 0.98
+                            and titleColor.G >= 0.98
+                            and titleColor.B >= 0.98
+                        local isReady = (titleIsReady and cooldownEmpty) or cooldownFull
+                        if isReady then
+                            return {
+                                Tool = tool,
+                                Category = category.Name,
+                                Key = keyName,
+                                Setting = "FarmSkill_" .. category.Token .. "_" .. keyName,
+                            }
+                        end
                     end
                 end
             end
@@ -6070,15 +6123,27 @@ function CombatService:_FindReadySkill(isEnabled, preferredCategory, ignoredTool
         return nil, "Skill controls are temporarily unavailable for " .. ignoredToolName
     end
     if checkedToolCount == 0 and missingToolCategory then
-        return nil, "No owned " .. missingToolCategory .. " skill weapon is available"
+        return nil, "No equipped " .. missingToolCategory .. " skill weapon is available"
+    end
+    if incompleteSkillControls then
+        return nil, "Skill UI incomplete: " .. incompleteSkillControls
+    end
+    if unavailableSkillTitle then
+        return nil, "Selected skill unavailable: " .. unavailableSkillTitle
     end
     return nil, "All selected skill keys are on cooldown"
 end
 
-function CombatService:FindReadyFarmSkill(farmSettings, preferredCategory, ignoredTools, onlyCategory)
+function CombatService:FindReadyFarmSkill(
+    farmSettings,
+    preferredCategory,
+    ignoredTools,
+    onlyCategory,
+    equippedTool
+)
     return self:_FindReadySkill(function(category, keyName)
         return farmSettings["FarmSkill_" .. category.Token .. "_" .. keyName] == true
-    end, preferredCategory, ignoredTools, onlyCategory)
+    end, preferredCategory, ignoredTools, onlyCategory, equippedTool)
 end
 
 function CombatService:FindReadyTikiSkill()
@@ -6172,7 +6237,7 @@ function CombatService:_RestoreTemporaryAim(aimContext)
     end)
 end
 
-function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
+function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContinue, requireEquipped)
     if not tool or not tool:IsA("Tool") or type(keyName) ~= "string" then
         return false, "Skill input is invalid"
     end
@@ -6180,9 +6245,16 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
         return false, "Skill target is no longer available"
     end
 
-    local equipped, equipResult = self:EquipTool(tool)
-    if not equipped then
-        return false, tostring(equipResult)
+    local character = self.Compatibility.Player and self.Compatibility.Player.Character
+    if requireEquipped then
+        if not character or tool.Parent ~= character then
+            return false, "Selected mastery weapon is no longer equipped"
+        end
+    else
+        local equipped, equipResult = self:EquipTool(tool)
+        if not equipped then
+            return false, tostring(equipResult)
+        end
     end
 
     local aimContext, aimError = self:_SetTemporaryAim(target)
@@ -6223,8 +6295,13 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     local holdDuration = math.clamp(tonumber(holdSeconds) or 0.5, 0.05, 5)
     local holdUntil = os.clock() + holdDuration
     local aimUpdateError
+    local weaponChanged = false
     local waitOk, waitError = pcall(function()
         while os.clock() < holdUntil do
+            if requireEquipped and tool.Parent ~= character then
+                weaponChanged = true
+                break
+            end
             if shouldContinue and not shouldContinue() then
                 break
             end
@@ -6255,6 +6332,9 @@ function CombatService:UseSkill(tool, keyName, target, holdSeconds, shouldContin
     if aimUpdateError then
         return false, "Skill aim update failed: " .. tostring(aimUpdateError)
     end
+    if weaponChanged then
+        return false, "Selected mastery weapon changed during skill input"
+    end
     return true, keyName .. " skill key sent"
 end
 
@@ -6262,7 +6342,34 @@ function CombatService:UseTikiSkill(tool, keyName, target, holdSeconds, shouldCo
     return self:UseSkill(tool, keyName, target, holdSeconds, shouldContinue)
 end
 
-function CombatService:AttackGunM1(target)
+function CombatService:_GetToolCooldown(tool)
+    local cooldownValue = tool and tool:FindFirstChild("Cooldown")
+    if cooldownValue
+        and (
+            cooldownValue:IsA("NumberValue")
+            or cooldownValue:IsA("IntValue")
+        )
+    then
+        local cooldown = tonumber(cooldownValue.Value)
+        if cooldown and cooldown > 0 then
+            return math.clamp(cooldown, 0.05, 5)
+        end
+    end
+
+    local combatUtil = self.Dependencies.CombatUtil
+    if tool and combatUtil and type(combatUtil.GetWeaponData) == "function" then
+        local dataOk, weaponData = pcall(combatUtil.GetWeaponData, combatUtil, tool.Name)
+        if dataOk and type(weaponData) == "table" then
+            local cooldown = tonumber(weaponData.Cooldown)
+            if cooldown and cooldown > 0 then
+                return math.clamp(cooldown, 0.05, 5)
+            end
+        end
+    end
+    return nil
+end
+
+function CombatService:AttackGunM1(target, requiredTool)
     if not self.EnemyService:IsAlive(target) then
         return false, "Gun M1 target is no longer alive"
     end
@@ -6283,18 +6390,22 @@ function CombatService:AttackGunM1(target)
         return false, "Gun M1 target is outside firing range"
     end
 
-    local now = os.clock()
-    if now < (self.NextGunM1At or 0) then
-        return false, "Gun M1 is cooling down"
+    local tool, findError
+    if requiredTool then
+        tool = requiredTool
+        local equippedCharacter = self.Compatibility.Player
+            and self.Compatibility.Player.Character
+        if not tool:IsA("Tool")
+            or tool.Parent ~= equippedCharacter
+            or tool.ToolTip ~= "Gun"
+        then
+            return false, "Selected mastery Gun is no longer equipped"
+        end
+    else
+        tool, findError = self:FindEquippedWeapon("Gun")
     end
-
-    local tool, findError = self:FindWeapon("Gun")
     if not tool then
-        return false, findError or "No owned Gun tool was found"
-    end
-    local equipped, equipResult = self:EquipTool(tool)
-    if not equipped then
-        return false, tostring(equipResult)
+        return false, findError or "No equipped Gun tool is available"
     end
     if character:FindFirstChild(tool.Name) ~= tool then
         return false, "Gun M1 weapon did not equip"
@@ -6312,24 +6423,13 @@ function CombatService:AttackGunM1(target)
         return false, "Gun is reloading"
     end
 
-    local function getGunCooldown()
-        local cooldown = 0.25
-        local cooldownValue = tool:FindFirstChild("Cooldown")
-        if cooldownValue
-            and (
-                cooldownValue:IsA("NumberValue")
-                or cooldownValue:IsA("IntValue")
-            )
-        then
-            cooldown = tonumber(cooldownValue.Value) or cooldown
-        elseif type(combatUtil.GetWeaponData) == "function" then
-            local dataOk, weaponData = pcall(combatUtil.GetWeaponData, combatUtil, tool.Name)
-            if dataOk and type(weaponData) == "table" then
-                cooldown = tonumber(weaponData.Cooldown) or cooldown
-            end
-        end
-        return math.clamp(cooldown, 0.05, 5)
+    local now = os.clock()
+    self.NextGunM1At = self.NextGunM1At or {}
+    if now < (self.NextGunM1At[tool] or 0) then
+        return false, "Gun M1 is cooling down"
     end
+
+    local cooldown = self:_GetToolCooldown(tool) or 0.25
 
     if tool.Name == "Skull Guitar" then
         local remote = tool:FindFirstChild("RemoteEvent")
@@ -6342,7 +6442,7 @@ function CombatService:AttackGunM1(target)
         if not fireOk then
             return false, "Equipped Skull Guitar TAP failed: " .. tostring(fireError)
         end
-        self.NextGunM1At = now + getGunCooldown()
+        self.NextGunM1At[tool] = now + cooldown
         return true, "Equipped Skull Guitar TAP sent; server damage is unconfirmed"
     end
 
@@ -6442,7 +6542,7 @@ function CombatService:AttackGunM1(target)
     if not aimWaitOk then
         return false, "Gun aim release wait failed: " .. tostring(aimWaitError)
     end
-    self.NextGunM1At = now + getGunCooldown()
+    self.NextGunM1At[tool] = now + cooldown
     return true, tostring(inputResult) .. "; server damage is not confirmed"
 end
 
@@ -6545,7 +6645,7 @@ function CombatService:_GetAttackCandidates(character, root, range)
     return candidates
 end
 
-function CombatService:_AttackFruitM1(target, character, root)
+function CombatService:_AttackFruitM1(target, character, root, tool)
     local targetPart = target and (target.PrimaryPart or target:FindFirstChild("HumanoidRootPart"))
     if not targetPart then
         return false, "Fruit M1 target is unavailable"
@@ -6558,8 +6658,7 @@ function CombatService:_AttackFruitM1(target, character, root)
     end
     direction = direction.Unit
 
-    local tool = character:FindFirstChildOfClass("Tool")
-    if not tool or tool.ToolTip ~= "Blox Fruit" then
+    if not tool or tool.Parent ~= character or tool.ToolTip ~= "Blox Fruit" then
         return false, "Selected fruit tool is not equipped"
     end
 
@@ -6589,7 +6688,7 @@ function CombatService:_AttackFruitM1(target, character, root)
     return false, "Selected fruit tool has no supported M1 remote"
 end
 
-function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation)
+function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation, requiredTool)
     local character, humanoid, root = self.Compatibility:GetCharacterParts()
     if not character or not humanoid or not root or not self.EnemyService:IsAlive(target) then
         return false, "Target or character is invalid"
@@ -6602,15 +6701,38 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
 
     weaponCategory = weaponCategory or "Melee"
     local tool = character:FindFirstChildOfClass("Tool")
+    if requiredTool and (not requiredTool:IsA("Tool") or tool ~= requiredTool) then
+        return false, "Selected mastery weapon is no longer equipped"
+    end
     if not tool or tool.ToolTip ~= weaponCategory then
         return false, "Selected weapon category is not equipped"
     end
 
     if weaponCategory == "Blox Fruit" then
-        local fruitIssued, fruitResult = self:_AttackFruitM1(target, character, root)
+        self.NextFruitM1At = self.NextFruitM1At or {}
+        local now = os.clock()
+        if requiredTool and now < (self.NextFruitM1At[tool] or 0) then
+            return false, "Blox Fruit M1 is cooling down"
+        end
+        local fruitCallOk, fruitIssued, fruitResult = pcall(
+            self._AttackFruitM1,
+            self,
+            target,
+            character,
+            root,
+            tool
+        )
+        if not fruitCallOk then
+            return false, "Fruit M1 request failed: " .. tostring(fruitIssued)
+        end
         if fruitIssued then
+            local cooldown = requiredTool and self:_GetToolCooldown(tool)
+            if cooldown then
+                self.NextFruitM1At[tool] = now + cooldown
+            end
             return true, fruitResult
         end
+        return false, fruitResult
     end
 
     local stun = character:FindFirstChild("Stun")
@@ -6716,7 +6838,6 @@ local TIKI_SKILL_HOLD_SECONDS = 0.5
 local FARM_SKILL_SCAN_INTERVAL = 0.4
 local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
-local MASTERY_M1_FALLBACK_INTERVAL = 0.5
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 5
 local SPAWN_LOAD_GRACE = 1
@@ -7509,16 +7630,23 @@ function MainFarm:_GetMasteryCategory(target, farmSettings, allowMastery)
     return nil
 end
 
-function MainFarm:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)
+function MainFarm:_TryMasteryM1Fallback(target, masteryCategory, farmSettings, requiredTool)
     local now = os.clock()
-    if now < (self.NextMasteryM1FallbackAt or 0) then
-        return false, "throttled", self.LastMasteryM1Result
+    local tool, findError
+    if requiredTool then
+        local character = self.Context and self.Context.Compatibility
+            and self.Context.Compatibility.Player
+            and self.Context.Compatibility.Player.Character
+        if requiredTool.Parent == character and requiredTool.ToolTip == masteryCategory then
+            tool = requiredTool
+        else
+            findError = "Selected mastery weapon is no longer equipped"
+        end
+    else
+        tool, findError = self.CombatService:FindEquippedWeapon(masteryCategory)
     end
-    self.NextMasteryM1FallbackAt = now + MASTERY_M1_FALLBACK_INTERVAL
-
-    local equipped, equipResult = self.CombatService:EquipWeapon(masteryCategory)
-    if not equipped then
-        local reason = tostring(equipResult)
+    if not tool then
+        local reason = tostring(findError or ("No equipped " .. masteryCategory .. " tool"))
         self.LastMasteryM1Result = {
             Category = masteryCategory,
             Issued = false,
@@ -7529,13 +7657,14 @@ function MainFarm:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)
     end
     local issued, result
     if masteryCategory == "Gun" then
-        issued, result = self.CombatService:AttackGunM1(target)
+        issued, result = self.CombatService:AttackGunM1(target, tool)
     elseif masteryCategory == "Blox Fruit" then
         issued, result = self.CombatService:AttackM1(
             target,
             30,
             "Blox Fruit",
-            farmSettings and farmSettings.AttackNoAnimation == true
+            farmSettings and farmSettings.AttackNoAnimation == true,
+            tool
         )
     else
         issued, result = false, "Unsupported mastery category"
@@ -7564,6 +7693,7 @@ function MainFarm:_TryStartFarmSkill(
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
+    local masteryTool
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
         if configuredCategory ~= "Blox Fruit" and configuredCategory ~= "Gun" then
@@ -7575,10 +7705,12 @@ function MainFarm:_TryStartFarmSkill(
             self.FarmSkillPreparing = nil
             return false
         end
-        local equipped, equipResult = self.CombatService:EquipWeapon(masteryCategory)
-        if not equipped then
+        local equipResult
+        masteryTool, equipResult = self.CombatService:FindEquippedWeapon(masteryCategory)
+        if not masteryTool then
             self:_SetStatus(
-                "Mastery weapon waiting: " .. tostring(equipResult),
+                "Mastery waiting: equip the " .. masteryCategory .. " weapon to master"
+                    .. (equipResult and (" (" .. tostring(equipResult) .. ")") or ""),
                 "warning"
             )
             return true
@@ -7599,7 +7731,6 @@ function MainFarm:_TryStartFarmSkill(
     local now = os.clock()
     if now < (self.NextFarmSkillScanAt or 0) then
         if masteryCategory then
-            self:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)
             return true
         end
         return self.FarmSkillPreparing ~= nil
@@ -7608,6 +7739,10 @@ function MainFarm:_TryStartFarmSkill(
     self.NextFarmSkillScanAt = now + FARM_SKILL_SCAN_INTERVAL
 
     self.FarmSkillIgnoredTools = self.FarmSkillIgnoredTools or {}
+    local skillIgnoredTools = self.FarmSkillIgnoredTools
+    if masteryCategory then
+        skillIgnoredTools = nil
+    end
     for toolName, retryAt in pairs(self.FarmSkillIgnoredTools) do
         if now >= retryAt then
             self.FarmSkillIgnoredTools[toolName] = nil
@@ -7617,8 +7752,9 @@ function MainFarm:_TryStartFarmSkill(
     local skill, skillError, preparingTool = self.CombatService:FindReadyFarmSkill(
         farmSettings,
         skillCategory,
-        self.FarmSkillIgnoredTools,
-        masteryCategory
+        skillIgnoredTools,
+        masteryCategory,
+        masteryTool
     )
     if preparingTool then
         local preparation = self.FarmSkillPreparing
@@ -7635,14 +7771,13 @@ function MainFarm:_TryStartFarmSkill(
                 local issued, result = self:_TryMasteryM1Fallback(
                     target,
                     masteryCategory,
-                    farmSettings
+                    farmSettings,
+                    masteryTool
                 )
                 self:_SetStatus(
                     "Preparing " .. preparingTool.Name
                         .. (issued and "; mastery M1 request issued"
-                            or (result == "throttled"
-                                and "; mastery M1 retry is throttled"
-                                or "; mastery M1 blocked: " .. tostring(result))),
+                            or "; mastery M1 blocked: " .. tostring(result)),
                     issued and "success" or "info"
                 )
             else
@@ -7650,14 +7785,20 @@ function MainFarm:_TryStartFarmSkill(
             end
             return true
         end
-        self.FarmSkillIgnoredTools[preparingTool.Name] = now + FARM_SKILL_UNAVAILABLE_RETRY
+        if not masteryCategory then
+            self.FarmSkillIgnoredTools[preparingTool.Name] =
+                now + FARM_SKILL_UNAVAILABLE_RETRY
+        end
         self.FarmSkillPreparing = nil
-        self.CombatService:EquipWeapon(masteryCategory or weaponCategory)
+        if not masteryCategory then
+            self.CombatService:EquipWeapon(weaponCategory)
+        end
         if masteryCategory then
             local issued, result = self:_TryMasteryM1Fallback(
                 target,
                 masteryCategory,
-                farmSettings
+                farmSettings,
+                masteryTool
             )
             self:_SetStatus(
                 "Skill controls unavailable: " .. preparingTool.Name
@@ -7690,7 +7831,8 @@ function MainFarm:_TryStartFarmSkill(
             local issued, result = self:_TryMasteryM1Fallback(
                 target,
                 masteryCategory,
-                farmSettings
+                farmSettings,
+                masteryTool
             )
             if issued then
                 local routeSuffix = ""
@@ -7708,36 +7850,13 @@ function MainFarm:_TryStartFarmSkill(
                         .. "; hit unconfirmed",
                     "success"
                 )
-            elseif result ~= "throttled" then
+            else
                 self:_SetStatus(
                     masteryCategory
                         .. " M1 blocked: "
                         .. tostring(result)
                         .. skillSuffix,
                     "warning"
-                )
-            else
-                local lastResult = self.LastMasteryM1Result
-                local message
-                local kind = "info"
-                if lastResult and lastResult.Category == masteryCategory then
-                    if lastResult.Issued then
-                        message = masteryCategory
-                            .. " M1 cooling down; last request issued, hit unconfirmed"
-                            .. skillSuffix
-                    else
-                        message = masteryCategory
-                            .. " M1 fallback blocked: "
-                            .. tostring(lastResult.Result)
-                            .. skillSuffix
-                        kind = "warning"
-                    end
-                else
-                    message = masteryCategory .. " M1 fallback retry is throttled"
-                end
-                self:_SetStatus(
-                    message,
-                    kind
                 )
             end
             return true
@@ -7768,10 +7887,12 @@ function MainFarm:_TryStartFarmSkill(
                 function()
                     local currentSettings = self.Context and self.Context.Config
                         and self.Context.Config.FarmSettings
+                    local currentCharacter
                     local currentRoot
                     if self.Context and self.Context.Compatibility then
-                        local _, _, characterRoot =
+                        local character, _, characterRoot =
                             self.Context.Compatibility:GetCharacterParts()
+                        currentCharacter = character
                         currentRoot = characterRoot
                     end
                     return self:_IsCurrent(session)
@@ -7779,6 +7900,14 @@ function MainFarm:_TryStartFarmSkill(
                         and self.EnemyService:IsAlive(target)
                         and currentSettings
                         and currentSettings[skill.Setting] == true
+                        and (
+                            not masteryTool
+                            or (
+                                masteryTool.Parent == currentCharacter
+                                and self.CombatService:FindEquippedWeapon(masteryCategory)
+                                    == masteryTool
+                            )
+                        )
                         and (
                             (masteryCategory
                                 and currentSettings.FarmMastery == true
@@ -7796,8 +7925,12 @@ function MainFarm:_TryStartFarmSkill(
                                 )
                             )
                         )
-                        and self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
-                end
+                        and (
+                            masteryCategory ~= nil
+                            or self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
+                        )
+                end,
+                masteryTool ~= nil
             )
         end)
         if not callOk then
@@ -7820,7 +7953,7 @@ function MainFarm:_TryStartFarmSkill(
                     local _, _, playerRoot = self.Context.Compatibility:GetCharacterParts()
                     currentRoot = playerRoot
                 end
-                local fallbackIssued, fallbackResult, fallbackLastResult
+                local fallbackIssued, fallbackResult
                 if masteryCategory
                     and currentSettings
                     and currentSettings.FarmMastery == true
@@ -7830,13 +7963,16 @@ function MainFarm:_TryStartFarmSkill(
                         allowMastery
                     ) == masteryCategory
                     and currentRoot
-                    and self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
+                    and (
+                        masteryCategory ~= nil
+                        or self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)
+                    )
                 then
-                    fallbackIssued, fallbackResult, fallbackLastResult =
-                        self:_TryMasteryM1Fallback(
+                    fallbackIssued, fallbackResult = self:_TryMasteryM1Fallback(
                         target,
                         masteryCategory,
-                        currentSettings
+                        currentSettings,
+                        masteryTool
                     )
                 end
                 if fallbackIssued then
@@ -7844,18 +7980,9 @@ function MainFarm:_TryStartFarmSkill(
                         "Skill failed; " .. masteryCategory .. " M1 fallback sent",
                         "warning"
                     )
-                elseif masteryCategory and fallbackResult and fallbackResult ~= "throttled" then
+                elseif masteryCategory and fallbackResult then
                     self:_SetStatus(
-                        "Skill failed; mastery M1 waiting: " .. tostring(fallbackResult),
-                        "warning"
-                    )
-                elseif masteryCategory and fallbackResult == "throttled"
-                    and fallbackLastResult
-                    and not fallbackLastResult.Issued
-                then
-                    self:_SetStatus(
-                        "Skill failed; mastery M1 blocked: "
-                            .. tostring(fallbackLastResult.Result),
+                        "Skill failed; mastery M1 blocked: " .. tostring(fallbackResult),
                         "warning"
                     )
                 else
@@ -7870,20 +7997,18 @@ function MainFarm:_TryStartFarmSkill(
             and self.Context.Compatibility:GetCharacterParts()
         if originalCharacter and currentCharacter == originalCharacter
             and combatService == self.CombatService
+            and not masteryCategory
         then
             local currentSettings = self.Context and self.Context.Config
                 and self.Context.Config.FarmSettings
             local restoreCategory = currentSettings
                 and currentSettings.WeaponCategory
                 or weaponCategory
-            if currentSettings and currentSettings.FarmMastery == true then
-                restoreCategory = self:_GetMasteryCategory(
-                    target,
-                    currentSettings,
-                    allowMastery
-                ) or restoreCategory
+            local masteryCategoryNow = currentSettings
+                and self:_GetMasteryCategory(target, currentSettings, allowMastery)
+            if not masteryCategoryNow then
+                combatService:EquipWeapon(restoreCategory)
             end
-            combatService:EquipWeapon(restoreCategory)
         end
     end)
     return true
@@ -9300,7 +9425,6 @@ function MainFarm:Start()
     self.TikiEventActive = false
     self.TikiEventTarget = nil
     self.NextFarmSkillScanAt = 0
-    self.NextMasteryM1FallbackAt = 0
     self.LastMasteryM1Result = nil
     self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
     self.FarmSkillActive = false

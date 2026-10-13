@@ -87,19 +87,23 @@ require(
     'self.Compatibility:GetPlayerGui()' in ready_skill
     and 'FindFirstChild("Skills")' in ready_skill
     and 'FindFirstChild("Cooldown")' in ready_skill
-    and 'title.TextColor3 == Color3.new(1, 1, 1)' in ready_skill
-    and 'UDim2.new(0, 0, 1, -1)' in ready_skill
-    and 'UDim2.new(1, 0, 1, -1)' in ready_skill
+    and "titleIsReady and cooldownEmpty" in ready_skill
+    and "cooldownFull" in ready_skill
+    and "cooldown.Size.X.Scale" in ready_skill
     and "frame.Visible" not in ready_skill
     and 'string.find(titleText, "Transformation", 1, true)' in ready_skill
     and "self:EquipTool(tool)" in ready_skill
+    and "if not equippedTool then" in ready_skill
+    and "equippedTool.Parent == character" in ready_skill
     and "ignoredTools" in ready_skill
     and "onlyCategory" in ready_skill
     and "category.Name == onlyCategory" in ready_skill
     and "No selected skill keys are enabled" in ready_skill
     and "All selected skill keys are on cooldown" in ready_skill
+    and "Skill UI incomplete:" in ready_skill
+    and "Selected skill unavailable:" in ready_skill
     and "GetDescendants" not in ready_skill,
-    "Skill readiness must match BNN cooldown/title states without rejecting hidden ready frames",
+    "Skill readiness must accept approximate ready cooldown states and report incomplete controls distinctly",
 )
 farm_skill_lookup = function_body(
     COMBAT,
@@ -114,6 +118,7 @@ tiki_skill_lookup = function_body(
 require(
     '"FarmSkill_" .. category.Token .. "_" .. keyName' in farm_skill_lookup
     and "onlyCategory" in farm_skill_lookup
+    and "equippedTool" in farm_skill_lookup
     and "return self:_FindReadySkill(function()" in tiki_skill_lookup
     and "farmSettings" not in tiki_skill_lookup,
     "Regular combat must honor skill selection while Tiki automatically accepts any ready skill",
@@ -131,6 +136,19 @@ require(
     and "Skull Guitar is in the Backpack; it will not be equipped for farming" in find_weapon,
     "Gun selection must preserve an equipped Skull Guitar but never auto-equip one from Backpack",
 )
+equipped_weapon = function_body(
+    COMBAT,
+    "function CombatService:FindEquippedWeapon",
+    "\nfunction CombatService:FindWeapon",
+)
+require(
+    "character:GetChildren()" in equipped_weapon
+    and 'item:IsA("Tool") and item.ToolTip == category' in equipped_weapon
+    and "Backpack" not in equipped_weapon
+    and "FindWeapon(" not in equipped_weapon
+    and "EquipTool(" not in equipped_weapon,
+    "Mastery weapon selection must inspect only the currently equipped tool",
+)
 
 gun_m1 = function_body(
     COMBAT,
@@ -138,10 +156,13 @@ gun_m1 = function_body(
     "\nfunction CombatService:TapSkullGuitar",
 )
 require(
-    'self:FindWeapon("Gun")' in gun_m1
-    and "self:EquipTool(tool)" in gun_m1
+    'self:FindEquippedWeapon("Gun")' in gun_m1
+    and "self:FindWeapon(" not in gun_m1
+    and "self:EquipTool(" not in gun_m1
+    and "requiredTool" in gun_m1
     and "IsGunReloading" in gun_m1
-    and "NextGunM1At" in gun_m1
+    and "NextGunM1At[tool]" in gun_m1
+    and "self:_GetToolCooldown(tool)" in gun_m1
     and 'if tool.Name == "Skull Guitar" then' in gun_m1
     and 'remote:FireServer("TAP", targetRoot.Position)' in gun_m1
     and "server damage is unconfirmed" in gun_m1
@@ -158,6 +179,28 @@ require(
     and "ShootGunEvent" not in gun_m1
     and "debugLibrary" not in gun_m1,
     "Gun M1 must use validated screen-targeted input for regular guns and TAP only an already-equipped Skull Guitar",
+)
+fruit_m1 = function_body(
+    COMBAT,
+    "function CombatService:_AttackFruitM1",
+    "\nfunction CombatService:AttackM1",
+)
+mastery_attack_m1 = function_body(
+    COMBAT,
+    "function CombatService:AttackM1",
+    "\nfunction CombatService:Cancel",
+)
+require(
+    "tool.Parent ~= character" in fruit_m1
+    and "tool:FindFirstChild(\"LeftClickRemote\")" in fruit_m1
+    and "remoteFunction:InvokeServer(\"TAP\")" in fruit_m1
+    and "requiredTool" in mastery_attack_m1
+    and "NextFruitM1At[tool]" in mastery_attack_m1
+    and "self:_GetToolCooldown(tool)" in mastery_attack_m1
+    and "pcall(" in mastery_attack_m1
+    and "self:FindWeapon(" not in mastery_attack_m1
+    and "self:EquipTool(" not in mastery_attack_m1,
+    "Fruit Mastery M1 must use the pinned equipped fruit and its available cooldown data",
 )
 gun_shoot_lookup = function_body(
     COMPATIBILITY,
@@ -207,6 +250,8 @@ require(
     and "SendKeyEvent(true," in BNN
     and "SendKeyEvent(false," in BNN
     and "self.ActiveInputRelease = releaseInput" in use_skill
+    and "requireEquipped" in use_skill
+    and "tool.Parent ~= character" in use_skill
     and "self:_SetTemporaryAim(target)" in use_skill
     and "self:_UpdateTemporaryAim(aimContext, target)" in use_skill
     and "self:_RestoreTemporaryAim(aimContext)" in use_skill
@@ -248,15 +293,18 @@ mastery_m1 = function_body(
     "\nfunction MainFarm:_TryStartFarmSkill",
 )
 require(
-    "MASTERY_M1_FALLBACK_INTERVAL" in mastery_m1
-    and "EquipWeapon(masteryCategory)" in mastery_m1
+    "FindEquippedWeapon(masteryCategory)" in mastery_m1
+    and "AttackGunM1(target, tool)" in mastery_m1
+    and "tool" in mastery_m1
+    and "EquipWeapon(" not in mastery_m1
+    and "MASTERY_M1_FALLBACK_INTERVAL" not in mastery_m1
     and "LastMasteryM1Result" in mastery_m1
     and 'masteryCategory == "Gun"' in mastery_m1
-    and "AttackGunM1(target)" in mastery_m1
     and 'masteryCategory == "Blox Fruit"' in mastery_m1
     and 'AttackM1(' in mastery_m1
+    and 'tool\n        )' in mastery_m1
     and '"Blox Fruit"' in mastery_m1,
-    "When no selected mastery skill is ready, throttle and use that mastery weapon's M1 path",
+    "Mastery fallback must use only the currently equipped mastery tool and leave attack timing to the tool path",
 )
 
 farm_skill = function_body(
@@ -272,6 +320,7 @@ require(
     and "FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
+    and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
     and "task.spawn(function()" in farm_skill
     and "combatService:UseSkill(" in farm_skill
     and "self:_IsCurrent(session)" in farm_skill
@@ -289,19 +338,24 @@ require(
     and "no skill keys enabled" in farm_skill
     and 'string.find(resultText, "shootGun", 1, true)' in farm_skill
     and 'routeSuffix = " (shootGun)"' in farm_skill
-    and "M1 cooling down; last request issued" in farm_skill
-    and farm_skill.index("_IsAtFarmAttackPosition")
-    < farm_skill.index("self:_TryMasteryM1Fallback")
     and "masteryCategory" in farm_skill
-    and "self.CombatService:EquipWeapon(masteryCategory)" in farm_skill
-    and farm_skill.count(
-        "self:_TryMasteryM1Fallback(target, masteryCategory, farmSettings)"
-    ) >= 1
+    and "self.CombatService:FindEquippedWeapon(masteryCategory)" in farm_skill
+    and "self.CombatService:EquipWeapon(masteryCategory)" not in farm_skill
+    and "masteryTool ~= nil" in farm_skill
+    and "self.CombatService:FindEquippedWeapon(masteryCategory)" in farm_skill
+    and "masteryTool.Parent == currentCharacter" in farm_skill
+    and "masteryCategory ~= nil\n                            or self:_IsAtFarmAttackPosition" in farm_skill
+    and "MASTERY_M1_FALLBACK_INTERVAL" not in farm_skill
+    and "skillIgnoredTools," in farm_skill
+    and "if masteryCategory then\n            return true" in farm_skill
     and "Skill failed; " in farm_skill
-    and "fallbackIssued, fallbackResult, fallbackLastResult =" in farm_skill
+    and "fallbackIssued, fallbackResult =" in farm_skill
     and "combatService:EquipWeapon(restoreCategory)" in farm_skill
+    and "and not masteryCategory" in farm_skill
+    and "if not masteryCategoryNow then" in farm_skill
+    and "local masteryCategoryNow = currentSettings" in farm_skill
     and "Mastery waiting: enable Use skills while farming" not in farm_skill,
-    "Mastery skills must bypass the general farm-skill toggle while respecting selected category and keys",
+    "Mastery skills must stay on the pinned equipped tool, retry UI detection, and bypass farm-only movement checks",
 )
 require(
     MAIN_FARM.count("self:_TryStartFarmSkill(") == 3
@@ -341,6 +395,7 @@ require(
 
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: ready skills use BNN cooldown states, VIM key input, and cancellation-safe release")
-print("PASS: Gun Mastery uses regular-gun input and only uses an already-equipped Skull Guitar")
+print("PASS: mastery stays on the currently equipped tool and never equips from Backpack")
+print("PASS: Gun Mastery uses regular-gun input and TAP only for an equipped Skull Guitar")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")
