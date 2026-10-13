@@ -111,6 +111,13 @@ require(
     and "GetDescendants" not in ready_skill,
     "Mastery readiness must match BNN's two cooldown states while reporting incomplete controls distinctly",
 )
+require(
+    "for _, keyName in ipairs(selectedKeys) do" in ready_skill
+    and "if isReady then" in ready_skill
+    and "self.LastMasterySkillKey[equippedTool]" in ready_skill
+    and "rotatedKeys" in ready_skill,
+    "Each rescan must inspect every selected key, including another ready key and a reused off-cooldown Z",
+)
 farm_skill_lookup = function_body(
     COMBAT,
     "function CombatService:FindReadyFarmSkill",
@@ -261,6 +268,9 @@ require(
     and "pinEquippedTool" in use_skill
     and "self:EquipTool(tool)" in use_skill
     and use_skill.index("self:EquipTool(tool)") < use_skill.index("SendKeyEvent(true, keyName")
+    and use_skill.index("local waitOk, waitError = pcall(function()")
+    < use_skill.index("local releaseOk, releaseResult = pcall(releaseInput)")
+    < use_skill.index("if farmStateChanged then")
     and "tool.Parent ~= character" in use_skill
     and "farmStateChanged = true" in use_skill
     and '"Skill input cancelled because farm state changed"' in use_skill
@@ -312,6 +322,10 @@ farm_skill = function_body(
     "function MainFarm:_TryStartFarmSkill",
     "\nfunction MainFarm:_StepAura",
 )
+mastery_dispatch = farm_skill.split(
+    "-- Match BNN's per-iteration Mastery flow.",
+    1,
+)[1].split("    return true\nend", 1)[0]
 mastery_skill_success = farm_skill.split(
     "if activated and self:_IsCurrent(session) and self.Target == target then",
     1,
@@ -333,11 +347,17 @@ require(
     and "and FARM_STEP_INTERVAL" in farm_skill
     and "or FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "self.NextFarmSkillScanAt = now + skillScanInterval" in farm_skill
-    and "self.NextFarmSkillScanAt = os.clock() + skillScanInterval" in farm_skill
+    and "self.NextFarmSkillScanAt = masteryCategory" in farm_skill
+    and "and 0" in farm_skill
+    and "or (os.clock() + skillScanInterval)" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
     and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
-    and "task.spawn(function()" in farm_skill
+    and "task.spawn(function()" in mastery_dispatch
+    and "finishSkillAttempt(runSkillAttempt())" in mastery_dispatch
+    and mastery_dispatch.index("finishSkillAttempt(runSkillAttempt())")
+    < mastery_dispatch.index("else")
+    < mastery_dispatch.index("task.spawn(function()")
     and "combatService:UseSkill(" in farm_skill
     and "self:_IsCurrent(session)" in farm_skill
     and "self.Target == target" in farm_skill

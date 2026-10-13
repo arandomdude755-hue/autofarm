@@ -7832,7 +7832,7 @@ function MainFarm:_TryStartFarmSkill(
             .. " (" .. string.format("%.2fs hold", skillHold) .. ")"
     end
     self:_SetStatus(usingSkillStatus, "success")
-    task.spawn(function()
+    local function runSkillAttempt()
         local callOk, activated, activationResult = pcall(function()
             return combatService:UseSkill(
                 skill.Tool,
@@ -7889,12 +7889,17 @@ function MainFarm:_TryStartFarmSkill(
             )
         end)
         if not callOk then
-            activationResult = "Skill execution error: " .. tostring(activated)
-            activated = false
+            return false, "Skill execution error: " .. tostring(activated)
         end
+        return activated, activationResult
+    end
+
+    local function finishSkillAttempt(activated, activationResult)
         if self.FarmSkillGeneration == generation then
             self.FarmSkillActive = false
-            self.NextFarmSkillScanAt = os.clock() + skillScanInterval
+            self.NextFarmSkillScanAt = masteryCategory
+                and 0
+                or (os.clock() + skillScanInterval)
             if activated and self:_IsCurrent(session) and self.Target == target then
                 self:_SetStatus(
                     "Sent " .. skill.Category .. " " .. skill.Key .. " key input",
@@ -7931,7 +7936,18 @@ function MainFarm:_TryStartFarmSkill(
                 combatService:EquipWeapon(restoreCategory)
             end
         end
-    end)
+    end
+
+    if masteryCategory then
+        -- Match BNN's per-iteration Mastery flow. Completing the hold here
+        -- returns directly to the farm loop, where every selected key is
+        -- rescanned on the next step.
+        finishSkillAttempt(runSkillAttempt())
+    else
+        task.spawn(function()
+            finishSkillAttempt(runSkillAttempt())
+        end)
+    end
     return true
 end
 
