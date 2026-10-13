@@ -7689,9 +7689,7 @@ function MainFarm:_TryStartFarmSkill(
         and farmSettings.FarmMastery == true
         and allowMastery ~= false
     local masteryCategory = self:_GetMasteryCategory(target, farmSettings, allowMastery)
-    local skillScanInterval = masteryCategory
-        and FARM_STEP_INTERVAL
-        or FARM_SKILL_SCAN_INTERVAL
+    local skillScanInterval = FARM_SKILL_SCAN_INTERVAL
     local masteryTool
     if masteryEnabled then
         local configuredCategory = farmSettings.MasteryCategory
@@ -7897,9 +7895,7 @@ function MainFarm:_TryStartFarmSkill(
     local function finishSkillAttempt(activated, activationResult)
         if self.FarmSkillGeneration == generation then
             self.FarmSkillActive = false
-            self.NextFarmSkillScanAt = masteryCategory
-                and 0
-                or (os.clock() + skillScanInterval)
+            self.NextFarmSkillScanAt = os.clock() + skillScanInterval
             if activated and self:_IsCurrent(session) and self.Target == target then
                 self:_SetStatus(
                     "Sent " .. skill.Category .. " " .. skill.Key .. " key input",
@@ -7938,16 +7934,11 @@ function MainFarm:_TryStartFarmSkill(
         end
     end
 
-    if masteryCategory then
-        -- Match BNN's per-iteration Mastery flow. Completing the hold here
-        -- returns directly to the farm loop, where every selected key is
-        -- rescanned on the next step.
+    -- Mastery supplies its eligible category/tool and health threshold; the
+    -- shared farm-skill lifecycle handles scanning, input, and cleanup.
+    task.spawn(function()
         finishSkillAttempt(runSkillAttempt())
-    else
-        task.spawn(function()
-            finishSkillAttempt(runSkillAttempt())
-        end)
-    end
+    end)
     return true
 end
 

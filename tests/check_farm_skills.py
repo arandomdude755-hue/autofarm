@@ -322,8 +322,8 @@ farm_skill = function_body(
     "function MainFarm:_TryStartFarmSkill",
     "\nfunction MainFarm:_StepAura",
 )
-mastery_dispatch = farm_skill.split(
-    "-- Match BNN's per-iteration Mastery flow.",
+skill_dispatch = farm_skill.split(
+    "    task.spawn(function()",
     1,
 )[1].split("    return true\nend", 1)[0]
 mastery_skill_success = farm_skill.split(
@@ -343,21 +343,14 @@ require(
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
     and "self:_IsAtFarmAttackPosition(target, currentRoot, skillCategory)" in farm_skill
     and "FindReadyFarmSkill(" in farm_skill
-    and "skillScanInterval = masteryCategory" in farm_skill
-    and "and FARM_STEP_INTERVAL" in farm_skill
-    and "or FARM_SKILL_SCAN_INTERVAL" in farm_skill
+    and "local skillScanInterval = FARM_SKILL_SCAN_INTERVAL" in farm_skill
     and "self.NextFarmSkillScanAt = now + skillScanInterval" in farm_skill
-    and "self.NextFarmSkillScanAt = masteryCategory" in farm_skill
-    and "and 0" in farm_skill
-    and "or (os.clock() + skillScanInterval)" in farm_skill
+    and "self.NextFarmSkillScanAt = os.clock() + skillScanInterval" in farm_skill
     and "FARM_SKILL_PREPARE_TIMEOUT" in farm_skill
     and "FARM_SKILL_UNAVAILABLE_RETRY" in farm_skill
     and "if masteryCategory then\n        skillIgnoredTools = nil" in farm_skill
-    and "task.spawn(function()" in mastery_dispatch
-    and "finishSkillAttempt(runSkillAttempt())" in mastery_dispatch
-    and mastery_dispatch.index("finishSkillAttempt(runSkillAttempt())")
-    < mastery_dispatch.index("else")
-    < mastery_dispatch.index("task.spawn(function()")
+    and farm_skill.count("task.spawn(function()") == 1
+    and "finishSkillAttempt(runSkillAttempt())" in skill_dispatch
     and "combatService:UseSkill(" in farm_skill
     and "self:_IsCurrent(session)" in farm_skill
     and "self.Target == target" in farm_skill
@@ -444,5 +437,6 @@ print("PASS: Mastery and regular skills share cooldown readiness; Mastery still 
 print("PASS: skill input uses VIM key events, reports the hold duration, and releases safely")
 print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
 print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
-print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
+print("PASS: Mastery and ordinary farming share skill scan cadence and async dispatch")
+print("PASS: ordinary farm attacks restore Farm Weapon after asynchronous skill use")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")
