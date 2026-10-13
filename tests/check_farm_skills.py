@@ -293,23 +293,11 @@ require(
     "Mastery must switch categories only at or below the configured health threshold",
 )
 
-mastery_m1 = function_body(
-    MAIN_FARM,
-    "function MainFarm:_TryMasteryM1Fallback",
-    "\nfunction MainFarm:_TryStartFarmSkill",
-)
 require(
-    "EquipWeapon(masteryCategory)" in mastery_m1
-    and "AttackGunM1(target, tool)" in mastery_m1
-    and "tool" in mastery_m1
-    and "MASTERY_M1_FALLBACK_INTERVAL" not in mastery_m1
-    and "LastMasteryM1Result" in mastery_m1
-    and 'masteryCategory == "Gun"' in mastery_m1
-    and 'masteryCategory == "Blox Fruit"' in mastery_m1
-    and 'AttackM1(' in mastery_m1
-    and 'tool\n        )' in mastery_m1
-    and '"Blox Fruit"' in mastery_m1,
-    "Mastery fallback must select/equip a matching live tool, pin the attack to it, and leave attack timing to the tool path",
+    "_TryMasteryM1Fallback" not in MAIN_FARM
+    and "LastMasteryM1Result" not in MAIN_FARM
+    and "AttackGunM1(" not in MAIN_FARM,
+    "Farm Mastery must not dispatch any M1 attack while it is skills-only",
 )
 
 farm_skill = function_body(
@@ -321,6 +309,14 @@ mastery_skill_success = farm_skill.split(
     "if activated and self:_IsCurrent(session) and self.Target == target then",
     1,
 )[1].split("elseif not activated and self:_IsCurrent(session) and self.Target == target then", 1)[0]
+mastery_skill_failure = farm_skill.split(
+    "elseif not activated and self:_IsCurrent(session) and self.Target == target then",
+    1,
+)[1].split("\n            end\n        end\n        local currentCharacter", 1)[0]
+mastery_no_skill_branch = farm_skill.split("if not skill then", 1)[1].split(
+    "self.FarmSkillGeneration =",
+    1,
+)[0]
 require(
     "self:_IsAtFarmAttackPosition(target, playerRoot, skillCategory)" in farm_skill
     and farm_skill.index("_IsAtFarmAttackPosition") < farm_skill.index("FindReadyFarmSkill(")
@@ -343,10 +339,13 @@ require(
     and "local callOk, activated, activationResult = pcall(function()" in farm_skill
     and "if not callOk then" in farm_skill
     and "Mastery waiting for a ready selected " not in farm_skill
-    and "selected skills cooling down" in farm_skill
-    and "no skill keys enabled" in farm_skill
-    and 'string.find(resultText, "shootGun", 1, true)' in farm_skill
-    and 'routeSuffix = " (shootGun)"' in farm_skill
+    and "Mastery waiting: selected skills cooling down" in farm_skill
+    and "Mastery waiting: enable a selected skill key" in farm_skill
+    and "Mastery skill controls unavailable:" in farm_skill
+    and "Mastery skill input failed:" in farm_skill
+    and "return true\n        end\n        if skillError" in mastery_no_skill_branch
+    and "AttackGunM1(" not in farm_skill
+    and "AttackM1(" not in farm_skill
     and "masteryCategory" in farm_skill
     and "self.CombatService:EquipWeapon(masteryCategory)" in farm_skill
     and '"Mastery waiting: no usable "' in farm_skill
@@ -358,8 +357,6 @@ require(
     and "MASTERY_M1_FALLBACK_INTERVAL" not in farm_skill
     and "skillIgnoredTools," in farm_skill
     and "if masteryCategory then\n            return true" in farm_skill
-    and "Skill failed; " in farm_skill
-    and "fallbackIssued, fallbackResult =" in farm_skill
     and "combatService:EquipWeapon(restoreCategory)" in farm_skill
     and "and not masteryCategory" in farm_skill
     and "if not masteryCategoryNow then" in farm_skill
@@ -368,10 +365,11 @@ require(
     "Mastery skills must stay on the pinned equipped tool, retry UI detection, and bypass farm-only movement checks",
 )
 require(
-    "self:_TryMasteryM1Fallback(" in mastery_skill_success
-    and "mastery M1 input sent" in mastery_skill_success
-    and "M1 not sent:" in mastery_skill_success,
-    "After sending a mastery skill key, continue attacking with the selected mastery weapon's M1 path",
+    "key input" in mastery_skill_success
+    and "M1" not in mastery_skill_success
+    and "Mastery skill input failed:" in mastery_skill_failure
+    and "M1" not in mastery_skill_failure,
+    "Mastery must use skills only and wait safely when a skill send fails",
 )
 require(
     MAIN_FARM.count("self:_TryStartFarmSkill(") == 3
@@ -412,6 +410,6 @@ require(
 print("PASS: BNN skill keys, hold duration, and fast-release controls are migrated")
 print("PASS: ready skills use BNN cooldown states, VIM key input, and cancellation-safe release")
 print("PASS: Mastery equips and pins the selected hotbar tool; Skull Guitar TAP is chosen only while equipped")
-print("PASS: Gun Mastery uses regular-gun input and TAP only for an equipped Skull Guitar")
+print("PASS: Mastery is skills-only; the isolated Gun M1 helper is not called")
 print("PASS: regular farm attacks can use skills asynchronously and restore Farm Weapon")
 print("PASS: Tiki puzzle automatically uses any available skill without puzzle-only settings")

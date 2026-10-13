@@ -9,17 +9,11 @@ For the Tiki Outpost puzzle, automatically use any currently ready skill; do not
 
 The general “Use skills while farming” toggle gates only ordinary farm skill use. Farm Mastery uses the universal skill-key selections for its configured mastery category without requiring that toggle.
 
-When no selected Mastery skill is ready or its controls fail to load, do not suppress all combat: keep the configured Mastery weapon equipped and use a throttled M1 fallback for that category. After a mastery skill key is sent, continue with that category's M1 path rather than treating the key event as proof the game activated the skill.
+For now, Farm Mastery is skills-only: do not send M1 after a skill, while selected skills cool down, or when skill controls are unavailable. Keep the configured Mastery weapon equipped and report why the farm is waiting.
 
-**Why:** the user observed the farm idling at the Mastery health threshold while the player could manually change or unequip the weapon, and later reported the farm stalling after a Z skill key was sent.
+**Why:** the user suspects M1 integration is causing Mastery failures and wants skills isolated first. If M1 is reconsidered, prioritize Gun; fruit M1 is lower priority because some fruits have no M1.
 
-**How to apply:** preserve the normal skill-ready path, pin the selected tool, and continue M1 only after the skill key has been released and the selected category/health threshold still applies. Ensure cooldown, missing-UI, and activation-failure paths still attack with the selected Mastery category and expose failures through status.
-
-Do not label the M1 fallback's rate-limit window as "waiting for a ready skill." Preserve and report the last actual M1 result separately from skill readiness.
-
-**Why:** the user saw a skill-readiness message that was actually caused by the M1 fallback throttle, hiding whether the gun was reloading or activation had merely been requested.
-
-**How to apply:** when the fallback is rate-limited, report its prior result and the skill-key state distinctly; never treat Tool:Activate success as confirmation of damage.
+**How to apply:** preserve the normal skill-ready path and pin the selected tool. Every Mastery path that lacks a usable skill must remain handled without falling through to regular M1; expose cooldown, missing-UI, and activation-failure reasons in status.
 
 Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary and target-scoped through the game's Mouse module, verify that the aim assignment works before sending a key, and release the key on cancellation.
 
@@ -27,8 +21,8 @@ Do not port BNN's game-wide `__namecall` aim hook. Keep skill aiming temporary a
 
 **How to apply:** for future BNN farming migrations, keep the tested Level Farm path intact, implement each mode with its related settings, and keep unimplemented modes out of the UI. Keep Tiki automation event-scoped and automatic, avoid global remote hooks, keep normal-farm skill controls independent, and resume the selected Farm Weapon after temporary equipment changes.
 
-For Gun Mastery, use the validated CombatController `shootGun` input path with target screen coordinates; keep the optional internal-function lookup in Compatibility and do not manually fire validator or ShootGunEvent remotes. For skills on desktop and touch, use the reference-style VirtualInputManager key down/hold/up path; recognize both reference-ready cooldown bar sizes and do not require skill frames to be Visible.
+If Gun M1 is proposed again, first isolate it from skill dispatch and validate the reference-style target-aimed Gun input; do not manually fire validator or ShootGunEvent remotes. Fruit M1 remains lower priority. For skills on desktop and touch, use the reference-style VirtualInputManager key down/hold/up path; recognize both reference-ready cooldown bar sizes and do not require skill frames to be Visible.
 
-**Why:** in-game testing showed `Tool:Activate()` could return successfully without firing a gun shot. The references use the game's internal shooting input handler and accept both empty-width and full-width cooldown states without checking frame visibility. The user clarified that Player.Backpack means unequipped hotbar tools rather than stored inventory, and explicitly asked to use Skull Guitar when present while choosing TAP only when it is the equipped gun.
+**Why:** the user wants Gun M1 investigated separately after the skills-only Mastery path is stable, and considers fruit M1 lower priority. In-game testing showed `Tool:Activate()` could return successfully without firing a gun shot. The user clarified that Player.Backpack means unequipped hotbar tools rather than stored inventory, and explicitly asked to use Skull Guitar when present while choosing TAP only when it is the equipped gun.
 
-**How to apply:** resolve mastery weapons only from live Character/Player.Backpack Tool instances, preferring Skull Guitar for Gun if present; do not query stored inventory. Reuse ordinary farm skill selection, equipping, key input, and aim behavior while pinning the selected mastery tool. Use TAP only when Skull Guitar itself is equipped. For other guns, invoke an upvalue only after validating it is the named `shootGun` function. Retain range/reload/cooldown checks and report input sent—not confirmed damage—until live testing proves a hit.
+**How to apply:** resolve mastery weapons only from live Character/Player.Backpack Tool instances, preferring Skull Guitar for Gun if present; do not query stored inventory. Reuse ordinary farm skill selection, equipping, key input, and aim behavior while pinning the selected mastery tool. Use TAP only when Skull Guitar itself is equipped. Any later regular-gun M1 must stay out of remotes/validator manipulation and be testable independently; report input sent—not confirmed damage—until live testing proves a hit.
