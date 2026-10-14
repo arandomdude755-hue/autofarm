@@ -3396,7 +3396,12 @@ function MainFarm:Start()
     end
     local teleportFeature = self.Context and self.Context.TeleportFeature
     if teleportFeature and teleportFeature:IsTraveling() then
-        teleportFeature:Cancel("Auto Farm started; manual travel was cancelled.")
+        self.Context.State:SetStatus(
+            "Auto Farm unavailable while travel is active.",
+            "error",
+            "Turn off Travel to Island or Travel to NPC before starting Auto Farm."
+        )
+        return false, "Manual travel is active"
     end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then

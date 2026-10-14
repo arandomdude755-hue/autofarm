@@ -38,9 +38,9 @@ local function currentSeaIndex(compatibility)
     return count == 1 and found or nil
 end
 
-function TeleportFeature:_SetStatus(message, kind)
+function TeleportFeature:_SetStatus(message, kind, playerMessage)
     if self.Context and self.Context.State then
-        self.Context.State:SetStatus(message, kind or "info")
+        self.Context.State:SetStatus(message, kind or "info", playerMessage)
     end
 end
 
@@ -224,8 +224,24 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local mainFarm = context and context.MainFarm
     if mainFarm and mainFarm.Running then
         self:_SetFeatureEnabled(actionId, false)
-        self:_SetStatus("Turn off Start Farm before manual travel.", "warning")
+        self:_SetStatus(
+            "Travel unavailable while farming is active.",
+            "error",
+            "Turn off Start Farm first. Travel and farming can't run together."
+        )
         return false, "Auto Farm is running"
+    end
+    if self.ActiveTravel then
+        if self.ActiveTravel.Action == actionId then
+            return true
+        end
+        self:_SetFeatureEnabled(actionId, false)
+        self:_SetStatus(
+            "Travel unavailable: another trip is already active.",
+            "error",
+            "Turn off the current travel switch before starting a different trip."
+        )
+        return false, "Another trip is active"
     end
     local character, humanoid, root = compatibility:GetCharacterParts()
     if not character or not humanoid or not root then
@@ -234,9 +250,6 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         return false, "Character is unavailable"
     end
 
-    if self.ActiveTravel then
-        self:Cancel("Previous travel request cancelled.")
-    end
     local collisionCallOk, collisionReady, collisionError = pcall(function()
         return self.MovementService:SetFarmCollisionSuppression(true)
     end)

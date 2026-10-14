@@ -136,6 +136,14 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         WindowDrag = nil,
         StatusLabel = nil,
         StatusDot = nil,
+        NotificationFrame = nil,
+        NotificationAccent = nil,
+        NotificationStroke = nil,
+        NotificationTitle = nil,
+        NotificationMessage = nil,
+        NotificationTween = nil,
+        NotificationGeneration = 0,
+        LastNotificationId = 0,
         TabButtons = {},
         TabLabels = {},
         TabMarkers = {},
@@ -615,6 +623,9 @@ function UI:_Refresh(snapshot)
     if self.RestorePing then
         self.RestorePing.BackgroundColor3 = self.StatusLabel.TextColor3
     end
+    if snapshot.notification then
+        self:_ShowNotification(snapshot.notification)
+    end
 
     for tabName, button in pairs(self.TabButtons) do
         local selected = tabName == snapshot.selectedTab or tabName == selectedParent
@@ -721,6 +732,63 @@ function UI:_Refresh(snapshot)
             self.StatusLabel.TextColor3 = theme.Error
         end
     end
+end
+
+function UI:_ShowNotification(notification)
+    local frame = self.NotificationFrame
+    if not frame or not notification or notification.Id <= self.LastNotificationId then
+        return
+    end
+    self.LastNotificationId = notification.Id
+    self.NotificationGeneration += 1
+    local generation = self.NotificationGeneration
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
+
+    local theme = self.Config.Theme
+    frame.Visible = true
+    frame.Position = UDim2.new(1, -16, 1, 96)
+    self.NotificationTitle.Text = notification.Title or "Action unavailable"
+    self.NotificationMessage.Text = tostring(notification.Message or "")
+    local accent = notification.Kind == "error" and theme.Error or theme.Warning
+    self.NotificationAccent.BackgroundColor3 = accent
+    self.NotificationStroke.Color = accent
+    self.NotificationTitle.TextColor3 = accent
+
+    local showTween = TweenService:Create(
+        frame,
+        TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        { Position = UDim2.new(1, -16, 1, -16) }
+    )
+    self.NotificationTween = showTween
+    showTween:Play()
+
+    task.delay(4.5, function()
+        if self.NotificationGeneration ~= generation
+            or not self.NotificationFrame
+            or not self.NotificationFrame.Parent
+        then
+            return
+        end
+        if self.NotificationTween then
+            self.NotificationTween:Cancel()
+        end
+        local hideTween = TweenService:Create(
+            self.NotificationFrame,
+            TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { Position = UDim2.new(1, -16, 1, 96) }
+        )
+        self.NotificationTween = hideTween
+        hideTween:Play()
+        task.delay(0.2, function()
+            if self.NotificationGeneration == generation and self.NotificationFrame then
+                self.NotificationFrame.Visible = false
+                self.NotificationTween = nil
+            end
+        end)
+    end)
 end
 
 function UI:_ClearPage()
@@ -2477,6 +2545,65 @@ function UI:Mount()
         TextXAlignment = Enum.TextXAlignment.Right,
     }, statusFrame)
 
+    self.NotificationFrame = create("Frame", {
+        Name = "ActionErrorNotification",
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -16, 1, 96),
+        Size = UDim2.new(0.88, 0, 0, 78),
+        BackgroundColor3 = theme.Header,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 50,
+    }, self.Gui)
+    create("UISizeConstraint", {
+        MinSize = Vector2.new(210, 72),
+        MaxSize = Vector2.new(350, 84),
+    }, self.NotificationFrame)
+    addCorner(self.NotificationFrame, 6)
+    self.NotificationStroke = create("UIStroke", {
+        Color = theme.Error,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Transparency = 0.12,
+    }, self.NotificationFrame)
+    self.NotificationAccent = create("Frame", {
+        Name = "Accent",
+        Position = UDim2.fromOffset(0, 9),
+        Size = UDim2.new(0, 3, 1, -18),
+        BackgroundColor3 = theme.Error,
+        BorderSizePixel = 0,
+        ZIndex = 51,
+    }, self.NotificationFrame)
+    addCorner(self.NotificationAccent, 3)
+    self.NotificationTitle = create("TextLabel", {
+        Name = "Title",
+        Position = UDim2.fromOffset(14, 7),
+        Size = UDim2.new(1, -26, 0, 21),
+        BackgroundTransparency = 1,
+        Font = theme.StrongFont,
+        Text = "Action unavailable",
+        TextColor3 = theme.Error,
+        TextSize = theme.TextSizes.Control,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 52,
+    }, self.NotificationFrame)
+    self.NotificationMessage = create("TextLabel", {
+        Name = "Message",
+        Position = UDim2.fromOffset(14, 29),
+        Size = UDim2.new(1, -26, 1, -35),
+        BackgroundTransparency = 1,
+        Font = theme.Font,
+        Text = "",
+        TextColor3 = theme.Text,
+        TextSize = theme.TextSizes.Control,
+        TextWrapped = true,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 52,
+    }, self.NotificationFrame)
+
     self.Scroll = create("ScrollingFrame", {
         Name = "Page",
         Position = UDim2.new(0, 0, 0, layout.PageHeaderHeight),
@@ -2555,6 +2682,11 @@ end
 
 function UI:Destroy()
     self:_CloseDropdown()
+    self.NotificationGeneration += 1
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
     if self.ActiveSlider then
         self:_CommitActiveSlider()
     end
@@ -2593,6 +2725,11 @@ function UI:Destroy()
     self.WindowDrag = nil
     self.StatusLabel = nil
     self.StatusDot = nil
+    self.NotificationFrame = nil
+    self.NotificationAccent = nil
+    self.NotificationStroke = nil
+    self.NotificationTitle = nil
+    self.NotificationMessage = nil
     self.TabButtons = {}
     self.TabLabels = {}
     self.TabMarkers = {}

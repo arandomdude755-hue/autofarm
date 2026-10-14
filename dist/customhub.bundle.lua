@@ -777,8 +777,12 @@ function State.new(defaults)
         uiSize = defaults.UiSize,
         status = "Hub UI ready; Main Farm is available but disabled.",
         statusKind = "info",
+        notification = nil,
         featureEnabled = {},
     }
+    self._notificationSerial = 0
+    self._lastNotificationKey = nil
+    self._lastNotificationAt = 0
     return self
 end
 
@@ -793,6 +797,7 @@ function State:GetSnapshot()
         uiSize = self._values.uiSize,
         status = self._values.status,
         statusKind = self._values.statusKind,
+        notification = self._values.notification,
         featureEnabled = featureEnabled,
     }
 end
@@ -827,13 +832,38 @@ function State:Subscribe(listener)
     }
 end
 
-function State:SetStatus(message, kind)
+function State:_QueueErrorNotification(playerMessage)
+    local title = "Action unavailable"
+    local body = tostring(
+        playerMessage
+            or "That action couldn't be completed. Check the hub status line for details."
+    )
+    local key = title .. "\0" .. body
+    local now = os.clock()
+    if key == self._lastNotificationKey and now - self._lastNotificationAt < 1.25 then
+        return
+    end
+    self._lastNotificationKey = key
+    self._lastNotificationAt = now
+    self._notificationSerial += 1
+    self._values.notification = {
+        Id = self._notificationSerial,
+        Title = title,
+        Message = body,
+        Kind = "error",
+    }
+end
+
+function State:SetStatus(message, kind, playerMessage)
     local text = tostring(message)
     if #text > self._maxStatusCharacters then
         text = text:sub(1, self._maxStatusCharacters - 3) .. "..."
     end
     self._values.status = text
     self._values.statusKind = kind or "info"
+    if kind == "error" then
+        self:_QueueErrorNotification(playerMessage)
+    end
     self:_Notify()
 end
 
@@ -1502,6 +1532,14 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         WindowDrag = nil,
         StatusLabel = nil,
         StatusDot = nil,
+        NotificationFrame = nil,
+        NotificationAccent = nil,
+        NotificationStroke = nil,
+        NotificationTitle = nil,
+        NotificationMessage = nil,
+        NotificationTween = nil,
+        NotificationGeneration = 0,
+        LastNotificationId = 0,
         TabButtons = {},
         TabLabels = {},
         TabMarkers = {},
@@ -1981,6 +2019,9 @@ function UI:_Refresh(snapshot)
     if self.RestorePing then
         self.RestorePing.BackgroundColor3 = self.StatusLabel.TextColor3
     end
+    if snapshot.notification then
+        self:_ShowNotification(snapshot.notification)
+    end
 
     for tabName, button in pairs(self.TabButtons) do
         local selected = tabName == snapshot.selectedTab or tabName == selectedParent
@@ -2087,6 +2128,63 @@ function UI:_Refresh(snapshot)
             self.StatusLabel.TextColor3 = theme.Error
         end
     end
+end
+
+function UI:_ShowNotification(notification)
+    local frame = self.NotificationFrame
+    if not frame or not notification or notification.Id <= self.LastNotificationId then
+        return
+    end
+    self.LastNotificationId = notification.Id
+    self.NotificationGeneration += 1
+    local generation = self.NotificationGeneration
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
+
+    local theme = self.Config.Theme
+    frame.Visible = true
+    frame.Position = UDim2.new(1, -16, 1, 96)
+    self.NotificationTitle.Text = notification.Title or "Action unavailable"
+    self.NotificationMessage.Text = tostring(notification.Message or "")
+    local accent = notification.Kind == "error" and theme.Error or theme.Warning
+    self.NotificationAccent.BackgroundColor3 = accent
+    self.NotificationStroke.Color = accent
+    self.NotificationTitle.TextColor3 = accent
+
+    local showTween = TweenService:Create(
+        frame,
+        TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        { Position = UDim2.new(1, -16, 1, -16) }
+    )
+    self.NotificationTween = showTween
+    showTween:Play()
+
+    task.delay(4.5, function()
+        if self.NotificationGeneration ~= generation
+            or not self.NotificationFrame
+            or not self.NotificationFrame.Parent
+        then
+            return
+        end
+        if self.NotificationTween then
+            self.NotificationTween:Cancel()
+        end
+        local hideTween = TweenService:Create(
+            self.NotificationFrame,
+            TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { Position = UDim2.new(1, -16, 1, 96) }
+        )
+        self.NotificationTween = hideTween
+        hideTween:Play()
+        task.delay(0.2, function()
+            if self.NotificationGeneration == generation and self.NotificationFrame then
+                self.NotificationFrame.Visible = false
+                self.NotificationTween = nil
+            end
+        end)
+    end)
 end
 
 function UI:_ClearPage()
@@ -3843,6 +3941,65 @@ function UI:Mount()
         TextXAlignment = Enum.TextXAlignment.Right,
     }, statusFrame)
 
+    self.NotificationFrame = create("Frame", {
+        Name = "ActionErrorNotification",
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -16, 1, 96),
+        Size = UDim2.new(0.88, 0, 0, 78),
+        BackgroundColor3 = theme.Header,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 50,
+    }, self.Gui)
+    create("UISizeConstraint", {
+        MinSize = Vector2.new(210, 72),
+        MaxSize = Vector2.new(350, 84),
+    }, self.NotificationFrame)
+    addCorner(self.NotificationFrame, 6)
+    self.NotificationStroke = create("UIStroke", {
+        Color = theme.Error,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Transparency = 0.12,
+    }, self.NotificationFrame)
+    self.NotificationAccent = create("Frame", {
+        Name = "Accent",
+        Position = UDim2.fromOffset(0, 9),
+        Size = UDim2.new(0, 3, 1, -18),
+        BackgroundColor3 = theme.Error,
+        BorderSizePixel = 0,
+        ZIndex = 51,
+    }, self.NotificationFrame)
+    addCorner(self.NotificationAccent, 3)
+    self.NotificationTitle = create("TextLabel", {
+        Name = "Title",
+        Position = UDim2.fromOffset(14, 7),
+        Size = UDim2.new(1, -26, 0, 21),
+        BackgroundTransparency = 1,
+        Font = theme.StrongFont,
+        Text = "Action unavailable",
+        TextColor3 = theme.Error,
+        TextSize = theme.TextSizes.Control,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 52,
+    }, self.NotificationFrame)
+    self.NotificationMessage = create("TextLabel", {
+        Name = "Message",
+        Position = UDim2.fromOffset(14, 29),
+        Size = UDim2.new(1, -26, 1, -35),
+        BackgroundTransparency = 1,
+        Font = theme.Font,
+        Text = "",
+        TextColor3 = theme.Text,
+        TextSize = theme.TextSizes.Control,
+        TextWrapped = true,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 52,
+    }, self.NotificationFrame)
+
     self.Scroll = create("ScrollingFrame", {
         Name = "Page",
         Position = UDim2.new(0, 0, 0, layout.PageHeaderHeight),
@@ -3921,6 +4078,11 @@ end
 
 function UI:Destroy()
     self:_CloseDropdown()
+    self.NotificationGeneration += 1
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
     if self.ActiveSlider then
         self:_CommitActiveSlider()
     end
@@ -3959,6 +4121,11 @@ function UI:Destroy()
     self.WindowDrag = nil
     self.StatusLabel = nil
     self.StatusDot = nil
+    self.NotificationFrame = nil
+    self.NotificationAccent = nil
+    self.NotificationStroke = nil
+    self.NotificationTitle = nil
+    self.NotificationMessage = nil
     self.TabButtons = {}
     self.TabLabels = {}
     self.TabMarkers = {}
@@ -4076,9 +4243,9 @@ local function currentSeaIndex(compatibility)
     return count == 1 and found or nil
 end
 
-function TeleportFeature:_SetStatus(message, kind)
+function TeleportFeature:_SetStatus(message, kind, playerMessage)
     if self.Context and self.Context.State then
-        self.Context.State:SetStatus(message, kind or "info")
+        self.Context.State:SetStatus(message, kind or "info", playerMessage)
     end
 end
 
@@ -4262,8 +4429,24 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local mainFarm = context and context.MainFarm
     if mainFarm and mainFarm.Running then
         self:_SetFeatureEnabled(actionId, false)
-        self:_SetStatus("Turn off Start Farm before manual travel.", "warning")
+        self:_SetStatus(
+            "Travel unavailable while farming is active.",
+            "error",
+            "Turn off Start Farm first. Travel and farming can't run together."
+        )
         return false, "Auto Farm is running"
+    end
+    if self.ActiveTravel then
+        if self.ActiveTravel.Action == actionId then
+            return true
+        end
+        self:_SetFeatureEnabled(actionId, false)
+        self:_SetStatus(
+            "Travel unavailable: another trip is already active.",
+            "error",
+            "Turn off the current travel switch before starting a different trip."
+        )
+        return false, "Another trip is active"
     end
     local character, humanoid, root = compatibility:GetCharacterParts()
     if not character or not humanoid or not root then
@@ -4272,9 +4455,6 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         return false, "Character is unavailable"
     end
 
-    if self.ActiveTravel then
-        self:Cancel("Previous travel request cancelled.")
-    end
     local collisionCallOk, collisionReady, collisionError = pcall(function()
         return self.MovementService:SetFarmCollisionSuppression(true)
     end)
@@ -11876,7 +12056,12 @@ function MainFarm:Start()
     end
     local teleportFeature = self.Context and self.Context.TeleportFeature
     if teleportFeature and teleportFeature:IsTraveling() then
-        teleportFeature:Cancel("Auto Farm started; manual travel was cancelled.")
+        self.Context.State:SetStatus(
+            "Auto Farm unavailable while travel is active.",
+            "error",
+            "Turn off Travel to Island or Travel to NPC before starting Auto Farm."
+        )
+        return false, "Manual travel is active"
     end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then

@@ -12,8 +12,12 @@ function State.new(defaults)
         uiSize = defaults.UiSize,
         status = "Hub UI ready; Main Farm is available but disabled.",
         statusKind = "info",
+        notification = nil,
         featureEnabled = {},
     }
+    self._notificationSerial = 0
+    self._lastNotificationKey = nil
+    self._lastNotificationAt = 0
     return self
 end
 
@@ -28,6 +32,7 @@ function State:GetSnapshot()
         uiSize = self._values.uiSize,
         status = self._values.status,
         statusKind = self._values.statusKind,
+        notification = self._values.notification,
         featureEnabled = featureEnabled,
     }
 end
@@ -62,13 +67,38 @@ function State:Subscribe(listener)
     }
 end
 
-function State:SetStatus(message, kind)
+function State:_QueueErrorNotification(playerMessage)
+    local title = "Action unavailable"
+    local body = tostring(
+        playerMessage
+            or "That action couldn't be completed. Check the hub status line for details."
+    )
+    local key = title .. "\0" .. body
+    local now = os.clock()
+    if key == self._lastNotificationKey and now - self._lastNotificationAt < 1.25 then
+        return
+    end
+    self._lastNotificationKey = key
+    self._lastNotificationAt = now
+    self._notificationSerial += 1
+    self._values.notification = {
+        Id = self._notificationSerial,
+        Title = title,
+        Message = body,
+        Kind = "error",
+    }
+end
+
+function State:SetStatus(message, kind, playerMessage)
     local text = tostring(message)
     if #text > self._maxStatusCharacters then
         text = text:sub(1, self._maxStatusCharacters - 3) .. "..."
     end
     self._values.status = text
     self._values.statusKind = kind or "info"
+    if kind == "error" then
+        self:_QueueErrorNotification(playerMessage)
+    end
     self:_Notify()
 end
 

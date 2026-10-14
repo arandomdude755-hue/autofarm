@@ -66,9 +66,10 @@ require(
 )
 require(
     "mainFarm and mainFarm.Running" in FEATURE
-    and 'teleportFeature:Cancel("Auto Farm started; manual travel was cancelled.")' in MAIN_FARM
+    and "Turn off Travel to Island or Travel to NPC before starting Auto Farm." in MAIN_FARM
+    and "Turn off Start Farm first. Travel and farming can't run together." in FEATURE
     and "function TeleportFeature:Cancel(message)" in FEATURE,
-    "travel and Auto Farm must be mutually exclusive and Auto Farm must stop active travel",
+    "travel and Auto Farm conflicts must be blocked with player-facing explanations",
 )
 require(
     "MovementService.new(compatibility" in MANAGER
