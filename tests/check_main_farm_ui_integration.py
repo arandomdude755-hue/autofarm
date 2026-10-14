@@ -166,7 +166,8 @@ require('Name = "Option_" .. tostring(value)' in UI
         "Each weapon option must dispatch its selected value immediately")
 require('Name = "DropdownValue"' in UI
         and 'Name = "DropdownMenu"' in UI
-        and "function UI:_OpenDropdown(entry)" in UI
+        and "function UI:_OpenDropdown(entry, searchEnabled)" in UI
+        and "function UI:_RenderDropdownOptions(active, query)" in UI
         and "pcall(self.Dispatch, entry.Control.Action, value)" in UI
         and 'Kind = "dropdown"' in UI,
         "Weapon category dropdown must open choices and dispatch the selected category")
@@ -176,15 +177,27 @@ require('control.Kind == "settingSlider"' in UI
         and 'entry.PendingValue' in UI
         and 'track.InputBegan' in UI,
         "Aura distance slider must support touch/mouse drag and dispatch its selected value")
-dropdown_open = function_body(UI, "function UI:_OpenDropdown(entry)", "\nfunction UI:_ToggleDropdown")
-dropdown_close = function_body(UI, "function UI:_CloseDropdown()", "\nfunction UI:_OpenDropdown")
+dropdown_open = function_body(UI, "function UI:_OpenDropdown(entry, searchEnabled)", "\nfunction UI:_HandleDropdownTap")
+dropdown_render = function_body(UI, "function UI:_RenderDropdownOptions(active, query)", "\nfunction UI:_OpenDropdown")
+dropdown_close = function_body(UI, "function UI:_CloseDropdown()", "\nfunction UI:_RenderDropdownOptions")
 clear_page = function_body(UI, "function UI:_ClearPage()", "\nfunction UI:_SyncControlGridHeight")
 require("DropdownDismissOverlay" in dropdown_open
-        and "overlay.Activated" in dropdown_open
-        and "optionButton.Activated" in dropdown_open
+        and "UserInputService.InputBegan" in dropdown_open
+        and "pointInside(menu, position)" in dropdown_open
+        and "optionButton.Activated" in dropdown_render
         and "instance:Destroy()" in dropdown_close
         and "self:_CloseDropdown()" in clear_page,
         "dropdown dismissal, option selection, and page cleanup must close the popup")
+dropdown_tap = function_body(UI, "function UI:_HandleDropdownTap(entry)", "\nfunction UI:_ToggleDropdown")
+require("previous.Entry == entry" in dropdown_tap
+        and "now - previous.At <= 0.45" in dropdown_tap
+        and "self:_OpenDropdown(entry, true)" in dropdown_tap
+        and 'Name = "DropdownSearch"' in dropdown_open
+        and 'PlaceholderText = "Search options..."' in dropdown_open
+        and 'GetPropertyChangedSignal("Text")' in dropdown_open
+        and "normalizedQuery" in dropdown_render
+        and '"No matching options"' in dropdown_render,
+        "double-clicking a dropdown must open case-insensitive option search with empty-state feedback")
 require("for _, featureModule in ipairs(self.Modules) do" in dispatch
         and "featureModule.Handle" in dispatch,
         "FeatureManager must dispatch the action to the registered feature modules")

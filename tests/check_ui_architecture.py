@@ -176,7 +176,8 @@ require("local anchor = entry.Row or entry.Button" in UI_MODULE
         and "Button = row" in UI_MODULE
         and "}, self.Root)" in UI_MODULE
         and "}, overlay)" in UI_MODULE
-        and "Position = UDim2.fromOffset(0, (index - 1) * optionHeight)" in UI_MODULE
+        and "Position = UDim2.fromOffset(0, y)" in UI_MODULE
+        and "y += optionHeight" in UI_MODULE
         and "Size = UDim2.new(1, 0, 0, optionHeight)" in UI_MODULE
         and "DropdownOptionHeight = 44" in CONFIG
         and "TextSize = 13" in UI_MODULE

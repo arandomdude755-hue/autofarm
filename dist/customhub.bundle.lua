@@ -1812,6 +1812,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         SliderEntries = {},
         ActiveSlider = nil,
         ActiveDropdown = nil,
+        LastDropdownTap = nil,
         ActiveTweens = {},
         TweenCompletedConnections = {},
         PressedButtonScale = nil,
@@ -2897,7 +2898,13 @@ function UI:_CloseDropdown()
         return
     end
     self.ActiveDropdown = nil
+    self.LastDropdownTap = nil
     for _, connection in ipairs(dropdown.Connections) do
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+    end
+    for _, connection in ipairs(dropdown.OptionConnections or {}) do
         if connection and connection.Connected then
             connection:Disconnect()
         end
@@ -2914,7 +2921,94 @@ function UI:_CloseDropdown()
     end
 end
 
-function UI:_OpenDropdown(entry)
+function UI:_RenderDropdownOptions(active, query)
+    if not active or not active.OptionList then
+        return
+    end
+    for _, connection in ipairs(active.OptionConnections) do
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+    end
+    table.clear(active.OptionConnections)
+    for _, instance in ipairs(active.OptionInstances) do
+        if instance and instance.Parent then
+            instance:Destroy()
+        end
+    end
+    table.clear(active.OptionInstances)
+
+    local normalizedQuery = string.lower(tostring(query or ""))
+    local entry = active.Entry
+    local theme = self.Config.Theme
+    local optionHeight = active.OptionHeight
+    local y = 0
+    local matchCount = 0
+    for _, value in ipairs(entry.Options) do
+        local label = tostring(value)
+        if normalizedQuery == ""
+            or string.find(string.lower(label), normalizedQuery, 1, true)
+        then
+            local selected = value == entry.SelectedValue
+            local optionButton = create("TextButton", {
+                Name = "DropdownOption_" .. label:gsub("[^%w]", "_"),
+                Position = UDim2.fromOffset(0, y),
+                Size = UDim2.new(1, 0, 0, optionHeight),
+                BackgroundColor3 = selected and theme.Selected or theme.Panel,
+                BorderSizePixel = 0,
+                AutoButtonColor = false,
+                Font = theme.StrongFont,
+                Text = label,
+                TextColor3 = selected and theme.Accent or theme.Text,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                ZIndex = 62,
+            }, active.OptionList)
+            create("UIPadding", {
+                PaddingLeft = UDim.new(0, 14),
+                PaddingRight = UDim.new(0, 14),
+            }, optionButton)
+            self:_AttachButtonFeedback(optionButton, active.OptionConnections, 0.97)
+            table.insert(active.OptionInstances, optionButton)
+            table.insert(active.OptionConnections, optionButton.Activated:Connect(function()
+                self:_CloseDropdown()
+                local ok, result, actionError =
+                    pcall(self.Dispatch, entry.Control.Action, value)
+                if not ok then
+                    self.State:SetStatus("UI action error: " .. tostring(result), "error")
+                elseif result == false and actionError then
+                    self.State:SetStatus(tostring(actionError), "error")
+                end
+            end))
+            y += optionHeight
+            matchCount += 1
+        end
+    end
+
+    if matchCount == 0 then
+        local empty = create("TextLabel", {
+            Name = "DropdownNoResults",
+            Position = UDim2.fromOffset(0, 0),
+            Size = UDim2.new(1, 0, 0, optionHeight),
+            BackgroundTransparency = 1,
+            Font = theme.Font,
+            Text = "No matching options",
+            TextColor3 = theme.MutedText,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            ZIndex = 62,
+        }, active.OptionList)
+        table.insert(active.OptionInstances, empty)
+        y = optionHeight
+    end
+
+    active.OptionList.CanvasPosition = Vector2.new(0, 0)
+    active.OptionList.CanvasSize = UDim2.fromOffset(0, y)
+    active.OptionList.ScrollingEnabled = y > active.OptionList.AbsoluteSize.Y
+end
+
+function UI:_OpenDropdown(entry, searchEnabled)
     self:_CloseDropdown()
     local settings = self:_GetControlSettings(entry.Control)
     local selectedValue = entry.Setting == "UiSize"
@@ -2931,7 +3025,8 @@ function UI:_OpenDropdown(entry)
     local theme = self.Config.Theme
     local scale = self.RootScale and self.RootScale.Scale or 1
     local optionHeight = layout.DropdownOptionHeight
-    local totalHeight = optionHeight * #options
+    local searchHeight = searchEnabled and 38 or 0
+    local totalHeight = optionHeight * #options + searchHeight
     local anchor = entry.Row or entry.Button
     local rootPosition = self.Root.AbsolutePosition
     local rootSize = self.Root.AbsoluteSize
@@ -2949,7 +3044,7 @@ function UI:_OpenDropdown(entry)
         or belowAvailable >= aboveAvailable
     local availableHeight = openBelow and belowAvailable or aboveAvailable
     local menuHeight = math.min(totalHeight, availableHeight)
-    if menuHeight < 1 then
+    if menuHeight < 1 or (searchEnabled and menuHeight <= searchHeight) then
         self.State:SetStatus("There is not enough room to open this selector.", "error")
         return false
     end
@@ -2958,7 +3053,10 @@ function UI:_OpenDropdown(entry)
     local active = {
         Entry = entry,
         Connections = {},
+        OptionConnections = {},
+        OptionInstances = {},
         Instances = {},
+        OptionHeight = optionHeight,
     }
     self.ActiveDropdown = active
     self:_SetDropdownOpenVisual(entry, true)
@@ -2975,41 +3073,13 @@ function UI:_OpenDropdown(entry)
         ZIndex = 50,
     }, self.Root)
     table.insert(active.Instances, overlay)
-    table.insert(active.Connections, overlay.Activated:Connect(function()
-        self:_CloseDropdown()
-    end))
-    table.insert(active.Connections, UserInputService.InputBegan:Connect(function(input)
-        local inputType = input.UserInputType
-        if inputType ~= Enum.UserInputType.Touch
-            and inputType ~= Enum.UserInputType.MouseButton1 then
-            return
-        end
-        local rootPosition = self.Root.AbsolutePosition
-        local rootSize = self.Root.AbsoluteSize
-        local position = input.Position
-        local outsideRoot = position.X < rootPosition.X
-            or position.X > rootPosition.X + rootSize.X
-            or position.Y < rootPosition.Y
-            or position.Y > rootPosition.Y + rootSize.Y
-        if outsideRoot then
-            self:_CloseDropdown()
-        end
-    end))
-
-    local menu = create("ScrollingFrame", {
+    local menu = create("Frame", {
         Name = "DropdownMenu",
         Position = UDim2.fromOffset(left, top),
         Size = UDim2.fromOffset(menuWidth, menuHeight),
         BackgroundColor3 = theme.Panel,
         BorderSizePixel = 0,
-        ScrollBarThickness = 2,
-        ScrollBarImageColor3 = theme.Accent,
-        CanvasSize = UDim2.fromOffset(0, totalHeight),
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-        ScrollingEnabled = totalHeight > menuHeight,
-        AutomaticCanvasSize = Enum.AutomaticSize.None,
         ClipsDescendants = true,
-        Active = true,
         ZIndex = 60,
     }, overlay)
     addCorner(menu, 4)
@@ -3020,39 +3090,116 @@ function UI:_OpenDropdown(entry)
     }, menu)
     table.insert(active.Instances, menu)
 
-    for index, value in ipairs(options) do
-        local selected = value == entry.SelectedValue
-        local optionButton = create("TextButton", {
-            Name = "DropdownOption_" .. tostring(value):gsub("[^%w]", "_"),
-            Position = UDim2.fromOffset(0, (index - 1) * optionHeight),
-            Size = UDim2.new(1, 0, 0, optionHeight),
-            BackgroundColor3 = selected and theme.Selected or theme.Panel,
+    if searchEnabled then
+        local searchBox = create("TextBox", {
+            Name = "DropdownSearch",
+            Position = UDim2.fromOffset(7, 5),
+            Size = UDim2.new(1, -14, 0, searchHeight - 10),
+            BackgroundColor3 = theme.TabBar,
             BorderSizePixel = 0,
-            AutoButtonColor = false,
-            Font = theme.StrongFont,
-            Text = tostring(value),
-            TextColor3 = selected and theme.Accent or theme.Text,
-            TextSize = 13,
+            ClearTextOnFocus = false,
+            Font = theme.Font,
+            PlaceholderText = "Search options...",
+            PlaceholderColor3 = theme.MutedText,
+            Text = "",
+            TextColor3 = theme.Text,
+            TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            ZIndex = 61,
+            ZIndex = 62,
         }, menu)
+        addCorner(searchBox, 3)
         create("UIPadding", {
-            PaddingLeft = UDim.new(0, 14),
-            PaddingRight = UDim.new(0, 14),
-        }, optionButton)
-        self:_AttachButtonFeedback(optionButton, active.Connections, 0.97)
-        table.insert(active.Connections, optionButton.Activated:Connect(function()
-            self:_CloseDropdown()
-            local ok, result, actionError = pcall(self.Dispatch, entry.Control.Action, value)
-            if not ok then
-                self.State:SetStatus("UI action error: " .. tostring(result), "error")
-            elseif result == false and actionError then
-                self.State:SetStatus(tostring(actionError), "error")
+            PaddingLeft = UDim.new(0, 9),
+            PaddingRight = UDim.new(0, 9),
+        }, searchBox)
+        active.SearchBox = searchBox
+    end
+
+    local optionList = create("ScrollingFrame", {
+        Name = "DropdownOptions",
+        Position = UDim2.fromOffset(0, searchHeight),
+        Size = UDim2.new(1, 0, 1, -searchHeight),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = theme.Accent,
+        CanvasSize = UDim2.fromOffset(0, optionHeight * #options),
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ScrollingEnabled = optionHeight * #options > menuHeight - searchHeight,
+        AutomaticCanvasSize = Enum.AutomaticSize.None,
+        ClipsDescendants = true,
+        Active = true,
+        ZIndex = 61,
+    }, menu)
+    active.OptionList = optionList
+
+    local function pointInside(guiObject, position)
+        if not guiObject or not guiObject.Parent then
+            return false
+        end
+        local objectPosition = guiObject.AbsolutePosition
+        local objectSize = guiObject.AbsoluteSize
+        return position.X >= objectPosition.X
+            and position.X <= objectPosition.X + objectSize.X
+            and position.Y >= objectPosition.Y
+            and position.Y <= objectPosition.Y + objectSize.Y
+    end
+
+    table.insert(active.Connections, UserInputService.InputBegan:Connect(function(input)
+        local inputType = input.UserInputType
+        if inputType ~= Enum.UserInputType.Touch
+            and inputType ~= Enum.UserInputType.MouseButton1 then
+            return
+        end
+        local position = input.Position
+        if pointInside(menu, position) then
+            return
+        end
+        if pointInside(entry.Row or entry.Button, position) then
+            self:_HandleDropdownTap(entry)
+            return
+        end
+        self:_CloseDropdown()
+    end))
+
+    self:_RenderDropdownOptions(active, "")
+    if active.SearchBox then
+        table.insert(active.Connections, active.SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            if self.ActiveDropdown == active then
+                self:_RenderDropdownOptions(active, active.SearchBox.Text)
             end
         end))
+        active.SearchBox:CaptureFocus()
     end
     return true
+end
+
+function UI:_HandleDropdownTap(entry)
+    local control = entry.Control
+    local lockSetting = control and control.LockedBySetting
+    local settings = self:_GetControlSettings(control)
+    if lockSetting and settings[lockSetting] == true then
+        self.LastDropdownTap = nil
+        self:_ToggleDropdown(entry)
+        return
+    end
+
+    local now = os.clock()
+    local previous = self.LastDropdownTap
+    local isDoubleTap = previous
+        and previous.Entry == entry
+        and now - previous.At <= 0.45
+    if isDoubleTap then
+        self.LastDropdownTap = nil
+        self:_OpenDropdown(entry, true)
+        return
+    end
+
+    self:_ToggleDropdown(entry)
+    self.LastDropdownTap = {
+        Entry = entry,
+        At = now,
+    }
 end
 
 function UI:_ToggleDropdown(entry)
@@ -3073,7 +3220,7 @@ function UI:_ToggleDropdown(entry)
         )
         return
     end
-    self:_OpenDropdown(entry)
+    self:_OpenDropdown(entry, false)
 end
 
 function UI:_UpdateSliderVisual(entry, value)
@@ -3460,7 +3607,7 @@ function UI:_AddControl(control)
         }
         table.insert(self.SelectorEntries, entry)
         self:_Connect(self.PageConnections, row.Activated, function()
-            local ok, actionError = pcall(self._ToggleDropdown, self, entry)
+            local ok, actionError = pcall(self._HandleDropdownTap, self, entry)
             if not ok then
                 self.State:SetStatus("UI action error: " .. tostring(actionError), "error")
             end
