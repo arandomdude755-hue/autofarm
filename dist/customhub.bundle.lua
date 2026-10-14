@@ -6134,6 +6134,7 @@ function MovementService.new(compatibility, report)
         FarmCollisionCharacterAddedConnection = nil,
         FarmCollisionCharacterRemovingConnection = nil,
         FarmCollisionDescendantAddedConnection = nil,
+        FarmCollisionSteppedConnection = nil,
         FarmCollisionOriginals = {},
         FarmCollisionPartConnections = {},
         FarmCollisionErrorReported = false,
@@ -6306,17 +6307,19 @@ end
 function MovementService:_StartFarmCollisionMaintenance()
     self.FarmCollisionMaintenanceGeneration += 1
     local generation = self.FarmCollisionMaintenanceGeneration
-    task.spawn(function()
-        while self.FarmCollisionActive
-            and self.FarmCollisionMaintenanceGeneration == generation
-        do
-            task.wait(0.2)
-            if not self.FarmCollisionActive
-                or self.FarmCollisionMaintenanceGeneration ~= generation
-            then
-                break
-            end
+    disconnect(self.FarmCollisionSteppedConnection)
+    self.FarmCollisionSteppedConnection = self.Compatibility.RunService.Stepped:Connect(function()
+        if not self.FarmCollisionActive
+            or self.FarmCollisionMaintenanceGeneration ~= generation
+        then
+            return
+        end
 
+        -- Reassert collision suppression before each physics step, but only
+        -- across the cached, event-maintained character parts. This prevents
+        -- game scripts from restoring CanCollide between low-frequency checks
+        -- without rescanning the character hierarchy every frame.
+        do
             local ok, err = pcall(self._MaintainFarmCollision, self)
             if ok then
                 self.FarmCollisionErrorReported = false
@@ -6382,6 +6385,8 @@ function MovementService:SetFarmCollisionSuppression(enabled)
     if not enabled then
         self.FarmCollisionActive = false
         self.FarmCollisionMaintenanceGeneration += 1
+        disconnect(self.FarmCollisionSteppedConnection)
+        self.FarmCollisionSteppedConnection = nil
         disconnect(self.FarmCollisionCharacterAddedConnection)
         disconnect(self.FarmCollisionCharacterRemovingConnection)
         self.FarmCollisionCharacterAddedConnection = nil
@@ -6423,6 +6428,8 @@ function MovementService:SetFarmCollisionSuppression(enabled)
     if not ok then
         self.FarmCollisionActive = false
         self.FarmCollisionMaintenanceGeneration += 1
+        disconnect(self.FarmCollisionSteppedConnection)
+        self.FarmCollisionSteppedConnection = nil
         disconnect(self.FarmCollisionCharacterAddedConnection)
         disconnect(self.FarmCollisionCharacterRemovingConnection)
         self.FarmCollisionCharacterAddedConnection = nil

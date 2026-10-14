@@ -153,9 +153,9 @@ require(
 require(
     "for part in pairs(self.FarmCollisionOriginals)" in collision_maintenance
     and "GetDescendants" not in collision_maintenance
-    and "task.wait(0.2)" in collision_maintenance_loop
+    and "Stepped:Connect" in collision_maintenance_loop
     and "pcall(self._MaintainFarmCollision, self)" in collision_maintenance_loop,
-    "noclip safety checks must be low-frequency and limited to already tracked character parts",
+    "noclip must reassert before physics using only already tracked character parts",
 )
 require(
     "active.Goal = root.CFrame" in hold_position

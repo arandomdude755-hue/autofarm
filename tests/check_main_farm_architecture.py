@@ -96,6 +96,7 @@ for token in (
     "FarmCollisionCharacterAddedConnection",
     "FarmCollisionCharacterRemovingConnection",
     "FarmCollisionDescendantAddedConnection",
+    "FarmCollisionSteppedConnection",
     "FarmCollisionCharacter",
     "FarmCollisionOriginals",
     "function MovementService:SetFarmCollisionSuppression(enabled)",
@@ -113,9 +114,10 @@ collision_lifecycle = movement[
 ]
 require(
     "Heartbeat:Connect" not in collision_lifecycle
+    and "Stepped:Connect" in collision_lifecycle
     and "CharacterAdded:Connect" in collision_lifecycle
     and "CharacterRemoving:Connect" in collision_lifecycle,
-    "farm collision suppression must not rescan the full character on every Heartbeat and must handle respawns",
+    "farm collision suppression must reassert before physics without per-frame hierarchy scans and handle respawns",
 )
 for token in ('"RE/RegisterAttack"', 'RemoteEvent("RegisterHit", true)', "CanAttack", "GetRigOfHitPart"):
     require(token in combat or token in (CUSTOM_HUB / "Compatibility.lua").read_text(encoding="utf-8"),
