@@ -28,9 +28,16 @@ MODULES = (
         {},
     ),
     (
+        "CustomHub.Features.MapGatewayService",
+        "src/ReplicatedStorage/CustomHub/Features/MapGatewayService.lua",
+        {},
+    ),
+    (
         "CustomHub.Features.TeleportFeature",
         "src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua",
-        {},
+        {
+            "require(script.Parent.MapGatewayService)": '__bundleLoad("CustomHub.Features.MapGatewayService")',
+        },
     ),
     (
         "CustomHub.Features.Farm.QuestService",

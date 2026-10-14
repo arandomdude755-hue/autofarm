@@ -231,6 +231,43 @@ function Compatibility:GetCommF()
     return commF
 end
 
+function Compatibility:CanSimulateTouch()
+    local ok, touchFunction = pcall(function()
+        return firetouchinterest
+    end)
+    return ok and type(touchFunction) == "function"
+end
+
+function Compatibility:TouchPart(touchingPart, targetPart, isCurrent)
+    if not touchingPart or not touchingPart.Parent or not targetPart or not targetPart.Parent then
+        return false, "Gateway touch parts are unavailable"
+    end
+    if type(isCurrent) == "function" and not isCurrent() then
+        return false, "Gateway touch was cancelled"
+    end
+    local ok, touchFunction = pcall(function()
+        return firetouchinterest
+    end)
+    if not ok or type(touchFunction) ~= "function" then
+        return false, "This client cannot activate the map gateway touch trigger"
+    end
+
+    local began, beginError = pcall(touchFunction, touchingPart, targetPart, 0)
+    if not began then
+        return false, "Gateway touch could not begin: " .. tostring(beginError)
+    end
+    task.wait(0.15)
+    if type(isCurrent) == "function" and not isCurrent() then
+        pcall(touchFunction, touchingPart, targetPart, 1)
+        return false, "Gateway touch was cancelled"
+    end
+    local ended, endError = pcall(touchFunction, touchingPart, targetPart, 1)
+    if not ended then
+        return false, "Gateway touch could not finish: " .. tostring(endError)
+    end
+    return true
+end
+
 function Compatibility:HasOwnedInventoryItem(itemName)
     local now = os.clock()
     self.OwnedInventoryCache = self.OwnedInventoryCache or {}

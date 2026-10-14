@@ -1142,6 +1142,43 @@ function Compatibility:GetCommF()
     return commF
 end
 
+function Compatibility:CanSimulateTouch()
+    local ok, touchFunction = pcall(function()
+        return firetouchinterest
+    end)
+    return ok and type(touchFunction) == "function"
+end
+
+function Compatibility:TouchPart(touchingPart, targetPart, isCurrent)
+    if not touchingPart or not touchingPart.Parent or not targetPart or not targetPart.Parent then
+        return false, "Gateway touch parts are unavailable"
+    end
+    if type(isCurrent) == "function" and not isCurrent() then
+        return false, "Gateway touch was cancelled"
+    end
+    local ok, touchFunction = pcall(function()
+        return firetouchinterest
+    end)
+    if not ok or type(touchFunction) ~= "function" then
+        return false, "This client cannot activate the map gateway touch trigger"
+    end
+
+    local began, beginError = pcall(touchFunction, touchingPart, targetPart, 0)
+    if not began then
+        return false, "Gateway touch could not begin: " .. tostring(beginError)
+    end
+    task.wait(0.15)
+    if type(isCurrent) == "function" and not isCurrent() then
+        pcall(touchFunction, touchingPart, targetPart, 1)
+        return false, "Gateway touch was cancelled"
+    end
+    local ended, endError = pcall(touchFunction, touchingPart, targetPart, 1)
+    if not ended then
+        return false, "Gateway touch could not finish: " .. tostring(endError)
+    end
+    return true
+end
+
 function Compatibility:HasOwnedInventoryItem(itemName)
     local now = os.clock()
     self.OwnedInventoryCache = self.OwnedInventoryCache or {}
@@ -4237,11 +4274,330 @@ return PlaceholderFeatures
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Features/PlaceholderFeatures.lua
 end
 
+__bundleFactories["CustomHub.Features.MapGatewayService"] = function()
+-- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/MapGatewayService.lua
+local MapGatewayService = {}
+MapGatewayService.__index = MapGatewayService
+
+local MINIMUM_DISTANCE_SAVED = 1500
+local MAX_ROUTE_HOPS = 4
+local FAILED_ROUTE_COOLDOWN = 120
+
+local ROUTES_BY_SEA = {
+    [1] = {
+        {
+            Name = "Enter Underwater City",
+            Stand = Vector3.new(4050, 6, -1815),
+            Destination = Vector3.new(61163.85, 11.6797, 1819.78),
+        },
+        {
+            Name = "Leave Underwater City",
+            Stand = Vector3.new(61170, 1, 1952),
+            Destination = Vector3.new(3864.69, 6.74, -1926.21),
+        },
+    },
+    [2] = {
+        {
+            Name = "Enter Ghost Ship",
+            Stand = Vector3.new(-6499, 91, -127),
+            Destination = Vector3.new(923, 126, 32852),
+        },
+        {
+            Name = "Leave Ghost Ship",
+            Stand = Vector3.new(920, 155, 32838),
+            Destination = Vector3.new(-6509, 89, -133),
+        },
+    },
+    [3] = {
+        {
+            Name = "Castle to Mansion",
+            Stand = Vector3.new(-5060.41, 318.5, -3193.22),
+            Destination = Vector3.new(-12463.60, 378.33, -7566.08),
+            Requires = "Valkyrie Helm",
+        },
+        {
+            Name = "Mansion to Castle",
+            Stand = Vector3.new(-12463.60, 378.33, -7566.08),
+            Destination = Vector3.new(-5060.41, 318.5, -3193.22),
+            Requires = "Valkyrie Helm",
+        },
+        {
+            Name = "Castle to Hydra",
+            Stand = Vector3.new(-5027.03, 318.5, -3206.70),
+            Destination = Vector3.new(5650.95, 1017.27, -350.38),
+            Requires = "Valkyrie Helm",
+        },
+        {
+            Name = "Hydra to Castle",
+            Stand = Vector3.new(5650.95, 1017.27, -350.38),
+            Destination = Vector3.new(-5027.03, 318.5, -3206.70),
+            Requires = "Valkyrie Helm",
+        },
+        {
+            Name = "Castle to Tiki",
+            Stand = Vector3.new(-5097.13, 318.5, -3178.40),
+            Destination = Vector3.new(-16814, 58, 304),
+            Map = "Boat Castle",
+            Touch = "MapTeleportC",
+            Requires = "Feathered Visage",
+        },
+        {
+            Name = "Tiki to Castle",
+            Stand = Vector3.new(-16799.09, 84.32, 291.07),
+            Destination = Vector3.new(-5084.73, 318.5, -3155.86),
+            Map = "TikiOutpost",
+            Touch = "MapTeleportC",
+            Requires = "Feathered Visage",
+        },
+        {
+            Name = "Enter Beautiful Pirate Domain",
+            Part = "WaterfallBossHitbox",
+            Argument = "WaterfallBossHitbox",
+        },
+        {
+            Name = "Leave Beautiful Pirate Domain",
+            Part = "TurtleEntranceBoss",
+            Argument = "TurtleEntranceBoss",
+        },
+    },
+}
+
+local function distance(first, second)
+    return (first - second).Magnitude
+end
+
+function MapGatewayService.new(compatibility)
+    return setmetatable({
+        Compatibility = compatibility,
+        FailedUntil = {},
+    }, MapGatewayService)
+end
+
+function MapGatewayService:_CurrentSeaIndex()
+    local compatibility = self.Compatibility
+    local found
+    local count = 0
+    for index, method in ipairs({ "IsFirstSea", "IsSecondSea", "IsThirdSea" }) do
+        local check = compatibility and compatibility[method]
+        if type(check) == "function" then
+            local ok, result = pcall(check, compatibility)
+            if ok and result == true then
+                found = index
+                count += 1
+            end
+        end
+    end
+    return count == 1 and found or nil
+end
+
+function MapGatewayService:_ResolveStand(route)
+    if route.Stand then
+        return route.Stand
+    end
+    if not route.Part then
+        return nil
+    end
+
+    local workspace = self.Compatibility and self.Compatibility.Workspace
+    local instance = workspace and workspace:FindFirstChild(route.Part, true)
+    if not instance then
+        return nil
+    end
+    if instance:IsA("BasePart") then
+        return instance.Position
+    elseif instance:IsA("Model") then
+        return instance:GetPivot().Position
+    end
+    return nil
+end
+
+function MapGatewayService:_ResolveTouchTarget(route)
+    local compatibility = self.Compatibility
+    if not compatibility or not compatibility.CanSimulateTouch
+        or not compatibility:CanSimulateTouch()
+    then
+        return nil
+    end
+    local workspace = compatibility.Workspace
+    local mapRoot = workspace and workspace:FindFirstChild("Map")
+    local map = mapRoot and mapRoot:FindFirstChild(route.Map or "Boat Castle")
+    local trigger = map and map:FindFirstChild(route.Touch)
+    local collectionService = compatibility.CollectionService
+    if not trigger or not collectionService then
+        return nil
+    end
+    local tagOk, tagged = pcall(collectionService.HasTag, collectionService, trigger, "BoatCastleTeleporter")
+    if not tagOk or tagged ~= true then
+        return nil
+    end
+    local hitbox = trigger:FindFirstChild("Hitbox")
+    return hitbox and hitbox:IsA("BasePart") and hitbox or nil
+end
+
+function MapGatewayService:_GetAvailableRoutes(seaIndex)
+    local compatibility = self.Compatibility
+    local now = os.clock()
+    local routes = {}
+    for _, source in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
+        if now >= (self.FailedUntil[source.Name] or 0) then
+            local available = true
+            if source.Requires then
+                local checkOk, owned = pcall(
+                    compatibility.HasOwnedInventoryItem,
+                    compatibility,
+                    source.Requires
+                )
+                available = checkOk and owned == true
+            end
+
+            local stand = available and self:_ResolveStand(source) or nil
+            available = available and typeof(stand) == "Vector3"
+            local touchTarget
+            if available and source.Touch then
+                touchTarget = self:_ResolveTouchTarget(source)
+                available = touchTarget ~= nil
+            end
+
+            if available then
+                local route = table.clone(source)
+                route.Stand = stand
+                route.TouchTarget = touchTarget
+                table.insert(routes, route)
+            end
+        end
+    end
+    return routes
+end
+
+function MapGatewayService:FindPlan(destination, currentPosition)
+    if typeof(destination) ~= "Vector3" or typeof(currentPosition) ~= "Vector3" then
+        return {}, "Travel positions are unavailable"
+    end
+    local seaIndex = self:_CurrentSeaIndex()
+    if not seaIndex then
+        return {}, "Current sea is unavailable"
+    end
+
+    local routes = self:_GetAvailableRoutes(seaIndex)
+    local function findBest(position, remainingHops, used)
+        local bestCost = distance(position, destination)
+        local bestPath = {}
+        if remainingHops <= 0 then
+            return bestCost, bestPath
+        end
+
+        for _, route in ipairs(routes) do
+            if not used[route.Name] then
+                used[route.Name] = true
+                local remainingCost, remainingPath =
+                    findBest(route.Destination, remainingHops - 1, used)
+                used[route.Name] = nil
+                local routeCost = distance(position, route.Stand) + remainingCost
+                if routeCost < bestCost then
+                    bestCost = routeCost
+                    bestPath = { route }
+                    for _, nextRoute in ipairs(remainingPath) do
+                        table.insert(bestPath, nextRoute)
+                    end
+                end
+            end
+        end
+        return bestCost, bestPath
+    end
+
+    local directDistance = distance(currentPosition, destination)
+    local plannedCost, plan = findBest(currentPosition, MAX_ROUTE_HOPS, {})
+    if #plan == 0 or directDistance - plannedCost < MINIMUM_DISTANCE_SAVED then
+        return {}, nil
+    end
+    return plan, nil
+end
+
+function MapGatewayService:MarkFailed(route)
+    if route and route.Name then
+        self.FailedUntil[route.Name] = os.clock() + FAILED_ROUTE_COOLDOWN
+    end
+end
+
+function MapGatewayService:Use(route, isCurrent)
+    local compatibility = self.Compatibility
+    isCurrent = isCurrent or function()
+        return true
+    end
+    if not route or not isCurrent() then
+        return false, "Travel was cancelled"
+    end
+
+    local character, _, root = compatibility:GetCharacterParts()
+    if not character or not root then
+        return false, "Character is unavailable"
+    end
+
+    local requestResult
+    if route.TouchTarget then
+        local touchOk, touchError = compatibility:TouchPart(
+            root,
+            route.TouchTarget,
+            isCurrent
+        )
+        if not touchOk then
+            return false, touchError
+        end
+    else
+        local remote, remoteError = compatibility:GetCommF()
+        if not remote then
+            return false, remoteError
+        end
+        task.spawn(function()
+            if not isCurrent() then
+                requestResult = { Ok = false, Result = "Travel was cancelled" }
+                return
+            end
+            local ok, result = pcall(function()
+                return remote:InvokeServer(
+                    "requestEntrance",
+                    route.Argument or route.Destination
+                )
+            end)
+            requestResult = { Ok = ok, Result = result }
+        end)
+    end
+
+    local deadline = os.clock() + 8
+    while isCurrent() and os.clock() < deadline do
+        local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
+        if currentCharacter ~= character or not currentRoot then
+            return false, "Character changed during gateway travel"
+        end
+        if distance(currentRoot.Position, route.Destination) <= 200 then
+            self.FailedUntil[route.Name] = nil
+            return true
+        end
+        if requestResult and not requestResult.Ok then
+            self:MarkFailed(route)
+            return false, "Gateway request failed: " .. tostring(requestResult.Result)
+        end
+        task.wait(0.1)
+    end
+    if not isCurrent() then
+        return false, "Travel was cancelled"
+    end
+    self:MarkFailed(route)
+    return false, "Gateway did not confirm arrival"
+end
+
+return MapGatewayService
+-- END SOURCE: src/ReplicatedStorage/CustomHub/Features/MapGatewayService.lua
+end
+
 __bundleFactories["CustomHub.Features.TeleportFeature"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua
+local MapGatewayService = __bundleLoad("CustomHub.Features.MapGatewayService")
+
 local TeleportFeature = {
     Context = nil,
     MovementService = nil,
+    GatewayService = nil,
     ActiveTravel = nil,
     Generation = 0,
     CharacterRemovingConnection = nil,
@@ -4249,6 +4605,7 @@ local TeleportFeature = {
 
 local MAX_STALL_RETRIES = 2
 local STALL_RETRY_DELAY = 1.1
+local MAX_TRAVEL_TIMEOUT = 150
 
 local function disconnect(connection)
     if connection then
@@ -4407,6 +4764,246 @@ function TeleportFeature:_ResolveIslandCFrame(destination)
     return nil, "The selected island has no usable destination"
 end
 
+function TeleportFeature:_IsTravelCurrent(request, character)
+    local context = self.Context
+    local compatibility = context and context.Compatibility
+    local mainFarm = context and context.MainFarm
+    return self.ActiveTravel == request
+        and self.Generation == request.Generation
+        and compatibility
+        and compatibility.Player
+        and compatibility.Player.Character == character
+        and not (mainFarm and mainFarm.Running)
+end
+
+function TeleportFeature:_MoveAndWait(request, character, destination)
+    local compatibility = self.Context.Compatibility
+    local _, _, startRoot = compatibility:GetCharacterParts()
+    if not startRoot then
+        return false, "Character is unavailable"
+    end
+
+    local lastStallAt = self.MovementService.LastStallAt
+    local routeRequestsBefore = table.clone(self.MovementService.LastRouteRequest or {})
+    local startDistance = (destination.Position - startRoot.Position).Magnitude
+    local moveCallOk, moved, moveResult = pcall(function()
+        return self.MovementService:MoveTo(destination, {
+            Speed = 190,
+            Threshold = 8,
+            IsCurrent = function()
+                return self:_IsTravelCurrent(request, character)
+            end,
+        })
+    end)
+    if not moveCallOk then
+        self.MovementService:Cancel()
+        return false, tostring(moved)
+    end
+    if not moved then
+        return false, tostring(moveResult)
+    end
+    if moveResult == "arrived" then
+        return true
+    end
+
+    local deadline = os.clock()
+        + math.max(20, math.min(MAX_TRAVEL_TIMEOUT, startDistance / 120 + 15))
+    while self.ActiveTravel == request do
+        if not self:_IsTravelCurrent(request, character) then
+            return false, "Travel was interrupted"
+        end
+        local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
+        if currentCharacter ~= character or not currentRoot then
+            return false, "Character changed during travel"
+        end
+        local remaining = (destination.Position - currentRoot.Position).Magnitude
+        if not self.MovementService.Active then
+            if remaining <= 14 then
+                return true
+            end
+            local routeTransitionStarted = false
+            for routeName, requestedAt in pairs(self.MovementService.LastRouteRequest or {}) do
+                if requestedAt > (routeRequestsBefore[routeName] or 0) then
+                    routeTransitionStarted = true
+                    break
+                end
+            end
+            if routeTransitionStarted then
+                local transitionDeadline = os.clock() + 8
+                while self:_IsTravelCurrent(request, character)
+                    and os.clock() < transitionDeadline
+                do
+                    local transitionCharacter, _, transitionRoot =
+                        compatibility:GetCharacterParts()
+                    if transitionCharacter ~= character or not transitionRoot then
+                        return false, "Character changed during map transition"
+                    end
+                    if (destination.Position - transitionRoot.Position).Magnitude <= 14 then
+                        return true
+                    end
+                    if (transitionRoot.Position - startRoot.Position).Magnitude >= 200 then
+                        return false, "Map transition completed; continue toward the destination"
+                    end
+                    task.wait(0.1)
+                end
+                if not self:_IsTravelCurrent(request, character) then
+                    return false, "Travel was interrupted"
+                end
+                return false, "Map transition did not reach the destination"
+            end
+            if self.MovementService.LastStallAt ~= lastStallAt then
+                return false, "Movement stalled before reaching the waypoint"
+            end
+            return false, "Movement stopped before reaching the waypoint"
+        end
+        if os.clock() >= deadline then
+            self.MovementService:Cancel()
+            return false, "Movement timed out before reaching the waypoint"
+        end
+        task.wait(0.1)
+    end
+    return false, "Travel was cancelled"
+end
+
+function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
+    local retries = 0
+    while self:_IsTravelCurrent(request, character) do
+        if waitBeforeRetry or retries > 0 then
+            task.wait(STALL_RETRY_DELAY)
+            waitBeforeRetry = false
+            if not self:_IsTravelCurrent(request, character) then
+                return
+            end
+        end
+
+        local arrived, reason = self:_MoveAndWait(request, character, request.Destination)
+        if arrived then
+            self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
+            return
+        end
+        if not self:_IsTravelCurrent(request, character) then
+            return
+        end
+
+        if reason == "Map transition completed; continue toward the destination" then
+            request.RouteTransitionRetries = (request.RouteTransitionRetries or 0) + 1
+            if request.RouteTransitionRetries > 2 then
+                self:_FinishTravel(
+                    request,
+                    "Map gateway transitions did not reach the selected destination.",
+                    "warning"
+                )
+                return
+            end
+            self:_SetStatus(
+                "Map transition complete; continuing to " .. request.Label .. ".",
+                "info"
+            )
+        else
+            retries += 1
+            request.StallRetries = retries
+            if retries > MAX_STALL_RETRIES then
+                self:_FinishTravel(
+                    request,
+                    "Travel stalled after "
+                        .. tostring(MAX_STALL_RETRIES)
+                        .. " retries; copy the status report for movement details, then try again.",
+                    "warning"
+                )
+                return
+            end
+            self:_SetStatus(
+                "Travel stalled; retrying ("
+                    .. tostring(retries)
+                    .. "/"
+                    .. tostring(MAX_STALL_RETRIES)
+                    .. ").",
+                "warning"
+            )
+        end
+    end
+end
+
+function TeleportFeature:_RunTravel(request, character)
+    local compatibility = self.Context.Compatibility
+    local _, _, root = compatibility:GetCharacterParts()
+    local plan = {}
+    if root and self.GatewayService then
+        local planOk, resolvedPlan = pcall(
+            self.GatewayService.FindPlan,
+            self.GatewayService,
+            request.Destination.Position,
+            root.Position
+        )
+        if planOk and type(resolvedPlan) == "table" then
+            plan = resolvedPlan
+        end
+    end
+    if #plan > 0 then
+        local routeNames = {}
+        for _, route in ipairs(plan) do
+            table.insert(routeNames, route.Name)
+        end
+        self:_SetStatus(
+            "Using map gateway route: " .. table.concat(routeNames, " → ") .. ".",
+            "info"
+        )
+    end
+
+    local gatewayFailed = false
+    for _, route in ipairs(plan) do
+        if not self:_IsTravelCurrent(request, character) then
+            return
+        end
+        self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
+        local reached = self:_MoveAndWait(
+            request,
+            character,
+            CFrame.new(route.Stand)
+        )
+        if not reached then
+            if not self:_IsTravelCurrent(request, character) then
+                return
+            end
+            self.GatewayService:MarkFailed(route)
+            self:_SetStatus(
+                "Could not reach " .. route.Name .. "; continuing by normal travel.",
+                "warning"
+            )
+            gatewayFailed = true
+            break
+        end
+
+        self:_SetStatus("Activating map gateway: " .. route.Name .. ".", "info")
+        local used, gatewayError = self.GatewayService:Use(route, function()
+            return self:_IsTravelCurrent(request, character)
+        end)
+        if not used then
+            if not self:_IsTravelCurrent(request, character) then
+                return
+            end
+            self.GatewayService:MarkFailed(route)
+            self:_SetStatus(
+                route.Name .. " did not confirm arrival; continuing by normal travel.",
+                "warning"
+            )
+            gatewayFailed = true
+            if gatewayError then
+                request.LastGatewayError = tostring(gatewayError)
+            end
+            break
+        end
+        self:_SetStatus(
+            route.Name .. " arrival confirmed; continuing to " .. request.Label .. ".",
+            "info"
+        )
+    end
+
+    if self:_IsTravelCurrent(request, character) then
+        self:_RunDirectTravel(request, character, gatewayFailed)
+    end
+end
+
 function TeleportFeature:_FinishTravel(request, message, kind)
     if self.ActiveTravel ~= request then
         return
@@ -4491,7 +5088,6 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         Generation = self.Generation,
         Character = character,
         StartedAt = os.clock(),
-        LastStallAt = self.MovementService.LastStallAt,
         Label = destinationLabel,
         Action = actionId,
         Destination = destination,
@@ -4500,103 +5096,15 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     self.ActiveTravel = request
     self:_SetFeatureEnabled(actionId, true)
 
-    local function issueMovement()
-        return self.MovementService:MoveTo(request.Destination, {
-            Speed = 190,
-            Threshold = 8,
-            IsCurrent = function()
-                return self.ActiveTravel == request
-                    and self.Generation == request.Generation
-                    and compatibility.Player.Character == character
-                    and not (mainFarm and mainFarm.Running)
-            end,
-        })
-    end
-    local moveCallOk, moved, moveResult = pcall(issueMovement)
-    if not moveCallOk then
-        moveResult = moved
-        moved = false
-    end
-    if not moved then
-        self:_FinishTravel(
-            request,
-            "Travel could not start: " .. tostring(moveResult),
-            "error"
-        )
-        return false, moveResult
-    end
-    if moveResult == "arrived" then
-        self:_FinishTravel(request, "Arrived at " .. destinationLabel .. ".", "success")
-        return true
-    end
-
     self:_SetStatus("Travelling to " .. destinationLabel .. ".", "info")
     task.spawn(function()
-        while self.ActiveTravel == request do
-            if compatibility.Player.Character ~= character then
-                self:_FinishTravel(request, "Travel cancelled because the character changed.", "warning")
-                return
-            end
-            if mainFarm and mainFarm.Running then
-                self:_FinishTravel(request, "Travel cancelled because Auto Farm started.", "warning")
-                return
-            end
-
-            if not self.MovementService.Active then
-                if self.MovementService.LastStallAt ~= request.LastStallAt then
-                    request.LastStallAt = self.MovementService.LastStallAt
-                    if request.StallRetries >= MAX_STALL_RETRIES then
-                        self:_FinishTravel(
-                            request,
-                            "Travel stalled after "
-                                .. tostring(request.StallRetries)
-                                .. " retries; copy the status report for movement details, then try again.",
-                            "warning"
-                        )
-                        return
-                    end
-
-                    request.StallRetries += 1
-                    self:_SetStatus(
-                        "Travel stalled; retrying ("
-                            .. tostring(request.StallRetries)
-                            .. "/"
-                            .. tostring(MAX_STALL_RETRIES)
-                            .. ").",
-                        "warning"
-                    )
-                    task.wait(STALL_RETRY_DELAY)
-                    if self.ActiveTravel ~= request then
-                        return
-                    end
-
-                    local retryCallOk, retryMoved, retryResult = pcall(issueMovement)
-                    if not retryCallOk then
-                        retryResult = retryMoved
-                        retryMoved = false
-                    end
-                    if not retryMoved then
-                        self:_FinishTravel(
-                            request,
-                            "Travel retry could not start: " .. tostring(retryResult),
-                            "error"
-                        )
-                        return
-                    end
-                    if retryResult == "arrived" then
-                        self:_FinishTravel(
-                            request,
-                            "Arrived at " .. request.Label .. ".",
-                            "success"
-                        )
-                        return
-                    end
-                else
-                    self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
-                    return
-                end
-            end
-            task.wait(0.1)
+        local runOk, runError = pcall(self._RunTravel, self, request, character)
+        if not runOk and self.ActiveTravel == request then
+            self:_FinishTravel(
+                request,
+                "Travel could not continue: " .. tostring(runError),
+                "error"
+            )
         end
     end)
     return true
@@ -4714,6 +5222,7 @@ function TeleportFeature:Initialize(context)
     self.Generation = 0
     self.ActiveTravel = nil
     self.MovementService = context.MovementService
+    self.GatewayService = MapGatewayService.new(context.Compatibility)
 
     local player = context.Compatibility.Player
     if player then
@@ -4730,6 +5239,7 @@ function TeleportFeature:Cleanup()
     self.CharacterRemovingConnection = nil
     self.Context = nil
     self.MovementService = nil
+    self.GatewayService = nil
 end
 
 return TeleportFeature

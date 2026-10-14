@@ -7,6 +7,12 @@ UI = (ROOT / "src/ReplicatedStorage/CustomHub/UI.lua").read_text(encoding="utf-8
 FEATURE = (ROOT / "src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua").read_text(
     encoding="utf-8"
 )
+GATEWAYS = (
+    ROOT / "src/ReplicatedStorage/CustomHub/Features/MapGatewayService.lua"
+).read_text(encoding="utf-8")
+COMPATIBILITY = (
+    ROOT / "src/ReplicatedStorage/CustomHub/Compatibility.lua"
+).read_text(encoding="utf-8")
 MANAGER = (ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua").read_text(
     encoding="utf-8"
 )
@@ -79,17 +85,57 @@ require(
 )
 require(
     "player.CharacterRemoving:Connect" in FEATURE
-    and "LastStallAt ~= request.LastStallAt" in FEATURE
+    and "function TeleportFeature:_MoveAndWait" in FEATURE
+    and "function TeleportFeature:_IsTravelCurrent" in FEATURE
     and "copy the status report for movement details" in FEATURE,
     "travel must stop on character reset and surface movement stalls",
 )
 require(
     "local MAX_STALL_RETRIES = 2" in FEATURE
-    and "request.StallRetries += 1" in FEATURE
+    and "request.StallRetries = retries" in FEATURE
     and "task.wait(STALL_RETRY_DELAY)" in FEATURE
-    and "issueMovement" in FEATURE
+    and "self:_MoveAndWait(request, character, request.Destination)" in FEATURE
     and "Travel stalled after " in FEATURE,
     "manual travel must retry a transient movement stall a bounded number of times",
+)
+require(
+    all(route in GATEWAYS for route in (
+        "Enter Underwater City",
+        "Leave Underwater City",
+        "Enter Ghost Ship",
+        "Leave Ghost Ship",
+        "Castle to Mansion",
+        "Mansion to Castle",
+        "Castle to Hydra",
+        "Hydra to Castle",
+        "Castle to Tiki",
+        "Tiki to Castle",
+        "Enter Beautiful Pirate Domain",
+        "Leave Beautiful Pirate Domain",
+    ))
+    and "MINIMUM_DISTANCE_SAVED = 1500" in GATEWAYS
+    and "MAX_ROUTE_HOPS = 4" in GATEWAYS
+    and "HasOwnedInventoryItem" in GATEWAYS
+    and '"Valkyrie Helm"' in GATEWAYS
+    and '"Feathered Visage"' in GATEWAYS,
+    "map gateway routes must be sea-scoped, distance-gated, and require owned items where Vxeze does",
+)
+require(
+    '"requestEntrance"' in GATEWAYS
+    and "BoatCastleTeleporter" in GATEWAYS
+    and "distance(currentRoot.Position, route.Destination) <= 200" in GATEWAYS
+    and "FAILED_ROUTE_COOLDOWN = 120" in GATEWAYS
+    and "Portal-Portal" not in GATEWAYS
+    and "Portal Fruit" not in GATEWAYS,
+    "map gateways must verify arrival, cool down failed routes, and exclude Portal Fruit",
+)
+require(
+    "function Compatibility:CanSimulateTouch()" in COMPATIBILITY
+    and "function Compatibility:TouchPart(touchingPart, targetPart, isCurrent)" in COMPATIBILITY
+    and "firetouchinterest" in COMPATIBILITY
+    and "self.GatewayService:Use(route" in FEATURE
+    and "continuing by normal travel" in FEATURE,
+    "touch-only gateways must use the guarded compatibility helper and fall back to normal travel",
 )
 require(
     "TeleportService" not in FEATURE
