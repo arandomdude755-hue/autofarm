@@ -204,6 +204,9 @@ require("self.LastQuestDiagnosticReportText" in copy_report
         and "setclipboard(text)" in copy_report
         and "Complete quest status report copied to clipboard." in copy_report
         and "self:_BuildFarmMasteryDiagnosticReport()" in copy_report
+        and "LastStallDiagnostic" in copy_report
+        and "movementDiagnostic.Text" in copy_report
+        and "movement-stall details copied to clipboard." in copy_report
         and "Farm Mastery diagnostic copied to clipboard." in copy_report
         and "complete report printed to output" in copy_report,
         "the copy action must include live Mastery diagnostics and handle clipboard unavailability")

@@ -171,6 +171,21 @@ require(
     and "PathfindingService" not in move_to,
     "farm travel must resume from a search hold and keep the existing direct noclip movement path",
 )
+stall_diagnostic = function_body(
+    MOVEMENT,
+    "function MovementService:_CaptureStallDiagnostic(",
+    "\nfunction MovementService:_MaintainFarmCollision()",
+)
+require(
+    "self._CaptureStallDiagnostic" in move_to
+    and move_to.index("self._CaptureStallDiagnostic") < move_to.index("self:_Finish(active, true)", move_to.index("elseif os.clock() - active.LastProgressAt > 2.5 then"))
+    and "self.FarmCollisionOriginals" in stall_diagnostic
+    and "active.CollisionOriginals" in stall_diagnostic
+    and "Workspace:Raycast" in stall_diagnostic
+    and "GetDescendants()" not in stall_diagnostic
+    and "LastCommandError" in stall_diagnostic,
+    "movement stalls must capture a bounded collision, obstacle, and correction snapshot without a hierarchy scan",
+)
 
 find_spawn = function_body(ENEMY, "function EnemyService:FindSpawn", "\nfunction EnemyService:IsSpawnAvailable")
 refresh_hidden_spawns = function_body(

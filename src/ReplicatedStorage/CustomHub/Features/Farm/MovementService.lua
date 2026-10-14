@@ -38,6 +38,10 @@ local function disconnect(connection)
     end
 end
 
+local function formatPosition(position)
+    return string.format("(%.1f, %.1f, %.1f)", position.X, position.Y, position.Z)
+end
+
 function MovementService.new(compatibility, report)
     return setmetatable({
         Compatibility = compatibility,
@@ -58,6 +62,7 @@ function MovementService.new(compatibility, report)
         FarmCollisionErrorReported = false,
         FarmCollisionMaintenanceGeneration = 0,
         HoldForce = nil,
+        LastStallDiagnostic = nil,
     }, MovementService)
 end
 
@@ -108,6 +113,95 @@ function MovementService:_ReportFarmCollisionError(err)
     end
     self.FarmCollisionErrorReported = true
     self.Report("Character collision maintenance error: " .. tostring(err), "warning")
+end
+
+function MovementService:_CaptureStallDiagnostic(active, root, goal, distance)
+    local collisionParts = {}
+    local collidableParts = {}
+    local collidableCount = 0
+    local seenParts = {}
+    local function inspectPart(part)
+        if not part or seenParts[part] or not part.Parent then
+            return
+        end
+        seenParts[part] = true
+        collisionParts[#collisionParts + 1] = part
+        if part.CanCollide then
+            collidableCount += 1
+            if #collidableParts < 5 then
+                collidableParts[#collidableParts + 1] = part.Name
+            end
+        end
+    end
+
+    for part in pairs(self.FarmCollisionOriginals) do
+        inspectPart(part)
+    end
+    for part in pairs(active.CollisionOriginals or {}) do
+        inspectPart(part)
+    end
+
+    local obstacle = "no hit within 30 studs"
+    local raycastOk, raycastResult = pcall(function()
+        local offset = goal.Position - root.Position
+        local castDistance = math.min(offset.Magnitude, 30)
+        if castDistance <= 0 then
+            return nil
+        end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { active.Character }
+        return self.Compatibility.Workspace:Raycast(
+            root.Position,
+            offset.Unit * castDistance,
+            params
+        )
+    end)
+    if not raycastOk then
+        obstacle = "raycast unavailable: " .. tostring(raycastResult)
+    elseif raycastResult then
+        local instance = raycastResult.Instance
+        local canCollide = "n/a"
+        if instance:IsA("BasePart") then
+            canCollide = tostring(instance.CanCollide)
+        end
+        obstacle = string.format(
+            "hit=%s (%s); distance=%.1f; CanCollide=%s; material=%s",
+            tostring(instance.Name),
+            tostring(instance.ClassName),
+            raycastResult.Distance,
+            canCollide,
+            tostring(raycastResult.Material)
+        )
+    end
+
+    local correctionDistance = active.LastCommandError
+        and string.format("%.1f studs", active.LastCommandError)
+        or "not available"
+    local collidableSummary = #collidableParts > 0
+        and table.concat(collidableParts, ", ")
+        or "none"
+    local lines = {
+        "===== [MovementStallDiagnostic] REPORT BEGIN =====",
+        string.format("Stall duration: %.2f seconds", os.clock() - active.LastProgressAt),
+        string.format("Root position: %s", formatPosition(root.Position)),
+        string.format("Goal position: %s; current distance=%.1f studs", formatPosition(goal.Position), distance),
+        "Tracked character parts: "
+            .. tostring(#collisionParts)
+            .. "; currently collidable: "
+            .. tostring(collidableCount)
+            .. "; examples: "
+            .. collidableSummary,
+        "Distance from last commanded position: " .. correctionDistance,
+        "Forward obstacle check: " .. obstacle,
+        "===== [MovementStallDiagnostic] REPORT END =====",
+    }
+    local text = table.concat(lines, "\n")
+    self.LastStallDiagnostic = {
+        At = os.clock(),
+        Text = text,
+    }
+    return text
 end
 
 function MovementService:_MaintainFarmCollision()
@@ -582,6 +676,7 @@ function MovementService:MoveTo(destination, options)
             root.CFrame = goalNow
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
+            active.LastCommandedPosition = goalNow.Position
             active.Holding = true
             active.BestDistance = 0
             active.LastProgressAt = os.clock()
@@ -589,10 +684,14 @@ function MovementService:MoveTo(destination, options)
         end
         local offset = goalNow.Position - root.Position
         local distance = offset.Magnitude
+        active.LastCommandError = active.LastCommandedPosition
+            and (root.Position - active.LastCommandedPosition).Magnitude
+            or nil
         if distance <= thresholdNow then
             root.CFrame = goalNow
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
+            active.LastCommandedPosition = goalNow.Position
             if active.KeepSession then
                 active.Holding = true
                 active.BestDistance = distance
@@ -611,9 +710,29 @@ function MovementService:MoveTo(destination, options)
             active.LastProgressAt = os.clock()
         elseif os.clock() - active.LastProgressAt > 2.5 then
             self.LastStallAt = os.clock()
+            local diagnosticOk, diagnosticError = pcall(
+                self._CaptureStallDiagnostic,
+                self,
+                active,
+                root,
+                goalNow,
+                distance
+            )
+            if not diagnosticOk then
+                self.LastStallDiagnostic = {
+                    At = os.clock(),
+                    Text = "===== [MovementStallDiagnostic] REPORT BEGIN =====\n"
+                        .. "Snapshot failed: "
+                        .. tostring(diagnosticError)
+                        .. "\n===== [MovementStallDiagnostic] REPORT END =====",
+                }
+            end
             self:_Finish(active, true)
             self:HoldPosition(active.IsCurrent)
-            self.Report("Movement stalled; cancelling this attempt before retry", "warning")
+            self.Report(
+                "Movement stalled; cancelling this attempt before retry. Copy the status report for details.",
+                "warning"
+            )
             return
         end
 
@@ -625,6 +744,7 @@ function MovementService:MoveTo(destination, options)
         root.CFrame = CFrame.new(nextPosition)
         root.AssemblyLinearVelocity = Vector3.zero
         root.AssemblyAngularVelocity = Vector3.zero
+        active.LastCommandedPosition = nextPosition
     end)
 
     return true, route and ("moving to " .. route.Name .. " staging") or "moving"

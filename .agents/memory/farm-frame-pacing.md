@@ -17,6 +17,12 @@ Farm travel should pass through terrain and walls using direct movement with col
 
 If event-only collision suppression still leaves some walls blocking, use a low-frequency safety sweep over already tracked character parts rather than rescanning all descendants every frame.
 
+For diagnosing occasional movement stalls, take a bounded snapshot only when the existing no-progress timeout fires: inspect already tracked character parts, compare the root against its last commanded position, and make one short forward raycast. Do not add continuous workspace scans or per-frame diagnostic logging.
+
+**Why:** the user approved collecting evidence at the stall point before changing noclip behavior, and farm performance has previously regressed from repeated scans.
+
+**How to apply:** keep movement diagnosis inside the stall/cancel path; use the copied status report to distinguish collision restoration from movement correction before choosing a fix.
+
 **Why:** repeated full-character hierarchy scans, collision writes at frame frequency, global target/spawn candidate scans, and unparented-instance enumeration can all stall the client; the user also reported some walls still blocked under event-only collision suppression. Restoring many corpse parts can add physics work on each kill. Source checks cannot distinguish which path dominates on the player’s device.
 
 **How to apply:** when changing Main Farm movement, collision handling, target acquisition, or mob gathering, keep travel direct and noclip rather than pathfinding, preserve airborne position during search gaps, use property events plus only a low-frequency sweep of indexed parts when needed, avoid full-tree per-frame work, preserve collision restoration across stop/respawn, skip property writes for dead targets, use indexed candidate subsets, bound per-call mob transforms, keep broad fallback discovery off the farm step, and verify performance with an in-game test.

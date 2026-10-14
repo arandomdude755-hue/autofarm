@@ -571,6 +571,23 @@ function MainFarm:CopyStatusReport()
     else
         text = self.LastQuestDiagnosticReportText
     end
+
+    local movementDiagnostic = self.MovementService
+        and self.MovementService.LastStallDiagnostic
+    local movementDiagnosticIncluded = false
+    if movementDiagnostic
+        and type(movementDiagnostic.Text) == "string"
+        and movementDiagnostic.Text ~= ""
+        and os.clock() - (movementDiagnostic.At or 0) <= 600
+    then
+        if type(text) == "string" and text ~= "" then
+            text = text .. "\n\n" .. movementDiagnostic.Text
+        else
+            text = movementDiagnostic.Text
+        end
+        movementDiagnosticIncluded = true
+    end
+
     if type(text) ~= "string" or text == "" then
         self:_SetStatus("No status report is available yet.", "warning")
         return true
@@ -585,7 +602,9 @@ function MainFarm:CopyStatusReport()
     end)
     if clipboardCallOk and copied then
         local copiedMessage = "Complete quest status report copied to clipboard."
-        if tikiDiagnostic then
+        if movementDiagnosticIncluded then
+            copiedMessage = "Status report including movement-stall details copied to clipboard."
+        elseif tikiDiagnostic then
             copiedMessage = "Tiki puzzle diagnostic copied to clipboard."
         elseif masteryDiagnostic then
             copiedMessage = "Farm Mastery diagnostic copied to clipboard."
