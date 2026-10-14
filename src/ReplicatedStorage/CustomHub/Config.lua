@@ -2,10 +2,74 @@ local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
 local farmModes = {
     "Level Farm",
     "Aura Farm",
+    "Farm Materials",
     "Farm Bones",
     "Farm Cake Prince",
     "Farm Tyrant of the Skies",
 }
+-- Material drop targets ported from the Vxeze reference catalog.
+-- Sea indexes are 1=First, 2=Second, 3=Third; materials never travel seas.
+local farmMaterialTargets = {
+    ["Angel Wings"] = {
+        [1] = { "God's Guard", "Shanda", "Royal Squad", "Royal Soldier", "Wysper", "Thunder God" },
+    },
+    Leather = {
+        [1] = { "Pirate", "Brute" },
+        [2] = { "Marine Captain" },
+        [3] = { "Jungle Pirate", "Forest Pirate", "Musketeer Pirate" },
+    },
+    ["Scrap Metal"] = {
+        [1] = { "Pirate", "Brute" },
+        [2] = { "Marine Captain" },
+        [3] = { "Jungle Pirate", "Forest Pirate" },
+    },
+    ["Magma Ore"] = {
+        [1] = { "Military Soldier", "Military Spy", "Magma Admiral" },
+        [2] = { "Magma Ninja", "Lava Pirate" },
+    },
+    ["Fish Tail"] = {
+        [1] = { "Fishman Warrior", "Fishman Commando", "Fishman Lord" },
+        [3] = { "Fishman Raider", "Fishman Captain" },
+    },
+    Ectoplasm = {
+        [2] = { "Ship Deckhand", "Ship Engineer", "Ship Steward", "Ship Officer", "Cursed Captain" },
+    },
+    ["Mystic Droplet"] = {
+        [2] = { "Water Fighter", "Sea Soldier" },
+    },
+    ["Radioactive Material"] = {
+        [2] = { "Factory Staff" },
+    },
+    ["Vampire Fang"] = {
+        [2] = { "Vampire" },
+    },
+    ["Conjured Cocoa"] = {
+        [3] = { "Chocolate Bar Battler", "Cocoa Warrior" },
+    },
+    ["Dragon Scale"] = {
+        [3] = { "Dragon Crew Archer", "Dragon Crew Warrior" },
+    },
+    Gunpowder = {
+        [3] = { "Pistol Billionaire" },
+    },
+    ["Mini Tusk"] = {
+        [3] = { "Mythological Pirate" },
+    },
+    Bones = {
+        [3] = { "Reborn Skeleton", "Living Zombie", "Demonic Soul", "Posessed Mummy" },
+    },
+    ["Demonic Wisp"] = {
+        [3] = { "Demonic Soul", "Reborn Skeleton", "Living Zombie", "Posessed Mummy" },
+    },
+    ["Nightmare Catcher"] = {
+        [3] = { "Reborn Skeleton", "Living Zombie", "Demonic Soul", "Posessed Mummy" },
+    },
+}
+local farmMaterials = {}
+for materialName in pairs(farmMaterialTargets) do
+    table.insert(farmMaterials, materialName)
+end
+table.sort(farmMaterials)
 local farmModeProfiles = {
     ["Farm Bones"] = {
         Sea = "Third Sea",
@@ -103,6 +167,9 @@ local Config = {
         FarmModes = farmModes,
         FarmModeProfiles = farmModeProfiles,
         FarmMode = "Level Farm",
+        FarmMaterials = farmMaterials,
+        FarmMaterialTargets = farmMaterialTargets,
+        FarmMaterial = "Leather",
         FarmMasteryMethods = { "Blox Fruit", "Gun" },
         FarmMastery = false,
         MasteryCategory = "Blox Fruit",
@@ -257,6 +324,13 @@ local Config = {
                     Action = "farm.mode.select",
                     Setting = "FarmMode",
                     Options = farmModes,
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Farm material",
+                    Action = "farm.material.select",
+                    Setting = "FarmMaterial",
+                    Options = farmMaterials,
                 },
                 {
                     Kind = "settingToggle",

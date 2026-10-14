@@ -37,6 +37,12 @@ Use Vxeze's reference-style Gun M1 approach: locate the game's gun-shoot functio
 
 **How to apply:** resolve mastery weapons only from live Character/Player.Backpack Tool instances; never query stored inventory. Prefer an equipped tool, otherwise use the one matching hotbar tool, including Skull Guitar. Keep the shared skill flow unchanged. Use the target-directed client gun handler only when a matching Gun is already equipped, restore its original target lookup immediately after firing, honor reload/cooldown state, and keep Gun M1 independently throttled from skills. Do not use direct TAP/Validator2/ShootGunEvent remote firing as a fallback.
 
+Farm Materials must stay in the player's current sea. If a selected material is only mapped to another sea, hold position and explain where it is available; do not travel automatically.
+
+**Why:** the user chose manual sea changes for material farming.
+
+**How to apply:** resolve the current sea before target selection, use only that sea's material mob list, and never invoke cross-sea travel for this mode.
+
 Changing the target, Mastery method, or selected tool during a farm must not leave a stale skill input or preparation state blocking the current farm. Re-evaluate the active context and safely release/reset stale state when it changes.
 
 **Why:** the user explicitly wants switching weapons or modes mid-farm to recover rather than break any farm function.

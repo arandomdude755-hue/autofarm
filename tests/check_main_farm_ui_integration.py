@@ -37,8 +37,9 @@ require('Label = "Farm method"' in farm_config
         and 'Options = farmModes' in farm_config
         and '"Farm Bones"' in CONFIG
         and '"Farm Cake Prince"' in CONFIG
-        and '"Farm Tyrant of the Skies"' in CONFIG,
-        "Farm page must offer the implemented level, aura, bone, cake, and Tiki modes")
+        and '"Farm Tyrant of the Skies"' in CONFIG
+        and '"Farm Materials"' in CONFIG,
+        "Farm page must offer the implemented level, aura, material, bone, cake, and Tiki modes")
 require('Label = "Auto quest for modes"' in farm_config
         and 'Action = "farm.autoModeQuest"' in farm_config
         and 'Setting = "AutoModeQuest"' in farm_config

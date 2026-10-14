@@ -31,10 +31,74 @@ local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
 local farmModes = {
     "Level Farm",
     "Aura Farm",
+    "Farm Materials",
     "Farm Bones",
     "Farm Cake Prince",
     "Farm Tyrant of the Skies",
 }
+-- Material drop targets ported from the Vxeze reference catalog.
+-- Sea indexes are 1=First, 2=Second, 3=Third; materials never travel seas.
+local farmMaterialTargets = {
+    ["Angel Wings"] = {
+        [1] = { "God's Guard", "Shanda", "Royal Squad", "Royal Soldier", "Wysper", "Thunder God" },
+    },
+    Leather = {
+        [1] = { "Pirate", "Brute" },
+        [2] = { "Marine Captain" },
+        [3] = { "Jungle Pirate", "Forest Pirate", "Musketeer Pirate" },
+    },
+    ["Scrap Metal"] = {
+        [1] = { "Pirate", "Brute" },
+        [2] = { "Marine Captain" },
+        [3] = { "Jungle Pirate", "Forest Pirate" },
+    },
+    ["Magma Ore"] = {
+        [1] = { "Military Soldier", "Military Spy", "Magma Admiral" },
+        [2] = { "Magma Ninja", "Lava Pirate" },
+    },
+    ["Fish Tail"] = {
+        [1] = { "Fishman Warrior", "Fishman Commando", "Fishman Lord" },
+        [3] = { "Fishman Raider", "Fishman Captain" },
+    },
+    Ectoplasm = {
+        [2] = { "Ship Deckhand", "Ship Engineer", "Ship Steward", "Ship Officer", "Cursed Captain" },
+    },
+    ["Mystic Droplet"] = {
+        [2] = { "Water Fighter", "Sea Soldier" },
+    },
+    ["Radioactive Material"] = {
+        [2] = { "Factory Staff" },
+    },
+    ["Vampire Fang"] = {
+        [2] = { "Vampire" },
+    },
+    ["Conjured Cocoa"] = {
+        [3] = { "Chocolate Bar Battler", "Cocoa Warrior" },
+    },
+    ["Dragon Scale"] = {
+        [3] = { "Dragon Crew Archer", "Dragon Crew Warrior" },
+    },
+    Gunpowder = {
+        [3] = { "Pistol Billionaire" },
+    },
+    ["Mini Tusk"] = {
+        [3] = { "Mythological Pirate" },
+    },
+    Bones = {
+        [3] = { "Reborn Skeleton", "Living Zombie", "Demonic Soul", "Posessed Mummy" },
+    },
+    ["Demonic Wisp"] = {
+        [3] = { "Demonic Soul", "Reborn Skeleton", "Living Zombie", "Posessed Mummy" },
+    },
+    ["Nightmare Catcher"] = {
+        [3] = { "Reborn Skeleton", "Living Zombie", "Demonic Soul", "Posessed Mummy" },
+    },
+}
+local farmMaterials = {}
+for materialName in pairs(farmMaterialTargets) do
+    table.insert(farmMaterials, materialName)
+end
+table.sort(farmMaterials)
 local farmModeProfiles = {
     ["Farm Bones"] = {
         Sea = "Third Sea",
@@ -132,6 +196,9 @@ local Config = {
         FarmModes = farmModes,
         FarmModeProfiles = farmModeProfiles,
         FarmMode = "Level Farm",
+        FarmMaterials = farmMaterials,
+        FarmMaterialTargets = farmMaterialTargets,
+        FarmMaterial = "Leather",
         FarmMasteryMethods = { "Blox Fruit", "Gun" },
         FarmMastery = false,
         MasteryCategory = "Blox Fruit",
@@ -286,6 +353,13 @@ local Config = {
                     Action = "farm.mode.select",
                     Setting = "FarmMode",
                     Options = farmModes,
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Farm material",
+                    Action = "farm.material.select",
+                    Setting = "FarmMaterial",
+                    Options = farmMaterials,
                 },
                 {
                     Kind = "settingToggle",
@@ -9182,7 +9256,7 @@ function MainFarm:_FindModeSpawn(targetNames, origin)
     return part, matchedTarget, diagnostic, part ~= nil or matchingMarkers
 end
 
-function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
+function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session, targetKind)
     if not self.EnemyService:IsAlive(target) then
         self:_ClearTarget()
         self:_SetStatus("Mode target died or became invalid; reacquiring", "info")
@@ -9199,7 +9273,9 @@ function MainFarm:_EngageModeTarget(target, targetIsBoss, root, session)
         self.SpawnLoading = nil
         self.NextSpawnSearchAt = 0
         self:_SetStatus(
-            (targetIsBoss and "Live boss acquired: " or "Quest-family target acquired: ")
+            (targetIsBoss and "Live boss acquired: "
+                or targetKind == "material" and "Material target acquired: "
+                or "Quest-family target acquired: ")
                 .. target.Name,
             "success"
         )
@@ -9890,6 +9966,223 @@ function MainFarm:_StepBossEventMode(
     )
 end
 
+function MainFarm:_StepFarmMaterials(session, root)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    local materialNames = farmSettings.FarmMaterials
+    local selectedMaterial = farmSettings.FarmMaterial
+    local selectedIsValid = false
+    if type(materialNames) == "table" then
+        for _, materialName in ipairs(materialNames) do
+            if materialName == selectedMaterial then
+                selectedIsValid = true
+                break
+            end
+        end
+    end
+
+    local function stopAndHold()
+        self:_ClearTarget()
+        self:_ResetSpawnSearch(nil)
+        self:_HoldPosition(session)
+    end
+
+    if not selectedIsValid then
+        stopAndHold()
+        self:_SetStatus("Select a valid material before farming", "error")
+        return
+    end
+
+    local materialTargets = farmSettings.FarmMaterialTargets
+    local selectedTargets = type(materialTargets) == "table"
+        and materialTargets[selectedMaterial]
+        or nil
+    if type(selectedTargets) ~= "table" then
+        stopAndHold()
+        self:_SetStatus("No enemy data is configured for " .. selectedMaterial, "error")
+        return
+    end
+
+    local seaChecks = {
+        { Index = 1, Name = "First Sea", Method = "IsFirstSea" },
+        { Index = 2, Name = "Second Sea", Method = "IsSecondSea" },
+        { Index = 3, Name = "Third Sea", Method = "IsThirdSea" },
+    }
+    local compatibility = self.Context.Compatibility
+    local currentSeaIndex
+    local currentSeaName
+    local recognizedSeaCount = 0
+    for _, sea in ipairs(seaChecks) do
+        local check = compatibility and compatibility[sea.Method]
+        if type(check) == "function" then
+            local ok, isCurrentSea = pcall(check, compatibility)
+            if ok and isCurrentSea == true then
+                currentSeaIndex = sea.Index
+                currentSeaName = sea.Name
+                recognizedSeaCount += 1
+            end
+        end
+    end
+    if recognizedSeaCount ~= 1 then
+        stopAndHold()
+        self:_SetStatus(
+            "Farm Materials is waiting for one recognized sea; cross-sea travel is disabled",
+            "warning"
+        )
+        return
+    end
+
+    local targetNames = selectedTargets[currentSeaIndex]
+    if type(targetNames) ~= "table" or #targetNames == 0 then
+        local availableSeas = {}
+        for _, sea in ipairs(seaChecks) do
+            local names = selectedTargets[sea.Index]
+            if type(names) == "table" and #names > 0 then
+                table.insert(availableSeas, sea.Name)
+            end
+        end
+        stopAndHold()
+        self:_SetStatus(
+            selectedMaterial .. " is not configured for " .. currentSeaName
+                .. (#availableSeas > 0
+                    and ("; available in " .. table.concat(availableSeas, ", "))
+                    or "")
+                .. ". Switch seas manually; cross-sea travel is disabled.",
+            "warning"
+        )
+        return
+    end
+
+    local searchKey = "material:" .. tostring(currentSeaIndex) .. ":" .. selectedMaterial
+    if self.SpawnSearchTarget ~= searchKey then
+        self:_ClearTarget()
+        self:_ResetSpawnSearch(searchKey)
+    end
+
+    local validTargetNames = {}
+    for _, targetName in ipairs(targetNames) do
+        if type(targetName) == "string" and targetName ~= "" then
+            validTargetNames[targetName] = true
+        end
+    end
+    if next(validTargetNames) == nil then
+        stopAndHold()
+        self:_SetStatus("No valid enemy names are configured for " .. selectedMaterial, "error")
+        return
+    end
+
+    local now = os.clock()
+    local target
+    if self.Target then
+        if self.EnemyService:IsAlive(self.Target)
+            and validTargetNames[self.Target.Name] == true
+        then
+            target = self.Target
+        else
+            self:_ClearTarget()
+        end
+    end
+    if not target and now >= (self.NextEnemySearchAt or 0) then
+        target = self.EnemyService:FindNearest(targetNames, root.Position)
+        self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    end
+    if target then
+        self:_EngageModeTarget(target, false, root, session, "material")
+        return
+    end
+
+    if self.SpawnCandidate and not self.EnemyService:IsSpawnAvailable(
+        self.SpawnCandidate,
+        self.SpawnCandidateTargetName
+    ) then
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.NextSpawnSearchAt = 0
+    end
+
+    if now >= (self.NextSpawnSearchAt or 0) then
+        local spawnPart, targetName, diagnostic, matchingMarkers =
+            self:_FindModeSpawn(targetNames, root.Position)
+        self.SpawnCandidate = spawnPart
+        self.SpawnCandidateTargetName = targetName
+        self.SpawnCandidateDiagnostic = diagnostic
+        self.ModeSpawnMarkersExhausted = not spawnPart and matchingMarkers
+        self.NextSpawnSearchAt = now + SPAWN_SCAN_INTERVAL
+    end
+
+    local spawnPart = self.SpawnCandidate
+    local spawnTargetName = self.SpawnCandidateTargetName
+    if spawnPart and spawnTargetName
+        and self.EnemyService:IsSpawnAvailable(spawnPart, spawnTargetName)
+    then
+        self:_MoveTo(spawnPart.CFrame * CFrame.new(0, 60, 0), session, 100, true)
+        if (spawnPart.Position - root.Position).Magnitude <= 100 then
+            if not self.SpawnLoading
+                or self.SpawnLoading.TargetName ~= spawnTargetName
+                or self.SpawnLoading.Part ~= spawnPart
+            then
+                self.SpawnLoading = {
+                    TargetName = spawnTargetName,
+                    Part = spawnPart,
+                    ArrivedAt = now,
+                }
+            elseif now - self.SpawnLoading.ArrivedAt >= SPAWN_LOAD_GRACE then
+                self.EnemyService:MarkSpawnIgnored(spawnPart, spawnTargetName)
+                self.SpawnLoading = nil
+                self.SpawnCandidate = nil
+                self.SpawnCandidateTargetName = nil
+                self.NextSpawnSearchAt = 0
+                self.NextEnemySearchAt = 0
+                self:_SetStatus(
+                    "No living " .. spawnTargetName
+                        .. " loaded at this marker; checking other material targets",
+                    "warning"
+                )
+                return
+            end
+            local elapsed = self.SpawnLoading and now - self.SpawnLoading.ArrivedAt or 0
+            self:_SetStatus(
+                "Waiting for " .. spawnTargetName .. " to load at spawn ("
+                    .. tostring(math.max(0, math.ceil(SPAWN_LOAD_GRACE - elapsed)))
+                    .. "s)",
+                "info"
+            )
+        else
+            if self.SpawnLoading and self.SpawnLoading.Part ~= spawnPart then
+                self.SpawnLoading = nil
+            end
+            self:_SetStatus("Travelling to supported spawn for " .. spawnTargetName, "info")
+        end
+        return
+    end
+
+    if self.ModeSpawnMarkersExhausted then
+        self:_HoldPosition(session)
+        self.EnemyService:ClearIgnoredSpawns()
+        self.SpawnCandidate = nil
+        self.SpawnCandidateTargetName = nil
+        self.SpawnLoading = nil
+        self.ModeSpawnMarkersExhausted = false
+        self.NextSpawnSearchAt = now + SPAWN_CYCLE_RETRY_INTERVAL
+        self:_SetStatus("Material spawn markers checked; retrying after a short pause", "warning")
+        return
+    end
+
+    if self.SpawnCandidateDiagnostic
+        and self.SpawnCandidateDiagnostic.HiddenDiscoveryLoading
+    then
+        self:_HoldPosition(session)
+        self:_SetStatus("Checking hidden material spawn markers in the background", "info")
+        return
+    end
+
+    self:_HoldPosition(session)
+    self:_SetStatus(
+        "No live " .. selectedMaterial .. " target or supported spawn marker is available",
+        "warning"
+    )
+end
+
 function MainFarm:_Step(session)
     if not self:_IsCurrent(session) then
         return
@@ -9946,6 +10239,10 @@ function MainFarm:_Step(session)
     end
     if farmMode == "Aura Farm" then
         self:_StepAura(session, root)
+        return
+    end
+    if farmMode == "Farm Materials" then
+        self:_StepFarmMaterials(session, root)
         return
     end
     if farmMode ~= "Level Farm" and type(farmModeProfile) ~= "table" then
@@ -10900,6 +11197,22 @@ function MainFarm:Handle(actionId, payload)
                 return false
             end
         end
+        return true
+    end
+    if actionId == "farm.material.select" then
+        local selectedMaterial = nil
+        for _, material in ipairs(farmSettings and farmSettings.FarmMaterials or {}) do
+            if material == payload then
+                selectedMaterial = material
+                break
+            end
+        end
+        if not farmSettings or not selectedMaterial then
+            self:_SetStatus("Farm material is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.FarmMaterial = selectedMaterial
+        self:_SetStatus("Farm material: " .. selectedMaterial, "success")
         return true
     end
     if actionId == "farm.auraDistance.set" then
