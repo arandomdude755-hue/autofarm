@@ -302,8 +302,25 @@ require("local normalizedName = normalizeEnemyName(target.Name)" in bring_mobs
         and "BRING_MOB_COOLDOWN" in bring_mobs
         and "BRING_MOB_MAX_MOVES_PER_CALL" in bring_mobs
         and "CFrame.new(3 + (index - 1) * 2, 0, 0)" in bring_mobs
+        and "not self.BringMobRejected[enemy]" in bring_mobs
+        and "not self.BringMobRecovery[enemy]" in bring_mobs
+        and "self:_WatchBroughtMob(" in bring_mobs
         and "GetDescendants" not in bring_mobs,
         "Bring mobs must use the configured 2-6 group cap, live exact-name index, distance/rate limits, and per-tick movement bound")
+bring_recovery = function_body(
+    ENEMY,
+    "function EnemyService:_WatchBroughtMob",
+    "\nfunction EnemyService:BringMatchingMob",
+)
+require(
+    "BRING_MOB_STUCK_HEALTH_TIMEOUT = 2.2" in ENEMY
+    and "task.delay(BRING_MOB_STUCK_HEALTH_TIMEOUT" in bring_recovery
+    and "recovery.HealthBefore" in bring_recovery
+    and "recovery.OriginalRootCFrame" in bring_recovery
+    and "self.BringMobRejected[model] = true" in bring_recovery
+    and "Instance.new" not in bring_recovery,
+    "Bring mobs must roll back undamaged NPCs after a bounded check and avoid adding persistent Ignored objects",
+)
 require(MAIN_FARM.count("self:_BringMobsIfEnabled(target, root") >= 3,
         "Bring mobs must be available across standard, Aura, and non-boss farm modes")
 collision = function_body(

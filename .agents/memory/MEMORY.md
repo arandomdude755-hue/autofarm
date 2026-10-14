@@ -2,6 +2,7 @@
 - [Git branch roles](git-branch-roles.md) — keep `main` as the main hub version and `dev` as the test version.
 - [BNN migration boundaries](bnn-migration-boundaries.md) — Mastery follows the current hotbar tool per category, recovers from swaps, and briefly pauses Gun M1 chasing after confirmed shots.
 - [Farm frame pacing](farm-frame-pacing.md) — Keep collision suppression event-driven; full character descendant scans on Heartbeat cause client frame drops.
+- [Bring Mobs recovery](bring-mobs-recovery.md) — Roll back a pulled NPC if it remains undamaged; avoid adding persistent `Ignored` markers.
 - [Farm settings terminology](farm-settings-terminology.md) — “Auto turn on aura” means Buso/Haki activation, separate from Aura Farm.
 - [Travel tab boundaries](travel-tab-boundaries.md) — island/NPC travel toggles turn off on arrival, stay current-sea-only, and cannot overlap Auto Farm.
 - [Player-facing errors](player-facing-errors.md) — block conflicting actions with clear, non-technical bottom-right notifications that say what to turn off.

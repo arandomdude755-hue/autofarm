@@ -7385,6 +7385,7 @@ local BRING_MOB_OTHER_PLAYER_RANGE = 300
 local BRING_MOB_MIN_COUNT = 2
 local BRING_MOB_MAX_COUNT = 6
 local BRING_MOB_MAX_MOVES_PER_CALL = 2
+local BRING_MOB_STUCK_HEALTH_TIMEOUT = 2.2
 
 local function disconnect(connection)
     if connection then
@@ -7537,6 +7538,8 @@ function EnemyService.new(compatibility)
         SpawnMarkerNames = setmetatable({}, { __mode = "k" }),
         BringMobNextAt = 0,
         BringMobTarget = nil,
+        BringMobRecovery = setmetatable({}, { __mode = "k" }),
+        BringMobRejected = setmetatable({}, { __mode = "k" }),
     }, EnemyService)
 end
 
@@ -8025,6 +8028,8 @@ function EnemyService:ClearTracking()
     self.HiddenSpawnCache = nil
     self.BringMobNextAt = 0
     self.BringMobTarget = nil
+    self.BringMobRecovery = setmetatable({}, { __mode = "k" })
+    self.BringMobRejected = setmetatable({}, { __mode = "k" })
     table.clear(self.PreparedTargets)
 end
 
@@ -8047,6 +8052,46 @@ function EnemyService:_HasNearbyOtherPlayer(position)
         end
     end
     return false
+end
+
+function EnemyService:_WatchBroughtMob(model, target, originalRootCFrame, healthBefore)
+    local recovery = {
+        Target = target,
+        OriginalRootCFrame = originalRootCFrame,
+        HealthBefore = healthBefore,
+    }
+    self.BringMobRecovery[model] = recovery
+
+    task.delay(BRING_MOB_STUCK_HEALTH_TIMEOUT, function()
+        if self.BringMobRecovery[model] ~= recovery then
+            return
+        end
+        self.BringMobRecovery[model] = nil
+
+        if not self:IsAlive(model) or not isDescendantOf(model, self.EnemyContainer) then
+            return
+        end
+        local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+        local modelRoot = model:FindFirstChild("HumanoidRootPart")
+        local targetRoot = recovery.Target
+            and recovery.Target:FindFirstChild("HumanoidRootPart")
+        if not humanoid or humanoid.Health < recovery.HealthBefore
+            or not modelRoot or not modelRoot:IsA("BasePart")
+            or not targetRoot or not targetRoot:IsA("BasePart")
+            or (modelRoot.Position - targetRoot.Position).Magnitude > 50
+        then
+            return
+        end
+
+        local restored = pcall(function()
+            modelRoot.CFrame = recovery.OriginalRootCFrame
+        end)
+        if restored then
+            -- Keep this NPC out of future bring attempts for this session rather
+            -- than adding an "Ignored" instance that changes normal farm targeting.
+            self.BringMobRejected[model] = true
+        end
+    end)
 end
 
 function EnemyService:BringMatchingMob(target, playerRoot, requestedCount)
@@ -8090,6 +8135,8 @@ function EnemyService:BringMatchingMob(target, playerRoot, requestedCount)
             and enemy.Name == target.Name
             and isDescendantOf(enemy, self.EnemyContainer)
             and not enemy:FindFirstChild("Ignored")
+            and not self.BringMobRejected[enemy]
+            and not self.BringMobRecovery[enemy]
             and self:IsAlive(enemy)
         then
             local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
@@ -8130,13 +8177,25 @@ function EnemyService:BringMatchingMob(target, playerRoot, requestedCount)
     )
     local movedCount = 0
     for index = 1, movesRemaining do
-        local candidateRoot = candidates[index].Model:FindFirstChild("HumanoidRootPart")
+        local candidateModel = candidates[index].Model
+        local candidateRoot = candidateModel:FindFirstChild("HumanoidRootPart")
+        local candidateHumanoid = candidateModel:FindFirstChildWhichIsA("Humanoid")
         if candidateRoot and candidateRoot:IsA("BasePart") and not candidateRoot.Anchored then
+            local originalRootCFrame = candidateRoot.CFrame
+            local healthBefore = candidateHumanoid and candidateHumanoid.Health
             local moved = pcall(function()
                 candidateRoot.CFrame = targetRoot.CFrame * CFrame.new(3 + (index - 1) * 2, 0, 0)
             end)
             if moved then
                 movedCount += 1
+                if candidateHumanoid and type(healthBefore) == "number" then
+                    self:_WatchBroughtMob(
+                        candidateModel,
+                        target,
+                        originalRootCFrame,
+                        healthBefore
+                    )
+                end
             end
         end
     end
