@@ -617,6 +617,20 @@ function MainFarm:CopyStatusReport()
         gatewayDiagnosticIncluded = true
     end
 
+    local compatibility = self.Context and self.Context.Compatibility
+    local titleDiagnosticIncluded = false
+    local titleDiagnostic = compatibility
+        and compatibility.BuildTitleAccessDiagnosticReport
+        and compatibility:BuildTitleAccessDiagnosticReport()
+    if type(titleDiagnostic) == "string" and titleDiagnostic ~= "" then
+        if type(text) == "string" and text ~= "" then
+            text = text .. "\n\n" .. titleDiagnostic
+        else
+            text = titleDiagnostic
+        end
+        titleDiagnosticIncluded = true
+    end
+
     if type(text) ~= "string" or text == "" then
         self:_SetStatus("No status report is available yet.", "warning")
         return true
@@ -639,6 +653,8 @@ function MainFarm:CopyStatusReport()
             copiedMessage = "Tiki puzzle diagnostic copied to clipboard."
         elseif masteryDiagnostic then
             copiedMessage = "Farm Mastery diagnostic copied to clipboard."
+        elseif titleDiagnosticIncluded then
+            copiedMessage = "Status report including title-access diagnostics copied to clipboard."
         end
         self:_SetStatus(
             copiedMessage,

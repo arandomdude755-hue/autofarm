@@ -171,6 +171,21 @@ require(
     and "and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL" in GATEWAYS,
     "requestEntrance must retry at the Vxeze cadence until arrival or the bounded timeout",
 )
+title_diagnostic = COMPATIBILITY[
+    COMPATIBILITY.index("function Compatibility:BuildTitleAccessDiagnosticReport()"):
+    COMPATIBILITY.index("\nfunction Compatibility:GetCombatDependencies()")
+]
+require(
+    "Liberator of the Sky" in title_diagnostic
+    and "Player.Data" in title_diagnostic
+    and "PlayerGui" in title_diagnostic
+    and "RemoteFunction" in title_diagnostic
+    and "generic remote; not invoked" in title_diagnostic
+    and "InvokeServer" not in title_diagnostic
+    and "FireServer" not in title_diagnostic
+    and "BuildTitleAccessDiagnosticReport" in MAIN_FARM,
+    "title-access diagnostics must inspect client state and remote names without invoking unknown remotes",
+)
 require(
     "TeleportService" not in FEATURE
     and 'Action = "teleport.status"' not in CONFIG,

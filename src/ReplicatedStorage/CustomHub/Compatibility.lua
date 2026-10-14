@@ -329,6 +329,178 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     return found == true
 end
 
+function Compatibility:BuildTitleAccessDiagnosticReport()
+    local targetTitle = "Liberator of the Sky"
+    local targetLower = string.lower(targetTitle)
+    local lines = {
+        "===== [TitleAccessDiagnostic] REPORT BEGIN =====",
+        "Target title: " .. targetTitle,
+        "Purpose: locate title ownership data; no remotes are invoked",
+    }
+    local matchCount = 0
+    local scanLimit = 3000
+    local matchLimit = 30
+
+    local function addMatch(sourceName, instance, valueDescription)
+        if matchCount >= matchLimit then
+            return
+        end
+        local path = "unknown path"
+        pcall(function()
+            path = instance:GetFullName()
+        end)
+        local className = "unknown class"
+        pcall(function()
+            className = instance.ClassName
+        end)
+        local visibility = ""
+        pcall(function()
+            if instance:IsA("GuiObject") then
+                visibility = "; Visible=" .. tostring(instance.Visible)
+            elseif instance:IsA("LayerCollector") then
+                visibility = "; Enabled=" .. tostring(instance.Enabled)
+            end
+        end)
+        lines[#lines + 1] = sourceName
+            .. ": "
+            .. path
+            .. " ("
+            .. className
+            .. ")"
+            .. (valueDescription and ("; value=" .. tostring(valueDescription)) or "")
+            .. visibility
+        matchCount += 1
+    end
+
+    local function scanRoot(sourceName, root)
+        if not root then
+            lines[#lines + 1] = sourceName .. ": unavailable"
+            return
+        end
+        local descendantsOk, descendants = pcall(root.GetDescendants, root)
+        if not descendantsOk or type(descendants) ~= "table" then
+            lines[#lines + 1] = sourceName .. ": descendants could not be read"
+            return
+        end
+        local scanned = math.min(#descendants, scanLimit)
+        local relevantCount = 0
+        for index = 1, scanned do
+            local instance = descendants[index]
+            local name = ""
+            pcall(function()
+                name = instance.Name
+            end)
+            local nameLower = string.lower(tostring(name))
+            local valueText
+            local valueOk = pcall(function()
+                if instance:IsA("ValueBase") then
+                    valueText = tostring(instance.Value)
+                elseif instance:IsA("TextLabel")
+                    or instance:IsA("TextButton")
+                    or instance:IsA("TextBox")
+                then
+                    valueText = tostring(instance.Text)
+                end
+            end)
+            if not valueOk then
+                valueText = nil
+            end
+            local valueLower = type(valueText) == "string" and string.lower(valueText) or ""
+            local exactTitleMatch = string.find(valueLower, targetLower, 1, true) ~= nil
+            if string.find(nameLower, "title", 1, true) or exactTitleMatch then
+                relevantCount += 1
+                addMatch(sourceName, instance, valueText)
+            end
+
+            local attributesOk, attributes = pcall(instance.GetAttributes, instance)
+            if attributesOk and type(attributes) == "table" then
+                for attributeName, attributeValue in pairs(attributes) do
+                    local attributeNameLower = string.lower(tostring(attributeName))
+                    local attributeText = tostring(attributeValue)
+                    local attributeValueLower = string.lower(attributeText)
+                    if string.find(attributeNameLower, "title", 1, true)
+                        or string.find(attributeValueLower, targetLower, 1, true)
+                    then
+                        relevantCount += 1
+                        addMatch(
+                            sourceName .. " attribute " .. tostring(attributeName),
+                            instance,
+                            attributeText
+                        )
+                    end
+                end
+            end
+        end
+        lines[#lines + 1] = sourceName
+            .. " scan: "
+            .. tostring(scanned)
+            .. " descendants; "
+            .. tostring(relevantCount)
+            .. " title-related matches"
+            .. (#descendants > scanned and "; scan limit reached" or "")
+    end
+
+    local player = self.Player
+    local playerData = player and player:FindFirstChild("Data")
+    scanRoot("Player.Data", playerData)
+
+    local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
+    scanRoot("PlayerGui", playerGui)
+    local titlesMenu = playerGui and playerGui:FindFirstChild("TitlesMenu")
+    local mainTitles = playerGui
+        and playerGui:FindFirstChild("Main")
+        and playerGui.Main:FindFirstChild("Titles")
+    lines[#lines + 1] = "TitlesMenu root: "
+        .. (titlesMenu and (titlesMenu.ClassName .. "; present") or "missing")
+    lines[#lines + 1] = "Main.Titles root: "
+        .. (mainTitles and (mainTitles.ClassName .. "; present") or "missing")
+
+    local replicatedStorage = self.ReplicatedStorage
+    local remoteCandidates = {}
+    local moduleCandidates = {}
+    if replicatedStorage then
+        local descendantsOk, descendants = pcall(replicatedStorage.GetDescendants, replicatedStorage)
+        if descendantsOk and type(descendants) == "table" then
+            for index = 1, math.min(#descendants, scanLimit) do
+                local instance = descendants[index]
+                local nameLower = string.lower(tostring(instance.Name))
+                if instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") then
+                    if string.find(nameLower, "title", 1, true) then
+                        remoteCandidates[#remoteCandidates + 1] = instance:GetFullName()
+                    elseif instance.Name == "CommF_" then
+                        remoteCandidates[#remoteCandidates + 1] =
+                            instance:GetFullName() .. " (generic remote; not invoked)"
+                    end
+                elseif instance:IsA("ModuleScript")
+                    and string.find(nameLower, "title", 1, true)
+                then
+                    moduleCandidates[#moduleCandidates + 1] = instance:GetFullName()
+                end
+            end
+        end
+    end
+    lines[#lines + 1] = "Title-related remotes: "
+        .. (#remoteCandidates > 0 and table.concat(remoteCandidates, ", ") or "none found")
+    lines[#lines + 1] = "Title-related modules: "
+        .. (#moduleCandidates > 0 and table.concat(moduleCandidates, ", ") or "none found")
+
+    local npcFolder = self.Workspace and self.Workspace:FindFirstChild("NPCs")
+    local titleNpcs = {}
+    for _, npc in ipairs(npcFolder and npcFolder:GetChildren() or {}) do
+        if string.find(string.lower(npc.Name), "title", 1, true) then
+            titleNpcs[#titleNpcs + 1] = npc.Name
+        end
+    end
+    lines[#lines + 1] = "Title-related Workspace.NPCs: "
+        .. (#titleNpcs > 0 and table.concat(titleNpcs, ", ") or "none found")
+    if matchCount == 0 then
+        lines[#lines + 1] = "Exact title text not found in the scanned Player.Data or PlayerGui entries."
+    end
+    lines[#lines + 1] = "Note: name/value matches are evidence only; they do not prove unlocked status."
+    lines[#lines + 1] = "===== [TitleAccessDiagnostic] REPORT END ====="
+    return table.concat(lines, "\n")
+end
+
 function Compatibility:GetCombatDependencies()
     local modules = self.ReplicatedStorage:FindFirstChild("Modules")
     local netModule = modules and modules:FindFirstChild("Net")
