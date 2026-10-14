@@ -27,6 +27,7 @@ local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local GUN_KNOCKBACK_HOLD_SECONDS = 0.3
 local FARM_GUN_SWAP_SETTLE_SECONDS = 0.6
 local TIKI_PUZZLE_ATTACK_RANGE = 8
+local TIKI_LOAD_ITEM_RETRY_INTERVAL = 3
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
@@ -440,7 +441,7 @@ function MainFarm:_BuildTikiPuzzleDiagnosticReport()
         "Farm mode: " .. tostring(farmSettings.FarmMode),
         "Puzzle phase active: " .. tostring(self.TikiPuzzleActive == true),
         "Puzzle event visible: " .. tostring(self.TikiEventActive == true),
-        "Attack policy: equipped Skull Guitar uses TAP only; otherwise use a ready skill",
+        "Attack policy: owned Skull Guitar is loaded and uses TAP only; otherwise use a ready skill",
         "Farm Mastery setting: " .. tostring(farmSettings.FarmMastery == true)
             .. " (independent; does not control Tiki puzzle attacks)",
         "Status: " .. tostring(self.LastStatus or "unavailable"),
@@ -493,6 +494,11 @@ function MainFarm:_BuildTikiPuzzleDiagnosticReport()
     end
     if combatReady and self.CombatService then
         local guitar = self.CombatService:FindToolByName("Skull Guitar")
+        local guitarOwned, guitarOwnershipError
+        if not guitar then
+            guitarOwned, guitarOwnershipError =
+                self.Context.Compatibility:HasOwnedInventoryItem("Skull Guitar")
+        end
         local player = self.Context and self.Context.Compatibility
             and self.Context.Compatibility.Player
         local character = player and player.Character
@@ -506,6 +512,8 @@ function MainFarm:_BuildTikiPuzzleDiagnosticReport()
             "Skull Guitar: " .. tostring(guitar and guitar.Name or "not loaded")
                 .. "; parent=" .. tostring(parent)
                 .. "; enabled=" .. tostring(guitar and guitar.Enabled)
+                .. "; stored_inventory_owned="
+                .. tostring(guitar and true or (guitarOwnershipError and "unknown" or guitarOwned))
         )
 
         local readyOk, readySkill, readyError = pcall(
@@ -1923,12 +1931,80 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
     end
 
     local compatibility = self.Context.Compatibility
+    local guitar = self.CombatService:FindToolByName("Skull Guitar")
+    if not guitar then
+        local ownsGuitar, ownershipError =
+            compatibility:HasOwnedInventoryItem("Skull Guitar")
+        if ownershipError then
+            self.LastTikiAction = {
+                At = now,
+                Target = eventTarget,
+                ObjectName = eventTarget and eventTarget.Name or "unknown",
+                Action = "Waiting for Skull Guitar inventory check",
+                ToolName = "Skull Guitar",
+                Result = tostring(ownershipError),
+                ClientFiringState = false,
+            }
+            self:_SetStatus(
+                "Tiki puzzle waiting for Skull Guitar ownership check: " .. tostring(ownershipError),
+                "warning"
+            )
+            return true
+        end
+
+        if ownsGuitar then
+            if now >= (self.NextTikiLoadItemAt or 0) then
+                self.NextTikiLoadItemAt = now + TIKI_LOAD_ITEM_RETRY_INTERVAL
+                local commF, remoteError = compatibility:GetCommF()
+                if not commF then
+                    self.LastTikiAction = {
+                        At = now,
+                        Target = eventTarget,
+                        ObjectName = eventTarget and eventTarget.Name or "unknown",
+                        Action = "Loading owned Skull Guitar",
+                        ToolName = "Skull Guitar",
+                        Result = tostring(remoteError),
+                        ClientFiringState = false,
+                    }
+                    self:_SetStatus(
+                        "Owned Skull Guitar cannot be loaded: " .. tostring(remoteError),
+                        "warning"
+                    )
+                else
+                    local requestOk, requestResult = pcall(function()
+                        return commF:InvokeServer("LoadItem", "Skull Guitar")
+                    end)
+                    self.LastTikiAction = {
+                        At = now,
+                        Target = eventTarget,
+                        ObjectName = eventTarget and eventTarget.Name or "unknown",
+                        Action = "Loading owned Skull Guitar",
+                        ToolName = "Skull Guitar",
+                        Result = requestOk and "LoadItem requested; waiting for tool"
+                            or tostring(requestResult),
+                        ClientFiringState = false,
+                    }
+                    if requestOk then
+                        self:_SetStatus(
+                            "Loading owned Skull Guitar for Tiki; waiting for it to appear",
+                            "info"
+                        )
+                    else
+                        self:_SetStatus(
+                            "Owned Skull Guitar load request failed: " .. tostring(requestResult),
+                            "warning"
+                        )
+                    end
+                end
+            else
+                self:_SetStatus("Waiting for owned Skull Guitar to load", "info")
+            end
+            return true
+        end
+    end
+
     local tapStateChanged = false
-    local equippedGun = self.CombatService:FindEquippedWeapon("Gun")
-    local guitarEquipped = equippedGun
-        and equippedGun.Name == "Skull Guitar"
-        and equippedGun.Parent == compatibility.Player.Character
-    if guitarEquipped then
+    if guitar then
         local tapped, tapResult, shotStateChanged =
             self.CombatService:TapSkullGuitar(targetPosition)
         tapStateChanged = shotStateChanged == true
@@ -1937,13 +2013,13 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
             Target = eventTarget,
             ObjectName = eventTarget and eventTarget.Name or "unknown",
             Action = "Skull Guitar TAP",
-            ToolName = equippedGun.Name,
+            ToolName = guitar.Name,
             Result = tostring(tapResult),
             ClientFiringState = tapStateChanged,
         }
         if tapped and shotStateChanged == true then
             self:_SetStatus(
-                "Sent equipped Skull Guitar TAP; waiting for event update",
+                "Sent owned Skull Guitar TAP; waiting for event update",
                 "success"
             )
             return true
@@ -1978,10 +2054,7 @@ function MainFarm:_UseTikiPuzzleAction(eventTarget, targetPosition, session)
             Result = reason,
             ClientFiringState = tapStateChanged,
         }
-        self:_SetStatus(
-            "Skull Guitar is not equipped; Tiki puzzle waiting for any ready skill: " .. reason,
-            "info"
-        )
+        self:_SetStatus("Tiki puzzle waiting for any ready skill: " .. reason, "info")
         return true
     end
 
@@ -2995,6 +3068,7 @@ function MainFarm:Initialize(context)
     self.TikiEventComplete = false
     self.NextTikiBossSearchAt = 0
     self.NextTikiActionAt = 0
+    self.NextTikiLoadItemAt = 0
 
     local player = context.Compatibility.Player
     if player then
@@ -3026,6 +3100,7 @@ function MainFarm:Initialize(context)
             self.TikiEventComplete = false
             self.NextTikiBossSearchAt = 0
             self.NextTikiActionAt = 0
+            self.NextTikiLoadItemAt = 0
             self:_ResetSpawnSearch(nil)
             self:_SetStatus("Character changed; farm session will reacquire after respawn", "warning")
         end)
@@ -3139,6 +3214,7 @@ function MainFarm:Stop()
     self.TikiEventActive = false
     self.TikiEventTarget = nil
     self.NextTikiActionAt = 0
+    self.NextTikiLoadItemAt = 0
     self.PendingQuestKey = nil
     self.PendingQuestReachedAt = nil
     self.PendingQuestTargetName = nil

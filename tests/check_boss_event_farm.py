@@ -183,9 +183,14 @@ event_action = function_body(
     "\nfunction MainFarm:_StepTikiEventPhase",
 )
 require(
-    'FindEquippedWeapon("Gun")' in event_action
-    and "if guitarEquipped then" in event_action
-    and event_action.index("if guitarEquipped then")
+    'FindToolByName("Skull Guitar")' in event_action
+    and 'HasOwnedInventoryItem("Skull Guitar")' in event_action
+    and 'InvokeServer("LoadItem", "Skull Guitar")' in event_action
+    and "if ownsGuitar then" in event_action
+    and "if guitar then" in event_action
+    and event_action.index("if ownsGuitar then")
+        < event_action.index("local skill, skillError = self.CombatService:FindReadyTikiSkill()")
+    and event_action.index("if guitar then")
         < event_action.index("local skill, skillError = self.CombatService:FindReadyTikiSkill()")
     and "TapSkullGuitar(targetPosition)" in event_action
     and "FindReadyTikiSkill()" in event_action
@@ -196,7 +201,7 @@ require(
     and '"Buy"' not in event_action
     and "ServerHop" not in event_action
     and "self.TikiPuzzleActive = true" in event_step,
-    "Tiki must use TAP only for an equipped Skull Guitar and otherwise use ready skills",
+    "Tiki must load an owned Skull Guitar and use TAP exclusively, otherwise use ready skills",
 )
 skull_tap = function_body(
     COMBAT,
@@ -204,10 +209,9 @@ skull_tap = function_body(
     "\nfunction CombatService:_FindBladeHitParts",
 )
 require(
-    'FindEquippedWeapon("Gun")' in skull_tap
-    and 'tool.Name ~= "Skull Guitar"' in skull_tap
-    and "self:EquipTool(tool)" not in skull_tap
-    and "must already be equipped" in skull_tap
+    'FindToolByName("Skull Guitar")' in skull_tap
+    and "self:EquipTool(tool)" in skull_tap
+    and "already equipped" not in skull_tap
     and "self:_InvokeGunShootInput(tool, targetPart)" in skull_tap
     and "FireServer" not in skull_tap
     and "IsGunReloading" in skull_tap
