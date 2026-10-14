@@ -87,6 +87,15 @@ require('TabSubsections = {' in CONFIG
         and 'Groups = { "farmSkillKeys" }' in CONFIG
         and 'table.insert(Config.Pages.FarmSettings.Controls, control)' in CONFIG,
         "Settings routes and collapsible skill keys must use the dedicated Farm settings page")
+require(
+    "function UI:_GetControlOptions(control)" in UI
+    and "function UI:_RefreshDropdownOptions(entry, selectedValue)" in UI
+    and "OptionsProvider" in UI
+    and 'GetAttributeChangedSignal("MAP")' in UI
+    and "self:_RefreshDropdownOptions(entry, selectedValue)" in UI
+    and "entry.Options = self:_GetControlOptions(entry.Control)" in UI,
+    "Dropdown option providers must refresh options and selection when sea state changes",
+)
 require('function UI:_LayoutNavigation(animate)' in UI
         and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI
         and 'function UI:_ToggleControlGroup(groupId)' in UI

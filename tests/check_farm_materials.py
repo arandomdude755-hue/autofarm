@@ -21,15 +21,26 @@ def function_body(source, signature, next_signature):
 farm_page = CONFIG[CONFIG.index("        Farm = {"):CONFIG.index("        Player = {")]
 require(
     '"Farm Materials"' not in CONFIG[CONFIG.index("local farmModes = {"):CONFIG.index("local farmMaterialTargets = {")]
+    and farm_page.index('Label = "Farm Materials"') > farm_page.index('Label = "Mastery health threshold"')
+    and farm_page.index('Label = "Farm material"') > farm_page.index('Label = "Mastery health threshold"')
     and 'Label = "Farm material"' in farm_page
     and 'Action = "farm.material.select"' in farm_page
     and 'Setting = "FarmMaterial"' in farm_page
     and "Options = farmMaterials" in farm_page
+    and "OptionsProvider = farmMaterialsForCurrentSea" in farm_page
     and 'Label = "Farm Materials"' in farm_page
     and 'Action = "farm.material.enabled"' in farm_page
     and 'Setting = "FarmMaterialsEnabled"' in farm_page
     and "FarmMaterialsEnabled = false" in CONFIG,
     "Farm Materials must have an independent enable toggle and material selector, separate from Farm method",
+)
+require(
+    "local function farmMaterialsForCurrentSea(compatibility)" in CONFIG
+    and "recognizedSeaCount ~= 1" in CONFIG
+    and "farmMaterialTargets[materialName][currentSeaIndex]" in CONFIG
+    and 'UnavailableSelectionLabel = "Unavailable in this sea"' in farm_page
+    and 'EmptyOptionsLabel = "No materials in this sea"' in farm_page,
+    "The material selector must only expose materials mapped for the detected sea",
 )
 require(
     "local farmMaterialTargets = {" in CONFIG

@@ -69,6 +69,37 @@ for materialName in pairs(farmMaterialTargets) do
     table.insert(farmMaterials, materialName)
 end
 table.sort(farmMaterials)
+local function farmMaterialsForCurrentSea(compatibility)
+    local seaChecks = {
+        { Index = 1, Method = "IsFirstSea" },
+        { Index = 2, Method = "IsSecondSea" },
+        { Index = 3, Method = "IsThirdSea" },
+    }
+    local currentSeaIndex
+    local recognizedSeaCount = 0
+    for _, sea in ipairs(seaChecks) do
+        local check = compatibility and compatibility[sea.Method]
+        if type(check) == "function" then
+            local ok, isCurrentSea = pcall(check, compatibility)
+            if ok and isCurrentSea == true then
+                currentSeaIndex = sea.Index
+                recognizedSeaCount += 1
+            end
+        end
+    end
+    if recognizedSeaCount ~= 1 then
+        return {}
+    end
+
+    local available = {}
+    for _, materialName in ipairs(farmMaterials) do
+        local seaTargets = farmMaterialTargets[materialName][currentSeaIndex]
+        if type(seaTargets) == "table" and #seaTargets > 0 then
+            table.insert(available, materialName)
+        end
+    end
+    return available
+end
 local farmModeProfiles = {
     ["Farm Bones"] = {
         Sea = "Third Sea",
@@ -326,19 +357,6 @@ local Config = {
                     Options = farmModes,
                 },
                 {
-                    Kind = "settingDropdown",
-                    Label = "Farm material",
-                    Action = "farm.material.select",
-                    Setting = "FarmMaterial",
-                    Options = farmMaterials,
-                },
-                {
-                    Kind = "settingToggle",
-                    Label = "Farm Materials",
-                    Action = "farm.material.enabled",
-                    Setting = "FarmMaterialsEnabled",
-                },
-                {
                     Kind = "settingToggle",
                     Label = "Auto quest for modes",
                     Action = "farm.autoModeQuest",
@@ -391,6 +409,26 @@ local Config = {
                     Max = 100,
                     Step = 1,
                     Unit = "%",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Farm Materials",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Farm material",
+                    Action = "farm.material.select",
+                    Setting = "FarmMaterial",
+                    Options = farmMaterials,
+                    OptionsProvider = farmMaterialsForCurrentSea,
+                    UnavailableSelectionLabel = "Unavailable in this sea",
+                    EmptyOptionsLabel = "No materials in this sea",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Farm Materials",
+                    Action = "farm.material.enabled",
+                    Setting = "FarmMaterialsEnabled",
                 },
                 {
                     Kind = "button",

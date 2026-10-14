@@ -49,6 +49,12 @@ Farm Materials is an independent priority toggle, not a Farm method option. Whil
 
 **How to apply:** keep material selection/toggle outside the Farm method options, dispatch material targeting before normal modes, and preserve the shared Mastery-aware engagement path.
 
+Only offer materials that have target mappings for the detected current sea. If the previously selected material becomes unavailable after a sea change, keep it unselected in the UI and label it unavailable rather than silently changing the user's choice.
+
+**Why:** the user wants other-sea materials hidden from the selector.
+
+**How to apply:** derive dropdown options from the current sea's material target map and refresh them on the map attribute change and dropdown open.
+
 Changing the target, Mastery method, or selected tool during a farm must not leave a stale skill input or preparation state blocking the current farm. Re-evaluate the active context and safely release/reset stale state when it changes.
 
 **Why:** the user explicitly wants switching weapons or modes mid-farm to recover rather than break any farm function.

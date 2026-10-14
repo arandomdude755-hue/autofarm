@@ -98,6 +98,37 @@ for materialName in pairs(farmMaterialTargets) do
     table.insert(farmMaterials, materialName)
 end
 table.sort(farmMaterials)
+local function farmMaterialsForCurrentSea(compatibility)
+    local seaChecks = {
+        { Index = 1, Method = "IsFirstSea" },
+        { Index = 2, Method = "IsSecondSea" },
+        { Index = 3, Method = "IsThirdSea" },
+    }
+    local currentSeaIndex
+    local recognizedSeaCount = 0
+    for _, sea in ipairs(seaChecks) do
+        local check = compatibility and compatibility[sea.Method]
+        if type(check) == "function" then
+            local ok, isCurrentSea = pcall(check, compatibility)
+            if ok and isCurrentSea == true then
+                currentSeaIndex = sea.Index
+                recognizedSeaCount += 1
+            end
+        end
+    end
+    if recognizedSeaCount ~= 1 then
+        return {}
+    end
+
+    local available = {}
+    for _, materialName in ipairs(farmMaterials) do
+        local seaTargets = farmMaterialTargets[materialName][currentSeaIndex]
+        if type(seaTargets) == "table" and #seaTargets > 0 then
+            table.insert(available, materialName)
+        end
+    end
+    return available
+end
 local farmModeProfiles = {
     ["Farm Bones"] = {
         Sea = "Third Sea",
@@ -355,19 +386,6 @@ local Config = {
                     Options = farmModes,
                 },
                 {
-                    Kind = "settingDropdown",
-                    Label = "Farm material",
-                    Action = "farm.material.select",
-                    Setting = "FarmMaterial",
-                    Options = farmMaterials,
-                },
-                {
-                    Kind = "settingToggle",
-                    Label = "Farm Materials",
-                    Action = "farm.material.enabled",
-                    Setting = "FarmMaterialsEnabled",
-                },
-                {
                     Kind = "settingToggle",
                     Label = "Auto quest for modes",
                     Action = "farm.autoModeQuest",
@@ -420,6 +438,26 @@ local Config = {
                     Max = 100,
                     Step = 1,
                     Unit = "%",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Farm Materials",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Farm material",
+                    Action = "farm.material.select",
+                    Setting = "FarmMaterial",
+                    Options = farmMaterials,
+                    OptionsProvider = farmMaterialsForCurrentSea,
+                    UnavailableSelectionLabel = "Unavailable in this sea",
+                    EmptyOptionsLabel = "No materials in this sea",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Farm Materials",
+                    Action = "farm.material.enabled",
+                    Setting = "FarmMaterialsEnabled",
                 },
                 {
                     Kind = "button",
@@ -1623,6 +1661,54 @@ function UI:_FindMatchingPageForTab(tabName, query)
     return nil
 end
 
+function UI:_GetControlOptions(control)
+    if type(control.OptionsProvider) == "function" then
+        local ok, options = pcall(
+            control.OptionsProvider,
+            self.Compatibility,
+            self.Config.FarmSettings
+        )
+        if ok and type(options) == "table" then
+            return options
+        end
+        return {}
+    end
+    return control.Options or {}
+end
+
+function UI:_RefreshDropdownOptions(entry, selectedValue)
+    entry.Options = self:_GetControlOptions(entry.Control)
+    entry.SelectedValue = selectedValue
+
+    if type(entry.Control.OptionsProvider) ~= "function" then
+        if entry.ValueLabel then
+            entry.ValueLabel.Text = tostring(selectedValue or "Select")
+        end
+        return
+    end
+
+    local selectedAvailable = false
+    for _, option in ipairs(entry.Options) do
+        if option == selectedValue then
+            selectedAvailable = true
+            break
+        end
+    end
+    if not selectedAvailable then
+        entry.SelectedValue = nil
+        local emptyLabel = entry.Control.EmptyOptionsLabel
+        local unavailableLabel = entry.Control.UnavailableSelectionLabel
+        local label = #entry.Options == 0 and emptyLabel
+            or unavailableLabel
+            or "Select"
+        if entry.ValueLabel then
+            entry.ValueLabel.Text = tostring(label)
+        end
+    elseif entry.ValueLabel then
+        entry.ValueLabel.Text = tostring(selectedValue)
+    end
+end
+
 function UI:_Refresh(snapshot)
     if not self.Gui then
         return
@@ -1736,9 +1822,8 @@ function UI:_Refresh(snapshot)
             and snapshot.uiSize
             or farmSettings[entry.Setting]
         if entry.Kind == "dropdown" then
-            entry.SelectedValue = selectedValue
+            self:_RefreshDropdownOptions(entry, selectedValue)
             if entry.ValueLabel then
-                entry.ValueLabel.Text = tostring(selectedValue or "Select")
                 entry.ValueLabel.TextColor3 = theme.Text
             end
             self:_SetDropdownOpenVisual(
@@ -2233,7 +2318,12 @@ end
 
 function UI:_OpenDropdown(entry)
     self:_CloseDropdown()
-    local options = entry.Options or {}
+    local farmSettings = self.Config.FarmSettings or {}
+    local selectedValue = entry.Setting == "UiSize"
+        and self.State:GetSnapshot().uiSize
+        or farmSettings[entry.Setting]
+    self:_RefreshDropdownOptions(entry, selectedValue)
+    local options = entry.Options
     if not self.Gui or not self.Root or not entry.Button or #options == 0 then
         self.State:SetStatus("This selector has no available options.", "error")
         return false
@@ -2600,7 +2690,7 @@ function UI:_AddControl(control)
     if isSelector then
         row.Size = UDim2.new(1, 0, 0, layout.RowHeight)
         rowStroke.Transparency = 0.15
-        local options = control.Options or {}
+        local options = self:_GetControlOptions(control)
         local optionsFrame = create("Frame", {
             Name = "Options",
             Position = UDim2.new(
@@ -2676,7 +2766,7 @@ function UI:_AddControl(control)
         })
     elseif isDropdown then
         rowStroke.Transparency = 0.15
-        local options = control.Options or {}
+        local options = self:_GetControlOptions(control)
         local farmSettings = self.Config.FarmSettings or {}
         local selectedValue = control.Setting == "UiSize"
             and self.State:GetSnapshot().uiSize
@@ -3572,6 +3662,17 @@ function UI:Mount()
             self:_WatchViewport(workspace.CurrentCamera)
         end
     )
+    local gameWorkspace = self.Compatibility and self.Compatibility.Workspace
+    if gameWorkspace and type(gameWorkspace.GetAttributeChangedSignal) == "function" then
+        self:_Connect(
+            self.PersistentConnections,
+            gameWorkspace:GetAttributeChangedSignal("MAP"),
+            function()
+                self:_CloseDropdown()
+                self:_Refresh(self.State:GetSnapshot())
+            end
+        )
+    end
     self:_Connect(
         self.PersistentConnections,
         self.Root:GetPropertyChangedSignal("AbsoluteSize"),
