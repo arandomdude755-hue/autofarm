@@ -604,6 +604,19 @@ function MainFarm:CopyStatusReport()
         movementDiagnosticIncluded = true
     end
 
+    local gatewayDiagnosticIncluded = false
+    local gatewayDiagnostic = teleportFeature
+        and teleportFeature.BuildGatewayDiagnosticReport
+        and teleportFeature:BuildGatewayDiagnosticReport()
+    if type(gatewayDiagnostic) == "string" and gatewayDiagnostic ~= "" then
+        if type(text) == "string" and text ~= "" then
+            text = text .. "\n\n" .. gatewayDiagnostic
+        else
+            text = gatewayDiagnostic
+        end
+        gatewayDiagnosticIncluded = true
+    end
+
     if type(text) ~= "string" or text == "" then
         self:_SetStatus("No status report is available yet.", "warning")
         return true
@@ -618,7 +631,9 @@ function MainFarm:CopyStatusReport()
     end)
     if clipboardCallOk and copied then
         local copiedMessage = "Complete quest status report copied to clipboard."
-        if movementDiagnosticIncluded then
+        if gatewayDiagnosticIncluded then
+            copiedMessage = "Status report including gateway details copied to clipboard."
+        elseif movementDiagnosticIncluded then
             copiedMessage = "Status report including movement-stall details copied to clipboard."
         elseif tikiDiagnostic then
             copiedMessage = "Tiki puzzle diagnostic copied to clipboard."

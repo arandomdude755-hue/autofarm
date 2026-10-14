@@ -4283,6 +4283,12 @@ local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
 local FAILED_ROUTE_COOLDOWN = 120
 
+local SEA_LABELS = {
+    [1] = "First Sea",
+    [2] = "Second Sea",
+    [3] = "Third Sea",
+}
+
 local ROUTES_BY_SEA = {
     [1] = {
         {
@@ -4366,10 +4372,27 @@ local function distance(first, second)
     return (first - second).Magnitude
 end
 
+local function formatPosition(position)
+    if typeof(position) ~= "Vector3" then
+        return "n/a"
+    end
+    return string.format("(%.1f, %.1f, %.1f)", position.X, position.Y, position.Z)
+end
+
+local function formatScalar(value, limit)
+    local text = tostring(value):gsub("[%c]", " ")
+    limit = limit or 120
+    if #text > limit then
+        text = string.sub(text, 1, limit) .. "..."
+    end
+    return text
+end
+
 function MapGatewayService.new(compatibility)
     return setmetatable({
         Compatibility = compatibility,
         FailedUntil = {},
+        LastDiagnostic = nil,
     }, MapGatewayService)
 end
 
@@ -4416,67 +4439,121 @@ function MapGatewayService:_ResolveTouchTarget(route)
     if not compatibility or not compatibility.CanSimulateTouch
         or not compatibility:CanSimulateTouch()
     then
-        return nil
+        return nil, "touch simulation is unavailable on this client"
     end
     local workspace = compatibility.Workspace
     local mapRoot = workspace and workspace:FindFirstChild("Map")
     local map = mapRoot and mapRoot:FindFirstChild(route.Map or "Boat Castle")
     local trigger = map and map:FindFirstChild(route.Touch)
     local collectionService = compatibility.CollectionService
-    if not trigger or not collectionService then
-        return nil
+    if not trigger then
+        return nil, "gateway trigger is not loaded"
+    end
+    if not collectionService then
+        return nil, "CollectionService is unavailable"
     end
     local tagOk, tagged = pcall(collectionService.HasTag, collectionService, trigger, "BoatCastleTeleporter")
     if not tagOk or tagged ~= true then
-        return nil
+        return nil, "gateway trigger is not tagged BoatCastleTeleporter"
     end
     local hitbox = trigger:FindFirstChild("Hitbox")
-    return hitbox and hitbox:IsA("BasePart") and hitbox or nil
+    if not hitbox or not hitbox:IsA("BasePart") then
+        return nil, "gateway trigger Hitbox is missing or not a BasePart"
+    end
+    return hitbox, nil
 end
 
 function MapGatewayService:_GetAvailableRoutes(seaIndex)
     local compatibility = self.Compatibility
     local now = os.clock()
     local routes = {}
+    local candidates = {}
+    local diagnostic = self.LastDiagnostic
+    if diagnostic then
+        diagnostic.Candidates = candidates
+    end
     for _, source in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
-        if now >= (self.FailedUntil[source.Name] or 0) then
+        local candidate = {
+            Name = source.Name,
+            Requirement = source.Requires,
+            Activation = source.Touch and "touch" or "requestEntrance",
+            Eligible = false,
+        }
+        local failedUntil = self.FailedUntil[source.Name] or 0
+        if now < failedUntil then
+            candidate.Reason = "temporarily skipped after a previous failure"
+            candidate.CooldownRemaining = math.max(0, failedUntil - now)
+        else
             local available = true
             if source.Requires then
-                local checkOk, owned = pcall(
+                local checkOk, owned, inventoryError = pcall(
                     compatibility.HasOwnedInventoryItem,
                     compatibility,
                     source.Requires
                 )
                 available = checkOk and owned == true
+                candidate.RequirementOwned = available
+                if not available then
+                    candidate.Reason = checkOk
+                            and (inventoryError or "required item not found in inventory")
+                        or ("inventory check failed: " .. formatScalar(owned))
+                end
             end
 
             local stand = available and self:_ResolveStand(source) or nil
-            available = available and typeof(stand) == "Vector3"
+            if available and typeof(stand) ~= "Vector3" then
+                available = false
+                candidate.Reason = "gateway stand position is not loaded"
+            end
             local touchTarget
             if available and source.Touch then
-                touchTarget = self:_ResolveTouchTarget(source)
+                local touchReason
+                touchTarget, touchReason = self:_ResolveTouchTarget(source)
                 available = touchTarget ~= nil
+                if not available then
+                    candidate.Reason = touchReason
+                end
             end
 
+            candidate.Eligible = available
             if available then
+                candidate.Stand = stand
+                candidate.Destination = source.Destination
+                if diagnostic and typeof(diagnostic.CurrentPosition) == "Vector3" then
+                    candidate.StandDistance = distance(diagnostic.CurrentPosition, stand)
+                end
                 local route = table.clone(source)
                 route.Stand = stand
                 route.TouchTarget = touchTarget
                 table.insert(routes, route)
             end
         end
+        table.insert(candidates, candidate)
     end
     return routes
 end
 
-function MapGatewayService:FindPlan(destination, currentPosition)
+function MapGatewayService:FindPlan(destination, currentPosition, destinationLabel)
+    self.LastDiagnostic = {
+        At = os.clock(),
+        DestinationLabel = destinationLabel,
+        Destination = destination,
+        CurrentPosition = currentPosition,
+        Phase = "checking available gateways",
+    }
+    local diagnostic = self.LastDiagnostic
     if typeof(destination) ~= "Vector3" or typeof(currentPosition) ~= "Vector3" then
+        diagnostic.Phase = "direct travel: positions unavailable"
+        diagnostic.Reason = "Travel positions are unavailable"
         return {}, "Travel positions are unavailable"
     end
     local seaIndex = self:_CurrentSeaIndex()
     if not seaIndex then
+        diagnostic.Phase = "direct travel: current sea unavailable"
+        diagnostic.Reason = "Current sea is unavailable"
         return {}, "Current sea is unavailable"
     end
+    diagnostic.Sea = SEA_LABELS[seaIndex]
 
     local routes = self:_GetAvailableRoutes(seaIndex)
     local function findBest(position, remainingHops, used)
@@ -4507,10 +4584,54 @@ function MapGatewayService:FindPlan(destination, currentPosition)
 
     local directDistance = distance(currentPosition, destination)
     local plannedCost, plan = findBest(currentPosition, MAX_ROUTE_HOPS, {})
+    diagnostic.DirectDistance = directDistance
+    diagnostic.PlannedDistance = plannedCost
+    diagnostic.DistanceSaved = directDistance - plannedCost
+    diagnostic.MinimumDistanceSaved = MINIMUM_DISTANCE_SAVED
     if #plan == 0 or directDistance - plannedCost < MINIMUM_DISTANCE_SAVED then
+        diagnostic.Phase = "direct travel: no qualifying gateway route"
+        diagnostic.Reason = #plan == 0
+                and "No available route produced a shorter path"
+            or "Best gateway route saves less than the required distance"
         return {}, nil
     end
+    diagnostic.SelectedRoutes = {}
+    for _, route in ipairs(plan) do
+        table.insert(diagnostic.SelectedRoutes, route.Name)
+    end
+    diagnostic.Phase = "gateway route selected"
     return plan, nil
+end
+
+function MapGatewayService:RecordTravelPhase(phase, route, details)
+    local diagnostic = self.LastDiagnostic
+    if not diagnostic then
+        return
+    end
+    diagnostic.Phase = phase
+    diagnostic.UpdatedAt = os.clock()
+    if route then
+        diagnostic.CurrentRoute = route.Name
+        diagnostic.Activation = route.TouchTarget and "touch" or "requestEntrance"
+        if not diagnostic.LastAttempt or diagnostic.LastAttempt.Route ~= route.Name then
+            diagnostic.LastAttempt = {}
+        end
+        diagnostic.LastAttempt.Route = route.Name
+        diagnostic.LastAttempt.Activation = diagnostic.Activation
+        diagnostic.LastAttempt.Phase = phase
+        diagnostic.LastAttempt.UpdatedAt = os.clock()
+    elseif diagnostic.LastAttempt then
+        diagnostic.LastAttempt.Phase = phase
+        diagnostic.LastAttempt.UpdatedAt = os.clock()
+    end
+    if type(details) == "table" then
+        for key, value in pairs(details) do
+            diagnostic[key] = value
+            if diagnostic.LastAttempt and key ~= "CurrentPosition" then
+                diagnostic.LastAttempt[key] = value
+            end
+        end
+    end
 end
 
 function MapGatewayService:MarkFailed(route)
@@ -4521,18 +4642,31 @@ end
 
 function MapGatewayService:Use(route, isCurrent)
     local compatibility = self.Compatibility
+    local diagnostic = self.LastDiagnostic
     isCurrent = isCurrent or function()
         return true
     end
     if not route or not isCurrent() then
+        self:RecordTravelPhase("gateway activation cancelled", route, {
+            Failure = "Travel was cancelled",
+        })
         return false, "Travel was cancelled"
     end
 
     local character, _, root = compatibility:GetCharacterParts()
     if not character or not root then
+        self:RecordTravelPhase("gateway activation failed", route, {
+            Failure = "Character is unavailable",
+        })
         return false, "Character is unavailable"
     end
 
+    self:RecordTravelPhase("activating gateway", route, {
+        PositionBeforeActivation = root.Position,
+        RemoteCallCount = 0,
+        RemoteCallStatus = "not started",
+        ActivationFailure = nil,
+    })
     local requestResult
     if route.TouchTarget then
         local touchOk, touchError = compatibility:TouchPart(
@@ -4540,13 +4674,32 @@ function MapGatewayService:Use(route, isCurrent)
             route.TouchTarget,
             isCurrent
         )
+        if diagnostic and diagnostic.LastAttempt then
+            diagnostic.LastAttempt.RemoteCallStatus = touchOk
+                    and "touch event completed"
+                or "touch event failed"
+            if not touchOk then
+                diagnostic.LastAttempt.ActivationFailure = touchError
+            end
+        end
         if not touchOk then
+            self:RecordTravelPhase("gateway touch failed", route, {
+                Failure = touchError,
+            })
             return false, touchError
         end
     else
         local remote, remoteError = compatibility:GetCommF()
         if not remote then
+            self:RecordTravelPhase("gateway remote unavailable", route, {
+                Failure = remoteError,
+                RemoteCallStatus = "not started",
+            })
             return false, remoteError
+        end
+        if diagnostic and diagnostic.LastAttempt then
+            diagnostic.LastAttempt.RemoteCallCount = 1
+            diagnostic.LastAttempt.RemoteCallStatus = "in progress"
         end
         task.spawn(function()
             if not isCurrent() then
@@ -4560,6 +4713,22 @@ function MapGatewayService:Use(route, isCurrent)
                 )
             end)
             requestResult = { Ok = ok, Result = result }
+            if diagnostic and diagnostic.LastAttempt
+                and diagnostic.LastAttempt.Route == route.Name
+            then
+                diagnostic.LastAttempt.RemoteCallStatus = ok
+                        and "InvokeServer returned"
+                    or "InvokeServer errored"
+                diagnostic.LastAttempt.RemoteResultType = type(result)
+                if type(result) == "string" or type(result) == "number"
+                    or type(result) == "boolean"
+                then
+                    diagnostic.LastAttempt.RemoteResultSummary = formatScalar(result, 100)
+                end
+                if not ok then
+                    diagnostic.LastAttempt.ActivationFailure = formatScalar(result)
+                end
+            end
         end)
     end
 
@@ -4567,23 +4736,204 @@ function MapGatewayService:Use(route, isCurrent)
     while isCurrent() and os.clock() < deadline do
         local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
         if currentCharacter ~= character or not currentRoot then
+            self:RecordTravelPhase("character changed during gateway activation", route, {
+                PositionAfterActivation = currentRoot and currentRoot.Position or nil,
+                Failure = "Character changed during gateway travel",
+            })
             return false, "Character changed during gateway travel"
+        end
+        if diagnostic and diagnostic.LastAttempt
+            and diagnostic.LastAttempt.Route == route.Name
+        then
+            diagnostic.LastAttempt.PositionAfterActivation = currentRoot.Position
+            diagnostic.LastAttempt.DistanceAfterActivation =
+                distance(currentRoot.Position, route.Destination)
+            diagnostic.LastAttempt.Displacement = distance(
+                diagnostic.LastAttempt.PositionBeforeActivation or root.Position,
+                currentRoot.Position
+            )
         end
         if distance(currentRoot.Position, route.Destination) <= 200 then
             self.FailedUntil[route.Name] = nil
+            self:RecordTravelPhase("gateway arrival confirmed", route, {
+                PositionAfterActivation = currentRoot.Position,
+                DistanceAfterActivation = distance(currentRoot.Position, route.Destination),
+            })
             return true
         end
         if requestResult and not requestResult.Ok then
             self:MarkFailed(route)
-            return false, "Gateway request failed: " .. tostring(requestResult.Result)
+            local failure = "Gateway request failed: " .. formatScalar(requestResult.Result)
+            self:RecordTravelPhase("gateway request failed", route, {
+                PositionAfterActivation = currentRoot.Position,
+                Failure = failure,
+            })
+            return false, failure
         end
         task.wait(0.1)
     end
     if not isCurrent() then
+        self:RecordTravelPhase("gateway activation cancelled", route, {
+            Failure = "Travel was cancelled",
+        })
         return false, "Travel was cancelled"
     end
     self:MarkFailed(route)
+    local _, _, finalRoot = compatibility:GetCharacterParts()
+    self:RecordTravelPhase("arrival was not confirmed before timeout", route, {
+        PositionAfterActivation = finalRoot and finalRoot.Position or nil,
+        DistanceAfterActivation = finalRoot
+                and distance(finalRoot.Position, route.Destination)
+            or nil,
+        Failure = "Gateway did not confirm arrival within 8 seconds",
+    })
     return false, "Gateway did not confirm arrival"
+end
+
+function MapGatewayService:BuildDiagnosticReport()
+    local diagnostic = self.LastDiagnostic
+    if type(diagnostic) ~= "table" then
+        return nil
+    end
+
+    local age = math.max(0, os.clock() - (diagnostic.At or os.clock()))
+    if age > 600 then
+        return nil
+    end
+    local lines = {
+        "===== [GatewayDiagnostic] REPORT BEGIN =====",
+        "Age: " .. string.format("%.2f", age) .. " seconds",
+        "Sea: " .. tostring(diagnostic.Sea or "unknown"),
+        "Destination: " .. tostring(diagnostic.DestinationLabel or "unknown")
+            .. " at " .. formatPosition(diagnostic.Destination),
+        "Phase: " .. tostring(diagnostic.Phase or "unknown"),
+    }
+    if diagnostic.CurrentPosition then
+        table.insert(lines, "Start position: " .. formatPosition(diagnostic.CurrentPosition))
+    end
+    if type(diagnostic.DirectDistance) == "number" then
+        table.insert(
+            lines,
+            "Route distances: direct="
+                .. string.format("%.1f", diagnostic.DirectDistance)
+                .. "; planned="
+                .. string.format("%.1f", diagnostic.PlannedDistance or 0)
+                .. "; saved="
+                .. string.format("%.1f", diagnostic.DistanceSaved or 0)
+                .. "; minimum="
+                .. tostring(diagnostic.MinimumDistanceSaved or MINIMUM_DISTANCE_SAVED)
+        )
+    end
+    if diagnostic.Reason then
+        table.insert(lines, "Planner reason: " .. formatScalar(diagnostic.Reason))
+    end
+    if type(diagnostic.SelectedRoutes) == "table" then
+        table.insert(
+            lines,
+            "Selected route(s): "
+                .. (#diagnostic.SelectedRoutes > 0
+                    and table.concat(diagnostic.SelectedRoutes, " -> ")
+                    or "none")
+        )
+    end
+
+    for _, candidate in ipairs(diagnostic.Candidates or {}) do
+        table.insert(
+            lines,
+            "Candidate "
+                .. tostring(candidate.Name)
+                .. ": eligible="
+                .. tostring(candidate.Eligible)
+                .. "; activation="
+                .. tostring(candidate.Activation)
+                .. "; requirement="
+                .. tostring(candidate.Requirement or "none")
+                .. "; owned="
+                .. (candidate.RequirementOwned == nil
+                    and "n/a"
+                    or tostring(candidate.RequirementOwned))
+                .. "; reason="
+                .. formatScalar(candidate.Reason or "available")
+                .. (type(candidate.StandDistance) == "number"
+                    and ("; start_to_pad=" .. string.format("%.1f", candidate.StandDistance))
+                    or "")
+                .. (type(candidate.CooldownRemaining) == "number"
+                    and ("; cooldown=" .. string.format("%.1f", candidate.CooldownRemaining))
+                    or "")
+        )
+    end
+
+    local attempt = diagnostic.LastAttempt
+    if attempt then
+        table.insert(
+            lines,
+            "Last attempt: route="
+                .. tostring(attempt.Route)
+                .. "; type="
+                .. tostring(attempt.Activation)
+                .. "; phase="
+                .. tostring(attempt.Phase)
+                .. "; call_count="
+                .. tostring(attempt.RemoteCallCount or 0)
+                .. "; call_status="
+                .. tostring(attempt.RemoteCallStatus or "n/a")
+        )
+        if attempt.RemoteResultType then
+            table.insert(
+                lines,
+                "Remote result: type="
+                    .. tostring(attempt.RemoteResultType)
+                    .. "; summary="
+                    .. tostring(attempt.RemoteResultSummary or "<not scalar>")
+            )
+        end
+        if attempt.PositionBeforeApproach or attempt.PositionAfterApproach
+            or type(attempt.DistanceToStand) == "number"
+            or type(attempt.DistanceAtStand) == "number"
+        then
+            table.insert(
+                lines,
+                "Approach positions: before="
+                    .. formatPosition(attempt.PositionBeforeApproach)
+                    .. "; after="
+                    .. formatPosition(attempt.PositionAfterApproach)
+                    .. "; start_to_pad="
+                    .. (type(attempt.DistanceToStand) == "number"
+                        and string.format("%.1f", attempt.DistanceToStand)
+                        or "n/a")
+                    .. "; at_pad_distance="
+                    .. (type(attempt.DistanceAtStand) == "number"
+                        and string.format("%.1f", attempt.DistanceAtStand)
+                        or "n/a")
+            )
+        end
+        if attempt.PositionBeforeActivation then
+            table.insert(
+                lines,
+                "Activation positions: before="
+                    .. formatPosition(attempt.PositionBeforeActivation)
+                    .. "; after="
+                    .. formatPosition(attempt.PositionAfterActivation)
+                    .. "; distance_after="
+                    .. (type(attempt.DistanceAfterActivation) == "number"
+                        and string.format("%.1f", attempt.DistanceAfterActivation)
+                        or "n/a")
+                    .. "; displacement="
+                    .. (type(attempt.Displacement) == "number"
+                        and string.format("%.1f", attempt.Displacement)
+                        or "n/a")
+            )
+        end
+        if attempt.Failure then
+            table.insert(lines, "Attempt failure: " .. formatScalar(attempt.Failure))
+        end
+    end
+
+    if diagnostic.Failure then
+        table.insert(lines, "Travel note: " .. formatScalar(diagnostic.Failure))
+    end
+    table.insert(lines, "===== [GatewayDiagnostic] REPORT END =====")
+    return table.concat(lines, "\n")
 end
 
 return MapGatewayService
@@ -4878,6 +5228,9 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
 
         local arrived, reason = self:_MoveAndWait(request, character, request.Destination)
         if arrived then
+            if self.GatewayService then
+                self.GatewayService:RecordTravelPhase("destination reached")
+            end
             self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
             return
         end
@@ -4903,6 +5256,13 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
             retries += 1
             request.StallRetries = retries
             if retries > MAX_STALL_RETRIES then
+                if self.GatewayService then
+                    self.GatewayService:RecordTravelPhase(
+                        "normal travel stopped after gateway fallback",
+                        nil,
+                        { Failure = reason }
+                    )
+                end
                 self:_FinishTravel(
                     request,
                     "Travel stalled after "
@@ -4933,10 +5293,17 @@ function TeleportFeature:_RunTravel(request, character)
             self.GatewayService.FindPlan,
             self.GatewayService,
             request.Destination.Position,
-            root.Position
+            root.Position,
+            request.Label
         )
         if planOk and type(resolvedPlan) == "table" then
             plan = resolvedPlan
+        elseif not planOk then
+            self.GatewayService:RecordTravelPhase(
+                "gateway planning failed; using normal travel",
+                nil,
+                { Failure = resolvedPlan }
+            )
         end
     end
     if #plan > 0 then
@@ -4948,6 +5315,10 @@ function TeleportFeature:_RunTravel(request, character)
             "Using map gateway route: " .. table.concat(routeNames, " → ") .. ".",
             "info"
         )
+    elseif self.GatewayService then
+        self.GatewayService:RecordTravelPhase(
+            "using normal travel: no qualifying map gateway route"
+        )
     end
 
     local gatewayFailed = false
@@ -4955,8 +5326,15 @@ function TeleportFeature:_RunTravel(request, character)
         if not self:_IsTravelCurrent(request, character) then
             return
         end
+        local _, _, approachRoot = compatibility:GetCharacterParts()
+        self.GatewayService:RecordTravelPhase("approaching gateway stand", route, {
+            PositionBeforeApproach = approachRoot and approachRoot.Position or nil,
+            DistanceToStand = approachRoot
+                    and (approachRoot.Position - route.Stand).Magnitude
+                or nil,
+        })
         self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
-        local reached = self:_MoveAndWait(
+        local reached, movementError = self:_MoveAndWait(
             request,
             character,
             CFrame.new(route.Stand)
@@ -4966,6 +5344,15 @@ function TeleportFeature:_RunTravel(request, character)
                 return
             end
             self.GatewayService:MarkFailed(route)
+            local _, _, failedRoot = compatibility:GetCharacterParts()
+            self.GatewayService:RecordTravelPhase(
+                "could not reach gateway stand; falling back to normal travel",
+                route,
+                {
+                    PositionAfterApproach = failedRoot and failedRoot.Position or nil,
+                    Failure = movementError,
+                }
+            )
             self:_SetStatus(
                 "Could not reach " .. route.Name .. "; continuing by normal travel.",
                 "warning"
@@ -4974,6 +5361,13 @@ function TeleportFeature:_RunTravel(request, character)
             break
         end
 
+        local _, _, gatewayRoot = compatibility:GetCharacterParts()
+        self.GatewayService:RecordTravelPhase("at gateway stand; activating", route, {
+            PositionAtStand = gatewayRoot and gatewayRoot.Position or nil,
+            DistanceAtStand = gatewayRoot
+                    and (gatewayRoot.Position - route.Stand).Magnitude
+                or nil,
+        })
         self:_SetStatus("Activating map gateway: " .. route.Name .. ".", "info")
         local used, gatewayError = self.GatewayService:Use(route, function()
             return self:_IsTravelCurrent(request, character)
@@ -4983,6 +5377,11 @@ function TeleportFeature:_RunTravel(request, character)
                 return
             end
             self.GatewayService:MarkFailed(route)
+            self.GatewayService:RecordTravelPhase(
+                "gateway activation failed; falling back to normal travel",
+                route,
+                { Failure = gatewayError }
+            )
             self:_SetStatus(
                 route.Name .. " did not confirm arrival; continuing by normal travel.",
                 "warning"
@@ -4993,6 +5392,10 @@ function TeleportFeature:_RunTravel(request, character)
             end
             break
         end
+        self.GatewayService:RecordTravelPhase(
+            "gateway arrival confirmed; continuing to destination",
+            route
+        )
         self:_SetStatus(
             route.Name .. " arrival confirmed; continuing to " .. request.Label .. ".",
             "info"
@@ -5002,6 +5405,12 @@ function TeleportFeature:_RunTravel(request, character)
     if self:_IsTravelCurrent(request, character) then
         self:_RunDirectTravel(request, character, gatewayFailed)
     end
+end
+
+function TeleportFeature:BuildGatewayDiagnosticReport()
+    return self.GatewayService
+        and self.GatewayService:BuildDiagnosticReport()
+        or nil
 end
 
 function TeleportFeature:_FinishTravel(request, message, kind)
@@ -9792,6 +10201,19 @@ function MainFarm:CopyStatusReport()
         movementDiagnosticIncluded = true
     end
 
+    local gatewayDiagnosticIncluded = false
+    local gatewayDiagnostic = teleportFeature
+        and teleportFeature.BuildGatewayDiagnosticReport
+        and teleportFeature:BuildGatewayDiagnosticReport()
+    if type(gatewayDiagnostic) == "string" and gatewayDiagnostic ~= "" then
+        if type(text) == "string" and text ~= "" then
+            text = text .. "\n\n" .. gatewayDiagnostic
+        else
+            text = gatewayDiagnostic
+        end
+        gatewayDiagnosticIncluded = true
+    end
+
     if type(text) ~= "string" or text == "" then
         self:_SetStatus("No status report is available yet.", "warning")
         return true
@@ -9806,7 +10228,9 @@ function MainFarm:CopyStatusReport()
     end)
     if clipboardCallOk and copied then
         local copiedMessage = "Complete quest status report copied to clipboard."
-        if movementDiagnosticIncluded then
+        if gatewayDiagnosticIncluded then
+            copiedMessage = "Status report including gateway details copied to clipboard."
+        elseif movementDiagnosticIncluded then
             copiedMessage = "Status report including movement-stall details copied to clipboard."
         elseif tikiDiagnostic then
             copiedMessage = "Tiki puzzle diagnostic copied to clipboard."

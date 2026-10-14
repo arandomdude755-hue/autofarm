@@ -284,6 +284,9 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
 
         local arrived, reason = self:_MoveAndWait(request, character, request.Destination)
         if arrived then
+            if self.GatewayService then
+                self.GatewayService:RecordTravelPhase("destination reached")
+            end
             self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
             return
         end
@@ -309,6 +312,13 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
             retries += 1
             request.StallRetries = retries
             if retries > MAX_STALL_RETRIES then
+                if self.GatewayService then
+                    self.GatewayService:RecordTravelPhase(
+                        "normal travel stopped after gateway fallback",
+                        nil,
+                        { Failure = reason }
+                    )
+                end
                 self:_FinishTravel(
                     request,
                     "Travel stalled after "
@@ -339,10 +349,17 @@ function TeleportFeature:_RunTravel(request, character)
             self.GatewayService.FindPlan,
             self.GatewayService,
             request.Destination.Position,
-            root.Position
+            root.Position,
+            request.Label
         )
         if planOk and type(resolvedPlan) == "table" then
             plan = resolvedPlan
+        elseif not planOk then
+            self.GatewayService:RecordTravelPhase(
+                "gateway planning failed; using normal travel",
+                nil,
+                { Failure = resolvedPlan }
+            )
         end
     end
     if #plan > 0 then
@@ -354,6 +371,10 @@ function TeleportFeature:_RunTravel(request, character)
             "Using map gateway route: " .. table.concat(routeNames, " → ") .. ".",
             "info"
         )
+    elseif self.GatewayService then
+        self.GatewayService:RecordTravelPhase(
+            "using normal travel: no qualifying map gateway route"
+        )
     end
 
     local gatewayFailed = false
@@ -361,8 +382,15 @@ function TeleportFeature:_RunTravel(request, character)
         if not self:_IsTravelCurrent(request, character) then
             return
         end
+        local _, _, approachRoot = compatibility:GetCharacterParts()
+        self.GatewayService:RecordTravelPhase("approaching gateway stand", route, {
+            PositionBeforeApproach = approachRoot and approachRoot.Position or nil,
+            DistanceToStand = approachRoot
+                    and (approachRoot.Position - route.Stand).Magnitude
+                or nil,
+        })
         self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
-        local reached = self:_MoveAndWait(
+        local reached, movementError = self:_MoveAndWait(
             request,
             character,
             CFrame.new(route.Stand)
@@ -372,6 +400,15 @@ function TeleportFeature:_RunTravel(request, character)
                 return
             end
             self.GatewayService:MarkFailed(route)
+            local _, _, failedRoot = compatibility:GetCharacterParts()
+            self.GatewayService:RecordTravelPhase(
+                "could not reach gateway stand; falling back to normal travel",
+                route,
+                {
+                    PositionAfterApproach = failedRoot and failedRoot.Position or nil,
+                    Failure = movementError,
+                }
+            )
             self:_SetStatus(
                 "Could not reach " .. route.Name .. "; continuing by normal travel.",
                 "warning"
@@ -380,6 +417,13 @@ function TeleportFeature:_RunTravel(request, character)
             break
         end
 
+        local _, _, gatewayRoot = compatibility:GetCharacterParts()
+        self.GatewayService:RecordTravelPhase("at gateway stand; activating", route, {
+            PositionAtStand = gatewayRoot and gatewayRoot.Position or nil,
+            DistanceAtStand = gatewayRoot
+                    and (gatewayRoot.Position - route.Stand).Magnitude
+                or nil,
+        })
         self:_SetStatus("Activating map gateway: " .. route.Name .. ".", "info")
         local used, gatewayError = self.GatewayService:Use(route, function()
             return self:_IsTravelCurrent(request, character)
@@ -389,6 +433,11 @@ function TeleportFeature:_RunTravel(request, character)
                 return
             end
             self.GatewayService:MarkFailed(route)
+            self.GatewayService:RecordTravelPhase(
+                "gateway activation failed; falling back to normal travel",
+                route,
+                { Failure = gatewayError }
+            )
             self:_SetStatus(
                 route.Name .. " did not confirm arrival; continuing by normal travel.",
                 "warning"
@@ -399,6 +448,10 @@ function TeleportFeature:_RunTravel(request, character)
             end
             break
         end
+        self.GatewayService:RecordTravelPhase(
+            "gateway arrival confirmed; continuing to destination",
+            route
+        )
         self:_SetStatus(
             route.Name .. " arrival confirmed; continuing to " .. request.Label .. ".",
             "info"
@@ -408,6 +461,12 @@ function TeleportFeature:_RunTravel(request, character)
     if self:_IsTravelCurrent(request, character) then
         self:_RunDirectTravel(request, character, gatewayFailed)
     end
+end
+
+function TeleportFeature:BuildGatewayDiagnosticReport()
+    return self.GatewayService
+        and self.GatewayService:BuildDiagnosticReport()
+        or nil
 end
 
 function TeleportFeature:_FinishTravel(request, message, kind)

@@ -138,6 +138,15 @@ require(
     "touch-only gateways must use the guarded compatibility helper and fall back to normal travel",
 )
 require(
+    "function MapGatewayService:BuildDiagnosticReport()" in GATEWAYS
+    and "function MapGatewayService:RecordTravelPhase(phase, route, details)" in GATEWAYS
+    and "RemoteCallStatus" in GATEWAYS
+    and "DistanceAfterActivation" in GATEWAYS
+    and "Candidate " in GATEWAYS
+    and "function TeleportFeature:BuildGatewayDiagnosticReport()" in FEATURE,
+    "gateway diagnostics must distinguish planning, approach, activation, and arrival failures",
+)
+require(
     "TeleportService" not in FEATURE
     and 'Action = "teleport.status"' not in CONFIG,
     "manual travel must not add server hopping or the old placeholder",
