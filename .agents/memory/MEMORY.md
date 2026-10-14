@@ -6,3 +6,4 @@
 - [Farm settings terminology](farm-settings-terminology.md) — “Auto turn on aura” means Buso/Haki activation, separate from Aura Farm.
 - [Travel tab boundaries](travel-tab-boundaries.md) — island/NPC travel toggles turn off on arrival, stay current-sea-only, and cannot overlap Auto Farm.
 - [Player-facing errors](player-facing-errors.md) — block conflicting actions with clear, non-technical bottom-right notifications that say what to turn off.
+- [Status tab data](status-tab-data.md) — reuse validated quest state, prefer local event signals, and label uncertain timer calculations as estimates.

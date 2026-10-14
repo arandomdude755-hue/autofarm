@@ -601,6 +601,119 @@ function QuestService:GetActiveQuestState()
     return "active-unknown", nil, "GuideModule exposes a quest record without a readable task"
 end
 
+function QuestService:GetActiveQuestDetails()
+    local state, targetName, evidence = self:GetActiveQuestState()
+    local details = {
+        State = state,
+        Target = targetName,
+        Title = "Unavailable",
+        Progress = "Unavailable",
+        Reader = evidence or "Quest reader unavailable",
+    }
+    if state ~= "active" or type(targetName) ~= "string" then
+        return details
+    end
+
+    local guideData = self.Guide and self.Guide.Data
+    local questData = type(guideData) == "table" and guideData.QuestData or nil
+    local taskData = type(questData) == "table" and questData.Task or nil
+    local requiredCount = type(taskData) == "table" and tonumber(taskData[targetName]) or nil
+    if requiredCount and requiredCount > 0 then
+        details.Title = "Defeat " .. tostring(requiredCount) .. " " .. targetName
+        details.Progress = "Required: " .. tostring(requiredCount) .. "; current progress unavailable"
+    end
+
+    local firstSea = false
+    if self.Compatibility and type(self.Compatibility.IsFirstSea) == "function" then
+        local seaOk, isFirstSea = pcall(
+            self.Compatibility.IsFirstSea,
+            self.Compatibility
+        )
+        firstSea = seaOk and isFirstSea == true
+    end
+
+    local ok, guiDetails = pcall(function()
+        local compatibility = self.Compatibility
+        if not compatibility or type(compatibility.GetPlayerGui) ~= "function" then
+            return nil
+        end
+        local playerGui = compatibility:GetPlayerGui()
+        if not playerGui then
+            return nil
+        end
+
+        local trackedQuestFrame = playerGui:FindFirstChild("TrackedQuestFrame")
+        if trackedQuestFrame and trackedQuestFrame:IsA("ScreenGui")
+            and trackedQuestFrame.Enabled
+        then
+            local frame = trackedQuestFrame:FindFirstChild("Frame")
+            local header = frame and frame:FindFirstChild("header")
+            local titleLabel = header and header:FindFirstChild("textLabel")
+            local description = frame and frame:FindFirstChild("description")
+            local progressLabel = frame and frame:FindFirstChild("progress")
+            if isVisibleGuiObjectWithin(titleLabel, trackedQuestFrame)
+                and isVisibleGuiObjectWithin(description, trackedQuestFrame)
+                and isVisibleGuiObjectWithin(progressLabel, trackedQuestFrame)
+            then
+                local title = usableTrackedQuestText(
+                    titleLabel.Text,
+                    MAX_TRACKED_QUEST_TEXT_LENGTH
+                )
+                local trackedTarget = usableTrackedQuestText(
+                    description.Text,
+                    MAX_TRACKED_QUEST_TEXT_LENGTH
+                )
+                local progressText = usableTrackedQuestText(
+                    progressLabel.Text,
+                    MAX_TRACKED_QUEST_PROGRESS_LENGTH
+                )
+                local current, total = parseTrackedQuestProgress(progressText)
+                if title and trackedTarget and current ~= nil and total ~= nil
+                    and trackedTargetMatches(targetName, trackedTarget, firstSea)
+                then
+                    return {
+                        Title = title,
+                        Progress = tostring(current) .. "/" .. tostring(total),
+                    }
+                end
+            end
+        end
+
+        if firstSea then
+            local main = playerGui:FindFirstChild("Main")
+            local questFrame = main and main:FindFirstChild("Quest")
+            local container = questFrame and questFrame:FindFirstChild("Container")
+            local questTitle = container and container:FindFirstChild("QuestTitle")
+            local titleLabel = questTitle and questTitle:FindFirstChild("Title")
+            if main and (not main:IsA("ScreenGui") or main.Enabled)
+                and questFrame and questFrame:IsA("GuiObject") and questFrame.Visible
+                and titleLabel and titleLabel:IsA("TextLabel") and titleLabel.Visible
+            then
+                local title = usableTrackedQuestText(
+                    titleLabel.Text,
+                    MAX_MAIN_QUEST_TITLE_LENGTH
+                )
+                local current, total = parseMainQuestTitleProgress(title)
+                if title and current ~= nil and total ~= nil
+                    and titleContainsTarget(title, targetName, true)
+                then
+                    return {
+                        Title = title,
+                        Progress = tostring(current) .. "/" .. tostring(total),
+                    }
+                end
+            end
+        end
+        return nil
+    end)
+
+    if ok and type(guiDetails) == "table" then
+        details.Title = guiDetails.Title or details.Title
+        details.Progress = guiDetails.Progress or details.Progress
+    end
+    return details
+end
+
 function QuestService:SelectLevelQuest()
     local level = self:GetPlayerLevel()
     local guideData = self.Guide and self.Guide.Data
