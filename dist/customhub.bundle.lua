@@ -531,6 +531,7 @@ local Config = {
     },
     TabSubsections = {
         Settings = {
+            { Label = "Event Status", Page = "EventStatus" },
             { Label = "Main settings", Page = "Settings" },
             { Label = "Farm settings", Page = "FarmSettings" },
         },
@@ -700,7 +701,7 @@ local Config = {
             },
         },
         StatusServer = {
-            Title = "Status & Server",
+            Title = "Server Status",
             SingleColumn = true,
             Controls = {
                 {
@@ -720,8 +721,8 @@ local Config = {
                 { Kind = "statusValue", Key = "sea", Label = "Sea" },
                 { Kind = "statusValue", Key = "level", Label = "Level" },
                 { Kind = "statusValue", Key = "race", Label = "Race" },
-                { Kind = "statusValue", Key = "character", Label = "Character" },
-                { Kind = "statusValue", Key = "health", Label = "Health" },
+                { Kind = "statusValue", Key = "fragments", Label = "Fragments" },
+                { Kind = "statusValue", Key = "money", Label = "Money" },
                 {
                     Kind = "sectionHeader",
                     Label = "Farm",
@@ -731,7 +732,7 @@ local Config = {
                 { Kind = "statusValue", Key = "farmMaterials", Label = "Farm Materials" },
                 {
                     Kind = "sectionHeader",
-                    Label = "Active quest",
+                    Label = "Quest",
                 },
                 { Kind = "statusValue", Key = "questState", Label = "Quest status" },
                 { Kind = "statusValue", Key = "questTitle", Label = "Quest" },
@@ -741,24 +742,41 @@ local Config = {
                 { Kind = "statusValue", Key = "questDialogue", Label = "Quest dialogue" },
                 {
                     Kind = "sectionHeader",
+                    Label = "Server",
+                },
+                { Kind = "statusValue", Key = "serverAge", Label = "Server age" },
+                { Kind = "statusValue", Key = "players", Label = "Players" },
+                { Kind = "statusValue", Key = "placeId", Label = "Place ID" },
+                { Kind = "statusValue", Key = "jobId", Label = "Server ID" },
+            },
+        },
+        EventStatus = {
+            Title = "Event Status",
+            SingleColumn = true,
+            Controls = {
+                {
+                    Kind = "button",
+                    Label = "Refresh status",
+                    Action = "status.refresh",
+                },
+                {
+                    Kind = "button",
+                    Label = "Copy status report",
+                    Action = "status.copy",
+                },
+                {
+                    Kind = "sectionHeader",
                     Label = "World events",
                 },
-                { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Legendary item window" },
-                { Kind = "statusValue", Key = "moon", Label = "Moon / game time" },
-                { Kind = "statusValue", Key = "raidTimer", Label = "Raid countdown" },
-                { Kind = "statusValue", Key = "prehistoricTimer", Label = "Prehistoric countdown" },
+                { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Fist / Chalice window" },
+                { Kind = "statusValue", Key = "moon", Label = "Moon phase / game time" },
+                { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
+                { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
+                { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },
                 { Kind = "statusValue", Key = "mirageIsland", Label = "Mirage Island" },
                 { Kind = "statusValue", Key = "prehistoricIsland", Label = "Prehistoric Island" },
                 { Kind = "statusValue", Key = "frozenDimension", Label = "Frozen Dimension" },
                 { Kind = "statusValue", Key = "tikiEyes", Label = "Tiki eyes" },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Server",
-                },
-                { Kind = "statusValue", Key = "serverUptime", Label = "Server uptime" },
-                { Kind = "statusValue", Key = "players", Label = "Players" },
-                { Kind = "statusValue", Key = "placeId", Label = "Place ID" },
-                { Kind = "statusValue", Key = "jobId", Label = "Server ID" },
             },
         },
         Settings = {
@@ -1993,7 +2011,7 @@ end
 
 local function displayTabName(tabName)
     return tabName == "Farm" and "Farming"
-        or tabName == "StatusServer" and "Status"
+        or tabName == "StatusServer" and "Server Status"
         or tabName
 end
 
@@ -5019,66 +5037,19 @@ local function formatDuration(totalSeconds)
     return string.format("%02d:%02d:%02d", hours, minutes, remainder)
 end
 
-local function readGuiTimer(compatibility, timerName)
-    local playerGui = compatibility and type(compatibility.GetPlayerGui) == "function"
-        and compatibility:GetPlayerGui()
-        or nil
-    local main = findChild(playerGui, "Main")
-    if not main then
-        return "Unavailable"
-    end
-    if main:IsA("ScreenGui") and not main.Enabled then
-        return "Unavailable (HUD hidden)"
-    end
-
-    local topHud = findChild(main, "TopHUDList")
-    local timer = findChild(topHud, timerName)
-    if not timer then
-        return "Unavailable"
-    end
-    if readProperty(timer, "Visible") ~= true then
-        return "Not active"
-    end
-
-    local function timeFromText(text)
-        if type(text) ~= "string" then
-            return nil
-        end
-        return text:match("(%d+:%d%d:%d%d)") or text:match("(%d+:%d%d)")
-    end
-
-    local timerText = timeFromText(readProperty(timer, "Text"))
-    if timerText then
-        return "Active: " .. timerText
-    end
-
-    local descendantsOk, descendants = pcall(function()
-        return timer:GetDescendants()
-    end)
-    if descendantsOk and type(descendants) == "table" then
-        for _, descendant in ipairs(descendants) do
-            local isText = false
-            pcall(function()
-                isText = descendant:IsA("TextLabel")
-                    or descendant:IsA("TextButton")
-                    or descendant:IsA("TextBox")
-            end)
-            if isText and readProperty(descendant, "Visible") ~= false then
-                timerText = timeFromText(readProperty(descendant, "Text"))
-                if timerText then
-                    return "Active: " .. timerText
-                end
-            end
-        end
-    end
-    return "Active (countdown text unavailable)"
+local function formatServerAge(totalSeconds)
+    local seconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor(seconds % 3600 / 60)
+    local remainder = seconds % 60
+    return string.format("%dh %dm %ds", hours, minutes, remainder)
 end
 
-local function readLegendaryItemEstimate(workspace)
+local function getOldestLocationTime(workspace)
     local worldOrigin = findChild(workspace, "_WorldOrigin")
     local locations = findChild(worldOrigin, "Locations")
     if not locations then
-        return "Unavailable"
+        return nil
     end
 
     local oldestTimeIn
@@ -5086,7 +5057,7 @@ local function readLegendaryItemEstimate(workspace)
         return locations:GetChildren()
     end)
     if not childrenOk or type(children) ~= "table" then
-        return "Unavailable"
+        return nil
     end
     for _, location in ipairs(children) do
         local value
@@ -5098,23 +5069,71 @@ local function readLegendaryItemEstimate(workspace)
             oldestTimeIn = value
         end
     end
+    return oldestTimeIn
+end
+
+local function readServerElapsed(workspace)
+    local oldestTimeIn = getOldestLocationTime(workspace)
     if not oldestTimeIn then
-        return "Unavailable (no TimeIn markers)"
+        return nil, "No TimeIn markers"
+    end
+    if oldestTimeIn < 1000000000 then
+        return nil, "Unrecognized TimeIn data"
     end
 
-    local nowOk, now = pcall(os.time)
-    now = nowOk and tonumber(now) or nil
-    if not now or oldestTimeIn < 1000000000 then
-        return "Unavailable (unrecognized TimeIn data)"
-    end
-    local elapsed = now - oldestTimeIn
-    if elapsed < 0 or elapsed > 30 * 24 * 60 * 60 then
-        return "Unavailable (TimeIn data is stale)"
+    local function validElapsed(now)
+        local elapsed = tonumber(now) and (tonumber(now) - oldestTimeIn) or nil
+        if elapsed and elapsed >= 0 and elapsed <= 30 * 24 * 60 * 60 then
+            return elapsed
+        end
+        return nil
     end
 
+    -- Prefer Roblox's synchronized server clock for the same TimeIn marker BNN uses.
+    local serverClockOk, serverNow = pcall(function()
+        return workspace:GetServerTimeNow()
+    end)
+    if serverClockOk then
+        local elapsed = validElapsed(serverNow)
+        if elapsed then
+            return elapsed
+        end
+    end
+
+    -- Older runtimes may need BNN's tick() clock correction.
+    local tickOk, correctedTick = pcall(function()
+        return tick() - 25200
+    end)
+    if tickOk then
+        local elapsed = validElapsed(correctedTick)
+        if elapsed then
+            return elapsed
+        end
+    end
+    return nil, "TimeIn clock mismatch"
+end
+
+local function readLegendaryItemEstimate(workspace)
+    local elapsed, reason = readServerElapsed(workspace)
+    if not elapsed then
+        return "Unavailable (" .. tostring(reason) .. ")"
+    end
     local cycleSeconds = 4 * 60 * 60
     local remaining = cycleSeconds - (elapsed % cycleSeconds)
     return formatDuration(remaining) .. " (estimate)"
+end
+
+local function formatNumber(value)
+    local number = tonumber(value)
+    if not number then
+        return displayValue(value)
+    end
+    local integer = math.floor(number)
+    local sign = integer < 0 and "-" or ""
+    local digits = tostring(math.abs(integer))
+    local reversed = digits:reverse():gsub("(%d%d%d)", "%1,")
+    local formatted = reversed:reverse():gsub("^,", "")
+    return sign .. formatted
 end
 
 local function readMoonStatus()
@@ -5192,13 +5211,44 @@ local function readTikiEyes(map)
     return tostring(cleared) .. " / 4 cleared"
 end
 
+local ELITE_TARGET_NAMES = {
+    "Deandre",
+    "Urban",
+    "Diablo",
+}
+
+local function readEliteHunterStatus(workspace)
+    local enemies = findChild(workspace, "Enemies")
+    if not enemies then
+        return "Unavailable (Enemies folder not loaded)"
+    end
+    local childrenOk, children = pcall(function()
+        return enemies:GetChildren()
+    end)
+    if not childrenOk or type(children) ~= "table" then
+        return "Unavailable"
+    end
+    for _, enemy in ipairs(children) do
+        if enemy:IsA("Model") and table.find(ELITE_TARGET_NAMES, enemy.Name) then
+            local humanoid = enemy:FindFirstChildWhichIsA("Humanoid")
+            if enemy:FindFirstChild("HumanoidRootPart")
+                and humanoid
+                and humanoid.Health > 0
+            then
+                return "Active: " .. enemy.Name
+            end
+        end
+    end
+    return "No active target loaded"
+end
+
 local function readWorldEventValues(context)
     local compatibility = context and context.Compatibility
     local workspace = compatibility and compatibility.Workspace
     local map = findChild(workspace, "Map")
     local worldOrigin = findChild(workspace, "_WorldOrigin")
     local locations = findChild(worldOrigin, "Locations")
-    local distributedTime = tonumber(readProperty(workspace, "DistributedGameTime"))
+    local serverElapsed = readServerElapsed(workspace)
     local mirage = findChild(map, "MysticIsland")
     local prehistoric = findChild(map, "PrehistoricIsland")
     local frozenDimension = findChild(locations, "Frozen Dimension")
@@ -5211,15 +5261,100 @@ local function readWorldEventValues(context)
     end
 
     return {
-        serverUptime = distributedTime and formatDuration(distributedTime) or "Unavailable",
+        serverAge = serverElapsed and formatServerAge(serverElapsed) or "Unavailable",
         legendaryItemTimer = readLegendaryItemEstimate(workspace),
         moon = readMoonStatus(),
-        raidTimer = readGuiTimer(compatibility, "RaidTimer"),
-        prehistoricTimer = readGuiTimer(compatibility, "PrehistoricRaidTimer"),
+        eliteHunter = readEliteHunterStatus(workspace),
         mirageIsland = presence(mirage, not map),
         prehistoricIsland = presence(prehistoric, not map),
         frozenDimension = presence(frozenDimension, not locations),
         tikiEyes = readTikiEyes(map),
+    }
+end
+
+local function readRemoteFunction(context)
+    local compatibility = context and context.Compatibility
+    local replicatedStorage = compatibility and compatibility.ReplicatedStorage
+    local remotes = findChild(replicatedStorage, "Remotes")
+    local remote = findChild(remotes, "CommF_")
+    if remote and remote:IsA("RemoteFunction") then
+        return remote
+    end
+    return nil
+end
+
+local function isThirdSea(compatibility)
+    local method = compatibility and compatibility.IsThirdSea
+    if type(method) ~= "function" then
+        return false
+    end
+    local ok, value = pcall(method, compatibility)
+    return ok and value == true
+end
+
+local function readLeviathanSpyStatus(context, remote)
+    if not isThirdSea(context and context.Compatibility) then
+        return "Third Sea only"
+    end
+    if not remote then
+        return "Unavailable (status remote not loaded)"
+    end
+    local ok, result = pcall(function()
+        return remote:InvokeServer("InfoLeviathan", "1")
+    end)
+    if not ok then
+        return "Unavailable (server check failed)"
+    end
+    local status = tonumber(result)
+    if status == 5 then
+        return "Ready to find Leviathan"
+    elseif status == -1 or status == nil then
+        return "Spy status unknown"
+    end
+    return "Visit the Spy for Leviathan info"
+end
+
+local function readCakePrinceMobs(context, remote)
+    if not isThirdSea(context and context.Compatibility) then
+        return "Third Sea only"
+    end
+    if not remote then
+        return "Unavailable (status remote not loaded)"
+    end
+    local ok, result = pcall(function()
+        return remote:InvokeServer("CakePrinceSpawner", true)
+    end)
+    if not ok then
+        return "Unavailable (server check failed)"
+    end
+    if type(result) == "number" then
+        return tostring(math.max(0, math.floor(result))) .. " mobs remaining"
+    end
+    if type(result) ~= "string" or result == "" then
+        return "Unavailable"
+    end
+
+    local normalized = string.lower(result)
+    if string.find(normalized, "open the portal now", 1, true) then
+        return "Portal ready"
+    elseif string.find(normalized, "already spawned", 1, true)
+        or string.find(normalized, "cake prince has spawned", 1, true)
+    then
+        return "Cake Prince spawned"
+    end
+    local count = result:match("(%d+)%s*[Mm]obs?")
+        or result:match("(%d+)")
+    if count then
+        return tostring(count) .. " mobs remaining"
+    end
+    return result:sub(1, 90)
+end
+
+local function readRemoteEventValues(context)
+    local remote = readRemoteFunction(context)
+    return {
+        leviathanSpy = readLeviathanSpyStatus(context, remote),
+        cakePrinceMobs = readCakePrinceMobs(context, remote),
     }
 end
 
@@ -5245,21 +5380,6 @@ local function getSea(compatibility)
     return matched or "Unknown"
 end
 
-local function getCharacterStatus(character)
-    if not character then
-        return "Not spawned"
-    end
-    local humanoid = character:FindFirstChildWhichIsA("Humanoid")
-    local root = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not root then
-        return "Loading"
-    end
-    if humanoid.Health <= 0 then
-        return "Respawning"
-    end
-    return "Alive"
-end
-
 function StatusFeature:_ReadValues()
     local context = self.Context
     local compatibility = context and context.Compatibility
@@ -5267,20 +5387,8 @@ function StatusFeature:_ReadValues()
     local playerData = player and player:FindFirstChild("Data")
     local level = getChildValue(playerData, "Level")
     local race = getChildValue(playerData, "Race")
-    local character = player and player.Character
-    local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
-    local health = "Unavailable"
-    if humanoid then
-        local currentHealth = tonumber(humanoid.Health)
-        local maxHealth = tonumber(humanoid.MaxHealth)
-        if currentHealth and maxHealth then
-            health = string.format(
-                "%d / %d",
-                math.floor(currentHealth + 0.5),
-                math.floor(maxHealth + 0.5)
-            )
-        end
-    end
+    local fragments = getChildValue(playerData, "Fragments")
+    local money = getChildValue(playerData, "Beli") or getChildValue(playerData, "Money")
 
     local snapshot = context.State:GetSnapshot()
     local farmSettings = context.Config and context.Config.FarmSettings or {}
@@ -5348,13 +5456,14 @@ function StatusFeature:_ReadValues()
         ["active-unknown"] = "Active (details unavailable)",
     }
     local worldEvents = readWorldEventValues(context)
+    local remoteEvents = self.RemoteEventStatus or {}
 
     return {
         sea = getSea(compatibility),
         level = displayValue(level),
         race = displayValue(race),
-        character = getCharacterStatus(character),
-        health = health,
+        fragments = formatNumber(fragments),
+        money = money ~= nil and ("$" .. formatNumber(money)) or "Unavailable",
         autoFarm = snapshot.featureEnabled["farm.main"] and "On" or "Off",
         farmMastery = farmSettings.FarmMastery == true and "On" or "Off",
         farmMaterials = farmSettings.FarmMaterialsEnabled == true and "On" or "Off",
@@ -5365,11 +5474,12 @@ function StatusFeature:_ReadValues()
         questProgress = questDetails.Progress or "Unavailable",
         questReader = questDetails.Reader or "Quest reader unavailable",
         questDialogue = questDialogue,
-        serverUptime = worldEvents.serverUptime,
+        serverAge = worldEvents.serverAge,
         legendaryItemTimer = worldEvents.legendaryItemTimer,
         moon = worldEvents.moon,
-        raidTimer = worldEvents.raidTimer,
-        prehistoricTimer = worldEvents.prehistoricTimer,
+        leviathanSpy = remoteEvents.leviathanSpy or "Waiting for status check",
+        cakePrinceMobs = remoteEvents.cakePrinceMobs or "Waiting for status check",
+        eliteHunter = worldEvents.eliteHunter,
         mirageIsland = worldEvents.mirageIsland,
         prehistoricIsland = worldEvents.prehistoricIsland,
         frozenDimension = worldEvents.frozenDimension,
@@ -5387,8 +5497,8 @@ function StatusFeature:_BuildReport(values)
         "Sea: " .. values.sea,
         "Level: " .. values.level,
         "Race: " .. values.race,
-        "Character: " .. values.character,
-        "Health: " .. values.health,
+        "Fragments: " .. values.fragments,
+        "Money: " .. values.money,
         "Auto Farm: " .. values.autoFarm,
         "Farm Mastery: " .. values.farmMastery,
         "Farm Materials: " .. values.farmMaterials,
@@ -5398,11 +5508,12 @@ function StatusFeature:_BuildReport(values)
         "Quest progress: " .. values.questProgress,
         "Quest reader: " .. values.questReader,
         "Quest dialogue: " .. values.questDialogue,
-        "Server uptime: " .. values.serverUptime,
+        "Server age: " .. values.serverAge,
         "Next legendary item: " .. values.legendaryItemTimer,
         "Moon: " .. values.moon,
-        "Raid timer: " .. values.raidTimer,
-        "Prehistoric timer: " .. values.prehistoricTimer,
+        "Leviathan Spy: " .. values.leviathanSpy,
+        "Cake Prince mobs: " .. values.cakePrinceMobs,
+        "Elite Hunter: " .. values.eliteHunter,
         "Mirage Island: " .. values.mirageIsland,
         "Prehistoric Island: " .. values.prehistoricIsland,
         "Frozen Dimension: " .. values.frozenDimension,
@@ -5415,18 +5526,55 @@ function StatusFeature:_BuildReport(values)
     return table.concat(lines, "\n")
 end
 
+function StatusFeature:_RequestEventStatusRefresh(context, generation)
+    if self._remoteRefreshBusy == generation then
+        return
+    end
+    local now = os.clock()
+    if now - (self._lastRemoteRefreshAt or -math.huge) < 15 then
+        return
+    end
+    self._lastRemoteRefreshAt = now
+    self._remoteRefreshBusy = generation
+    task.spawn(function()
+        local ok, values = pcall(readRemoteEventValues, context)
+        if self._remoteRefreshBusy == generation then
+            self._remoteRefreshBusy = nil
+        end
+        if not ok or type(values) ~= "table"
+            or self.Context ~= context
+            or self._generation ~= generation
+        then
+            return
+        end
+        self.RemoteEventStatus = values
+        context.State:SetStatusValues(self:_ReadValues())
+    end)
+end
+
 function StatusFeature:Initialize(context)
     self.Context = context
     self._generation = (self._generation or 0) + 1
     local generation = self._generation
+    self._remoteRefreshBusy = nil
+    self._lastRemoteRefreshAt = -math.huge
+    self.RemoteEventStatus = {
+        leviathanSpy = "Waiting for status check",
+        cakePrinceMobs = "Waiting for status check",
+    }
     context.State:SetStatusValues(self:_ReadValues())
     task.spawn(function()
         while self.Context == context and self._generation == generation do
             task.wait(1)
             if self.Context == context and self._generation == generation then
                 local snapshot = context.State:GetSnapshot()
-                if snapshot.selectedTab == "StatusServer" then
+                if snapshot.selectedTab == "StatusServer"
+                    or snapshot.selectedTab == "EventStatus"
+                then
                     context.State:SetStatusValues(self:_ReadValues())
+                end
+                if snapshot.selectedTab == "EventStatus" then
+                    self:_RequestEventStatusRefresh(context, generation)
                 end
             end
         end
@@ -5440,6 +5588,10 @@ function StatusFeature:Handle(actionId)
     end
     local values = self:_ReadValues()
     self.Context.State:SetStatusValues(values)
+    local snapshot = self.Context.State:GetSnapshot()
+    if snapshot.selectedTab == "EventStatus" then
+        self:_RequestEventStatusRefresh(self.Context, self._generation)
+    end
     if actionId == "status.refresh" then
         self.Context.State:SetStatus("Status refreshed.", "success")
         return true
@@ -5464,6 +5616,8 @@ end
 
 function StatusFeature:Cleanup()
     self._generation = (self._generation or 0) + 1
+    self._remoteRefreshBusy = nil
+    self.RemoteEventStatus = nil
     self.Context = nil
 end
 

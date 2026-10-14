@@ -502,6 +502,7 @@ local Config = {
     },
     TabSubsections = {
         Settings = {
+            { Label = "Event Status", Page = "EventStatus" },
             { Label = "Main settings", Page = "Settings" },
             { Label = "Farm settings", Page = "FarmSettings" },
         },
@@ -671,7 +672,7 @@ local Config = {
             },
         },
         StatusServer = {
-            Title = "Status & Server",
+            Title = "Server Status",
             SingleColumn = true,
             Controls = {
                 {
@@ -691,8 +692,8 @@ local Config = {
                 { Kind = "statusValue", Key = "sea", Label = "Sea" },
                 { Kind = "statusValue", Key = "level", Label = "Level" },
                 { Kind = "statusValue", Key = "race", Label = "Race" },
-                { Kind = "statusValue", Key = "character", Label = "Character" },
-                { Kind = "statusValue", Key = "health", Label = "Health" },
+                { Kind = "statusValue", Key = "fragments", Label = "Fragments" },
+                { Kind = "statusValue", Key = "money", Label = "Money" },
                 {
                     Kind = "sectionHeader",
                     Label = "Farm",
@@ -702,7 +703,7 @@ local Config = {
                 { Kind = "statusValue", Key = "farmMaterials", Label = "Farm Materials" },
                 {
                     Kind = "sectionHeader",
-                    Label = "Active quest",
+                    Label = "Quest",
                 },
                 { Kind = "statusValue", Key = "questState", Label = "Quest status" },
                 { Kind = "statusValue", Key = "questTitle", Label = "Quest" },
@@ -712,24 +713,41 @@ local Config = {
                 { Kind = "statusValue", Key = "questDialogue", Label = "Quest dialogue" },
                 {
                     Kind = "sectionHeader",
+                    Label = "Server",
+                },
+                { Kind = "statusValue", Key = "serverAge", Label = "Server age" },
+                { Kind = "statusValue", Key = "players", Label = "Players" },
+                { Kind = "statusValue", Key = "placeId", Label = "Place ID" },
+                { Kind = "statusValue", Key = "jobId", Label = "Server ID" },
+            },
+        },
+        EventStatus = {
+            Title = "Event Status",
+            SingleColumn = true,
+            Controls = {
+                {
+                    Kind = "button",
+                    Label = "Refresh status",
+                    Action = "status.refresh",
+                },
+                {
+                    Kind = "button",
+                    Label = "Copy status report",
+                    Action = "status.copy",
+                },
+                {
+                    Kind = "sectionHeader",
                     Label = "World events",
                 },
-                { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Legendary item window" },
-                { Kind = "statusValue", Key = "moon", Label = "Moon / game time" },
-                { Kind = "statusValue", Key = "raidTimer", Label = "Raid countdown" },
-                { Kind = "statusValue", Key = "prehistoricTimer", Label = "Prehistoric countdown" },
+                { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Fist / Chalice window" },
+                { Kind = "statusValue", Key = "moon", Label = "Moon phase / game time" },
+                { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
+                { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
+                { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },
                 { Kind = "statusValue", Key = "mirageIsland", Label = "Mirage Island" },
                 { Kind = "statusValue", Key = "prehistoricIsland", Label = "Prehistoric Island" },
                 { Kind = "statusValue", Key = "frozenDimension", Label = "Frozen Dimension" },
                 { Kind = "statusValue", Key = "tikiEyes", Label = "Tiki eyes" },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Server",
-                },
-                { Kind = "statusValue", Key = "serverUptime", Label = "Server uptime" },
-                { Kind = "statusValue", Key = "players", Label = "Players" },
-                { Kind = "statusValue", Key = "placeId", Label = "Place ID" },
-                { Kind = "statusValue", Key = "jobId", Label = "Server ID" },
             },
         },
         Settings = {

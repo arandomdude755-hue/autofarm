@@ -32,7 +32,7 @@ end
 
 local function displayTabName(tabName)
     return tabName == "Farm" and "Farming"
-        or tabName == "StatusServer" and "Status"
+        or tabName == "StatusServer" and "Server Status"
         or tabName
 end
 

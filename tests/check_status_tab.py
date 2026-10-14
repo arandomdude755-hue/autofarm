@@ -20,23 +20,27 @@ def require(condition, message):
 
 require(
     '"StatusServer"' in CONFIG
-    and 'Title = "Status & Server"' in CONFIG
-    and 'tabName == "StatusServer" and "Status"' in UI
+    and 'Title = "Server Status"' in CONFIG
+    and 'tabName == "StatusServer" and "Server Status"' in UI
+    and 'Settings = {\n            { Label = "Event Status", Page = "EventStatus" }' in CONFIG
+    and 'EventStatus = {\n            Title = "Event Status"' in CONFIG
     and 'Action = "status.refresh"' in CONFIG
     and 'Action = "status.copy"' in CONFIG,
-    "Status & Server tab exposes refresh and copy actions",
+    "Server Status remains top-level and Event Status is the Settings default subpage",
 )
 require(
     'Kind = "statusValue"' in CONFIG
     and "statusValues = statusValues" in STATE
     and "function State:SetStatusValues(values)" in STATE
     and "snapshot.statusValues[entry.Key]" in UI,
-    "read-only status rows update from isolated state snapshots",
+    "status rows update from isolated state snapshots",
 )
 require(
     all(
         f'Key = "{key}"' in CONFIG
         for key in (
+            "fragments",
+            "money",
             "questState",
             "questTitle",
             "questTarget",
@@ -49,45 +53,54 @@ require(
     and "self:GetActiveQuestState()" in QUEST_SERVICE
     and "parseTrackedQuestProgress" in QUEST_SERVICE
     and "titleContainsTarget(title, targetName, true)" in QUEST_SERVICE,
-    "active quest details reuse validated target matching and expose supported progress",
+    "Server Status replaces health/alive with currency and reuses validated quest details",
 )
 require(
     all(
         f'Key = "{key}"' in CONFIG
         for key in (
-            "serverUptime",
+            "serverAge",
             "legendaryItemTimer",
             "moon",
-            "raidTimer",
-            "prehistoricTimer",
+            "leviathanSpy",
+            "cakePrinceMobs",
+            "eliteHunter",
             "mirageIsland",
             "prehistoricIsland",
             "frozenDimension",
             "tikiEyes",
         )
     )
+    and "raidTimer" not in CONFIG
+    and "prehistoricTimer" not in CONFIG
+    and '"Health"' not in CONFIG
+    and '"Character"' not in CONFIG
     and "function readWorldEventValues(context)" in FEATURE
-    and 'readGuiTimer(compatibility, "RaidTimer")' in FEATURE
-    and 'readGuiTimer(compatibility, "PrehistoricRaidTimer")' in FEATURE
     and 'location:GetAttribute("TimeIn")' in FEATURE
-    and '" (estimate)"' in FEATURE,
-    "world-event status uses local timers and labels the legendary-item window as an estimate",
+    and "workspace:GetServerTimeNow()" in FEATURE
+    and "tick() - 25200" in FEATURE
+    and '" (estimate)"' in FEATURE
+    and "ELITE_TARGET_NAMES" in FEATURE,
+    "Event Status includes BNN-style server age, moon, and requested world-event status without raid countdowns",
 )
 require(
     "function StatusFeature:_ReadValues()" in FEATURE
     and "function StatusFeature:_BuildReport(values)" in FEATURE
     and 'values.fullJobId' in FEATURE
     and 'context.State:SetStatusValues(self:_ReadValues())' in FEATURE
-    and "InvokeServer" not in FEATURE
-    and "CommF_" not in FEATURE
+    and 'InvokeServer("InfoLeviathan", "1")' in FEATURE
+    and 'InvokeServer("CakePrinceSpawner", true)' in FEATURE
+    and 'InvokeServer("CakePrinceSpawner")' not in FEATURE
     and "StatusFeature" in MANAGER,
-    "status report gathers local player and server data without invoking remotes",
+    "event status uses only the references' read-only remote queries and never triggers Cake Prince",
 )
 require(
-    "snapshot.selectedTab == \"StatusServer\"" in FEATURE
+    'snapshot.selectedTab == "StatusServer"' in FEATURE
+    and 'snapshot.selectedTab == "EventStatus"' in FEATURE
+    and "now - (self._lastRemoteRefreshAt or -math.huge) < 15" in FEATURE
     and "task.wait(1)" in FEATURE
     and "self._generation = (self._generation or 0) + 1" in FEATURE,
-    "event timers refresh only while the Status tab is open and stop on cleanup",
+    "local status refreshes only on the two status pages and remote checks are rate-limited",
 )
 require(
     "StatusValueEntries" in UI
