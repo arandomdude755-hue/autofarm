@@ -802,6 +802,21 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession)
     if not self.MovementService then
         return false
     end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature.MoveFarmTo then
+        local routed, routeResult = teleportFeature:MoveFarmTo(destination, {
+            Speed = 190,
+            Threshold = threshold,
+            KeepSession = keepSession == true,
+            Label = "farm target",
+            IsCurrent = function()
+                return self:_IsCurrent(session)
+            end,
+        })
+        if routed then
+            return true, routeResult
+        end
+    end
     return self.MovementService:MoveTo(destination, {
         Speed = 190,
         Threshold = threshold,
@@ -3510,6 +3525,10 @@ function MainFarm:Stop()
     self.Session += 1
     self.Running = false
     self:_EndQuestDiagnosticWait("stopped_before_confirmation", os.clock())
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature.CancelFarmTravel then
+        teleportFeature:CancelFarmTravel()
+    end
     if self.MovementService then
         self.MovementService:Cancel()
         self.MovementService:SetFarmCollisionSuppression(false)

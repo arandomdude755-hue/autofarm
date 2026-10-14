@@ -171,6 +171,26 @@ require(
     and "and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL" in GATEWAYS,
     "requestEntrance must retry at the Vxeze cadence until arrival or the bounded timeout",
 )
+farm_navigation = FEATURE[
+    FEATURE.index("function TeleportFeature:MoveFarmTo("):
+    FEATURE.index("\nfunction TeleportFeature:_StartTravel(")
+]
+farm_move = MAIN_FARM[
+    MAIN_FARM.index("function MainFarm:_MoveTo("):
+    MAIN_FARM.index("\nfunction MainFarm:_HoldPosition(")
+]
+require(
+    "function TeleportFeature:MoveFarmTo(destination, options)" in farm_navigation
+    and "self.GatewayService.FindPlan" in farm_navigation
+    and "RoutePlan = routePlan" in farm_navigation
+    and "task.spawn(function()" in farm_navigation
+    and "pcall(self._RunTravel, self, request, character)" in farm_navigation
+    and "teleportFeature:MoveFarmTo(destination" in farm_move
+    and "Label = \"farm target\"" in farm_move
+    and "self.ActiveFarmTravel == request" in FEATURE
+    and "self:CancelFarmTravel(true)" in FEATURE,
+    "all MainFarm travel must reuse the same distance planner, route executor, and cancellation handling as travel-tab routes",
+)
 title_diagnostic = COMPATIBILITY[
     COMPATIBILITY.index("function Compatibility:BuildTitleAccessDiagnosticReport()"):
     COMPATIBILITY.index("\nfunction Compatibility:GetCombatDependencies()")

@@ -5,7 +5,10 @@ local TeleportFeature = {
     MovementService = nil,
     GatewayService = nil,
     ActiveTravel = nil,
+    ActiveFarmTravel = nil,
     Generation = 0,
+    FarmTravelGeneration = 0,
+    LastFarmGatewayPlanCheck = nil,
     CharacterRemovingConnection = nil,
 }
 
@@ -174,6 +177,18 @@ function TeleportFeature:_IsTravelCurrent(request, character)
     local context = self.Context
     local compatibility = context and context.Compatibility
     local mainFarm = context and context.MainFarm
+    if request.IsFarmTask == true then
+        local isCurrentOk, taskIsCurrent = pcall(request.IsCurrent)
+        return self.ActiveFarmTravel == request
+            and self.FarmTravelGeneration == request.Generation
+            and compatibility
+            and compatibility.Player
+            and compatibility.Player.Character == character
+            and mainFarm
+            and mainFarm.Running
+            and isCurrentOk
+            and taskIsCurrent == true
+    end
     return self.ActiveTravel == request
         and self.Generation == request.Generation
         and compatibility
@@ -343,8 +358,8 @@ end
 function TeleportFeature:_RunTravel(request, character)
     local compatibility = self.Context.Compatibility
     local _, _, root = compatibility:GetCharacterParts()
-    local plan = {}
-    if root and self.GatewayService then
+    local plan = request.RoutePlan or {}
+    if not request.RoutePlan and root and self.GatewayService then
         local planOk, resolvedPlan = pcall(
             self.GatewayService.FindPlan,
             self.GatewayService,
@@ -470,6 +485,18 @@ function TeleportFeature:BuildGatewayDiagnosticReport()
 end
 
 function TeleportFeature:_FinishTravel(request, message, kind)
+    if request.IsFarmTask == true then
+        if self.ActiveFarmTravel ~= request then
+            return
+        end
+        self.ActiveFarmTravel = nil
+        self.FarmTravelGeneration += 1
+        if self.MovementService then
+            self.MovementService:Cancel()
+        end
+        self:_SetStatus("Gateway route finished; farming will continue.", "info")
+        return
+    end
     if self.ActiveTravel ~= request then
         return
     end
@@ -505,6 +532,115 @@ function TeleportFeature:Cancel(message, keepActionEnabled)
         self:_SetStatus("Travel cancelled.", "info")
     end
     return true
+end
+
+function TeleportFeature:CancelFarmTravel(skipMovementCancel)
+    if not self.ActiveFarmTravel then
+        return false
+    end
+    self.ActiveFarmTravel = nil
+    self.FarmTravelGeneration += 1
+    self.LastFarmGatewayPlanCheck = nil
+    if self.MovementService and not skipMovementCancel then
+        self.MovementService:Cancel()
+    end
+    return true
+end
+
+function TeleportFeature:MoveFarmTo(destination, options)
+    options = options or {}
+    if typeof(destination) ~= "CFrame"
+        or not self.GatewayService
+        or not self.MovementService
+    then
+        return false, "Gateway-aware farm travel is unavailable"
+    end
+    local isCurrent = options.IsCurrent or function()
+        return true
+    end
+    if not isCurrent() then
+        self:CancelFarmTravel()
+        return false, "Farm movement is no longer current"
+    end
+
+    local character, _, root = self.Context.Compatibility:GetCharacterParts()
+    if not character or not root then
+        return false, "Character is unavailable"
+    end
+
+    local active = self.ActiveFarmTravel
+    if active and self:_IsTravelCurrent(active, active.Character) then
+        local shift = (active.Destination.Position - destination.Position).Magnitude
+        if shift <= 500 then
+            active.Destination = destination
+            active.Label = options.Label or active.Label
+            return true, "gateway route in progress"
+        end
+        self:CancelFarmTravel()
+    elseif active then
+        self:CancelFarmTravel()
+    end
+
+    local directDistance = (destination.Position - root.Position).Magnitude
+    if directDistance <= 1500 then
+        self.LastFarmGatewayPlanCheck = nil
+        return false, "No long-distance gateway route needed"
+    end
+
+    local now = os.clock()
+    local cached = self.LastFarmGatewayPlanCheck
+    if cached
+        and now - cached.At < 0.75
+        and (cached.Destination - destination.Position).Magnitude <= 200
+    then
+        return false, cached.Error or "No qualifying gateway route"
+    end
+
+    local planOk, routePlan = pcall(
+        self.GatewayService.FindPlan,
+        self.GatewayService,
+        destination.Position,
+        root.Position,
+        options.Label or "Farm target"
+    )
+    if not planOk or type(routePlan) ~= "table" or #routePlan == 0 then
+        self.LastFarmGatewayPlanCheck = {
+            At = now,
+            Destination = destination.Position,
+            Error = planOk and "No qualifying gateway route" or tostring(routePlan),
+        }
+        return false, self.LastFarmGatewayPlanCheck.Error
+    end
+
+    self.FarmTravelGeneration += 1
+    local request = {
+        IsFarmTask = true,
+        Generation = self.FarmTravelGeneration,
+        Character = character,
+        StartedAt = now,
+        Label = options.Label or "Farm target",
+        Destination = destination,
+        RoutePlan = routePlan,
+        IsCurrent = isCurrent,
+        Speed = tonumber(options.Speed) or 190,
+        Threshold = tonumber(options.Threshold) or 8,
+        KeepSession = options.KeepSession == true,
+        StallRetries = 0,
+    }
+    self.ActiveFarmTravel = request
+    self.LastFarmGatewayPlanCheck = nil
+    self:_SetStatus("Using a shorter gateway route to " .. request.Label .. ".", "info")
+    task.spawn(function()
+        local runOk, runError = pcall(self._RunTravel, self, request, character)
+        if not runOk and self.ActiveFarmTravel == request then
+            self:_FinishTravel(
+                request,
+                "Gateway route failed; farming will retry normal travel: " .. tostring(runError),
+                "warning"
+            )
+        end
+    end)
+    return true, "gateway route selected"
 end
 
 function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
@@ -725,13 +861,22 @@ function TeleportFeature:Initialize(context)
     self:Cleanup()
     self.Context = context
     self.Generation = 0
+    self.FarmTravelGeneration = 0
     self.ActiveTravel = nil
+    self.ActiveFarmTravel = nil
+    self.LastFarmGatewayPlanCheck = nil
     self.MovementService = context.MovementService
     self.GatewayService = MapGatewayService.new(context.Compatibility)
+    if self.MovementService then
+        self.MovementService.OnCancel = function()
+            self:CancelFarmTravel(true)
+        end
+    end
 
     local player = context.Compatibility.Player
     if player then
         self.CharacterRemovingConnection = player.CharacterRemoving:Connect(function()
+            self:CancelFarmTravel()
             self:Cancel("Travel cancelled because the character is resetting.")
         end)
     end
@@ -739,7 +884,11 @@ function TeleportFeature:Initialize(context)
 end
 
 function TeleportFeature:Cleanup()
+    self:CancelFarmTravel()
     self:Cancel("Travel cancelled during hub cleanup.")
+    if self.MovementService then
+        self.MovementService.OnCancel = nil
+    end
     disconnect(self.CharacterRemovingConnection)
     self.CharacterRemovingConnection = nil
     self.Context = nil

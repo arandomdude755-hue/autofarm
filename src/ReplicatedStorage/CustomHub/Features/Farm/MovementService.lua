@@ -419,6 +419,9 @@ end
 
 function MovementService:Cancel()
     self.RouteGeneration += 1
+    if type(self.OnCancel) == "function" then
+        pcall(self.OnCancel)
+    end
     self:_StopMovement()
     self:_DestroyHoldForce()
 end
