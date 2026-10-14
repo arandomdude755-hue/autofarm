@@ -76,6 +76,14 @@ require(
     "travel must stop on character reset and surface movement stalls",
 )
 require(
+    "local MAX_STALL_RETRIES = 2" in FEATURE
+    and "request.StallRetries += 1" in FEATURE
+    and "task.wait(STALL_RETRY_DELAY)" in FEATURE
+    and "issueMovement" in FEATURE
+    and "Travel stalled after " in FEATURE,
+    "manual travel must retry a transient movement stall a bounded number of times",
+)
+require(
     "TeleportService" not in FEATURE
     and "ReplicatedStorage" not in FEATURE
     and 'Action = "teleport.status"' not in CONFIG,

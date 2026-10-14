@@ -6,6 +6,9 @@ local TeleportFeature = {
     CharacterRemovingConnection = nil,
 }
 
+local MAX_STALL_RETRIES = 2
+local STALL_RETRY_DELAY = 1.1
+
 local function disconnect(connection)
     if connection then
         pcall(function()
@@ -198,10 +201,13 @@ function TeleportFeature:_StartTravel(destination, destinationLabel)
         StartedAt = os.clock(),
         LastStallAt = self.MovementService.LastStallAt,
         Label = destinationLabel,
+        Destination = destination,
+        StallRetries = 0,
     }
     self.ActiveTravel = request
-    local moveCallOk, moved, moveResult = pcall(function()
-        return self.MovementService:MoveTo(destination, {
+
+    local function issueMovement()
+        return self.MovementService:MoveTo(request.Destination, {
             Speed = 190,
             Threshold = 8,
             IsCurrent = function()
@@ -211,7 +217,8 @@ function TeleportFeature:_StartTravel(destination, destinationLabel)
                     and not (mainFarm and mainFarm.Running)
             end,
         })
-    end)
+    end
+    local moveCallOk, moved, moveResult = pcall(issueMovement)
     if not moveCallOk then
         moveResult = moved
         moved = false
@@ -243,15 +250,57 @@ function TeleportFeature:_StartTravel(destination, destinationLabel)
 
             if not self.MovementService.Active then
                 if self.MovementService.LastStallAt ~= request.LastStallAt then
-                    self:_FinishTravel(
-                        request,
-                        "Travel stalled; copy the status report for movement details.",
+                    request.LastStallAt = self.MovementService.LastStallAt
+                    if request.StallRetries >= MAX_STALL_RETRIES then
+                        self:_FinishTravel(
+                            request,
+                            "Travel stalled after "
+                                .. tostring(request.StallRetries)
+                                .. " retries; copy the status report for movement details, then try again.",
+                            "warning"
+                        )
+                        return
+                    end
+
+                    request.StallRetries += 1
+                    self:_SetStatus(
+                        "Travel stalled; retrying ("
+                            .. tostring(request.StallRetries)
+                            .. "/"
+                            .. tostring(MAX_STALL_RETRIES)
+                            .. ").",
                         "warning"
                     )
+                    task.wait(STALL_RETRY_DELAY)
+                    if self.ActiveTravel ~= request then
+                        return
+                    end
+
+                    local retryCallOk, retryMoved, retryResult = pcall(issueMovement)
+                    if not retryCallOk then
+                        retryResult = retryMoved
+                        retryMoved = false
+                    end
+                    if not retryMoved then
+                        self:_FinishTravel(
+                            request,
+                            "Travel retry could not start: " .. tostring(retryResult),
+                            "error"
+                        )
+                        return
+                    end
+                    if retryResult == "arrived" then
+                        self:_FinishTravel(
+                            request,
+                            "Arrived at " .. request.Label .. ".",
+                            "success"
+                        )
+                        return
+                    end
                 else
                     self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
+                    return
                 end
-                return
             end
             task.wait(0.1)
         end
