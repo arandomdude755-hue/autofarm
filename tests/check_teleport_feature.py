@@ -138,6 +138,11 @@ require(
     "touch-only gateways must use the guarded compatibility helper and fall back to normal travel",
 )
 require(
+    "for _, item in itemService:GetItems(quantityKey) do" in COMPATIBILITY
+    and "for item in itemService:GetItems(quantityKey) do" not in COMPATIBILITY,
+    "inventory ownership scans must read the item record yielded as GetItems' second value",
+)
+require(
     "function MapGatewayService:BuildDiagnosticReport()" in GATEWAYS
     and "function MapGatewayService:RecordTravelPhase(phase, route, details)" in GATEWAYS
     and "RemoteCallStatus" in GATEWAYS

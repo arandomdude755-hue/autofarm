@@ -300,7 +300,7 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     end
 
     local scanOk, found = pcall(function()
-        for item in itemService:GetItems(quantityKey) do
+        for _, item in itemService:GetItems(quantityKey) do
             if item and item.Value and item.Value > 0 then
                 local matchOk, itemDefinition = pcall(function()
                     return itemConfig.match(item.ItemId):unwrap()
