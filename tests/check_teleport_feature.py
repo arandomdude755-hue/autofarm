@@ -167,6 +167,29 @@ require(
     and "title_owned=" in GATEWAYS,
     "Tiki gateway eligibility must check Feathered Visage first, then an unlocked-title fallback, with diagnostics",
 )
+gateway_touch = GATEWAYS[
+    GATEWAYS.index("function MapGatewayService:_ResolveTouchTarget(route)"):
+    GATEWAYS.index("\nfunction MapGatewayService:_GetAvailableRoutes")
+]
+gateway_use = GATEWAYS[
+    GATEWAYS.index("function MapGatewayService:Use(route, isCurrent)"):
+    GATEWAYS.index("\nfunction MapGatewayService:BuildDiagnosticReport")
+]
+require(
+    'FindFirstChild(route.Map or "Boat Castle", true)' in gateway_touch
+    and "map:FindFirstChild(route.Touch, true)" in gateway_touch
+    and 'FindFirstChild("Hitbox", true)' in gateway_touch
+    and 'touchReason == "gateway trigger is not loaded"' in route_access
+    and "trigger lookup deferred until gateway stand is reached" in route_access
+    and "TouchTriggerLoaded" in route_access
+    and "GATEWAY_TOUCH_LOAD_TIMEOUT = 2" in GATEWAYS
+    and "route.Touch" in gateway_use
+    and "self:_ResolveTouchTarget(route)" in gateway_use
+    and "TouchTriggerLoadAttempts" in gateway_use
+    and gateway_use.index("if route.Touch then")
+    < gateway_use.index("compatibility:GetCommF()"),
+    "touch-gateway routes must tolerate streamed-out triggers during planning, then resolve the exact tagged trigger at the stand",
+)
 require(
     '"requestEntrance"' in GATEWAYS
     and "BoatCastleTeleporter" in GATEWAYS

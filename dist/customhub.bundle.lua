@@ -4870,6 +4870,7 @@ local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
 local FAILED_ROUTE_COOLDOWN = 120
 local GATEWAY_ACTIVATION_TIMEOUT = 8
+local GATEWAY_TOUCH_LOAD_TIMEOUT = 2
 local REMOTE_RETRY_INTERVAL = 0.3
 
 local SEA_LABELS = {
@@ -5034,8 +5035,8 @@ function MapGatewayService:_ResolveTouchTarget(route)
     end
     local workspace = compatibility.Workspace
     local mapRoot = workspace and workspace:FindFirstChild("Map")
-    local map = mapRoot and mapRoot:FindFirstChild(route.Map or "Boat Castle")
-    local trigger = map and map:FindFirstChild(route.Touch)
+    local map = mapRoot and mapRoot:FindFirstChild(route.Map or "Boat Castle", true)
+    local trigger = map and map:FindFirstChild(route.Touch, true)
     local collectionService = compatibility.CollectionService
     if not trigger then
         return nil, "gateway trigger is not loaded"
@@ -5047,7 +5048,7 @@ function MapGatewayService:_ResolveTouchTarget(route)
     if not tagOk or tagged ~= true then
         return nil, "gateway trigger is not tagged BoatCastleTeleporter"
     end
-    local hitbox = trigger:FindFirstChild("Hitbox")
+    local hitbox = trigger:FindFirstChild("Hitbox", true)
     if not hitbox or not hitbox:IsA("BasePart") then
         return nil, "gateway trigger Hitbox is missing or not a BasePart"
     end
@@ -5126,8 +5127,13 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
             if available and source.Touch then
                 local touchReason
                 touchTarget, touchReason = self:_ResolveTouchTarget(source)
-                available = touchTarget ~= nil
-                if not available then
+                if touchTarget then
+                    candidate.TouchTriggerLoaded = true
+                elseif touchReason == "gateway trigger is not loaded" then
+                    candidate.TouchTriggerLoaded = false
+                    candidate.Reason = "trigger lookup deferred until gateway stand is reached"
+                else
+                    available = false
                     candidate.Reason = touchReason
                 end
             end
@@ -5229,7 +5235,7 @@ function MapGatewayService:RecordTravelPhase(phase, route, details)
     diagnostic.UpdatedAt = os.clock()
     if route then
         diagnostic.CurrentRoute = route.Name
-        diagnostic.Activation = route.TouchTarget and "touch" or "requestEntrance"
+        diagnostic.Activation = route.Touch and "touch" or "requestEntrance"
         if not diagnostic.LastAttempt or diagnostic.LastAttempt.Route ~= route.Name then
             diagnostic.LastAttempt = {}
         end
@@ -5334,16 +5340,47 @@ function MapGatewayService:Use(route, isCurrent)
         end)
     end
 
-    if route.TouchTarget then
-        local touchOk, touchError = compatibility:TouchPart(
-            root,
-            route.TouchTarget,
-            isCurrent
-        )
+    if route.Touch then
+        local touchTarget
+        local touchResolveError
+        local touchLoadAttempts = 0
+        local deadline = os.clock() + GATEWAY_TOUCH_LOAD_TIMEOUT
+        repeat
+            touchLoadAttempts += 1
+            touchTarget, touchResolveError = self:_ResolveTouchTarget(route)
+            if touchTarget
+                or touchResolveError ~= "gateway trigger is not loaded"
+                or not isCurrent()
+                or os.clock() >= deadline
+            then
+                break
+            end
+            task.wait(0.1)
+        until false
+        if not touchTarget then
+            local failure = isCurrent()
+                    and (touchResolveError or "gateway trigger did not load at the stand")
+                or "Travel was cancelled"
+            self:RecordTravelPhase("gateway touch trigger unavailable at stand", route, {
+                Failure = failure,
+                TouchTriggerStatus = "not loaded",
+                TouchTriggerLoadAttempts = touchLoadAttempts,
+            })
+            return false, failure
+        end
+
+        route.TouchTarget = touchTarget
+        self:RecordTravelPhase("gateway touch trigger loaded", route, {
+            TouchTriggerStatus = "loaded at gateway stand",
+            TouchTriggerLoadAttempts = touchLoadAttempts,
+        })
+        local touchOk, touchError = compatibility:TouchPart(root, touchTarget, isCurrent)
         if diagnostic and diagnostic.LastAttempt then
             diagnostic.LastAttempt.RemoteCallStatus = touchOk
                     and "touch event completed"
                 or "touch event failed"
+            diagnostic.LastAttempt.TouchTriggerStatus = "loaded at gateway stand"
+            diagnostic.LastAttempt.TouchTriggerLoadAttempts = touchLoadAttempts
             if not touchOk then
                 diagnostic.LastAttempt.ActivationFailure = touchError
             end
@@ -5479,8 +5516,8 @@ function MapGatewayService:BuildDiagnosticReport()
                 .. tostring(candidate.Name)
                 .. ": eligible="
                 .. tostring(candidate.Eligible)
-                .. "; activation="
-                .. tostring(candidate.Activation)
+        .. "; activation="
+        .. tostring(candidate.Activation)
                 .. "; requirement="
                 .. tostring(candidate.Requirement or "none")
                 .. "; owned="
@@ -5502,6 +5539,9 @@ function MapGatewayService:BuildDiagnosticReport()
                     )
                     or "")
                 .. (candidate.AccessBy and ("; access_by=" .. tostring(candidate.AccessBy)) or "")
+                .. (candidate.TouchTriggerLoaded ~= nil
+                    and ("; trigger_loaded=" .. tostring(candidate.TouchTriggerLoaded))
+                    or "")
                 .. "; reason="
                 .. formatScalar(candidate.Reason or "available")
                 .. (type(candidate.StandDistance) == "number"
@@ -5527,6 +5567,12 @@ function MapGatewayService:BuildDiagnosticReport()
                 .. tostring(attempt.RemoteCallCount or 0)
                 .. "; call_status="
                 .. tostring(attempt.RemoteCallStatus or "n/a")
+                .. (attempt.TouchTriggerStatus
+                    and ("; touch_trigger=" .. tostring(attempt.TouchTriggerStatus))
+                    or "")
+                .. (type(attempt.TouchTriggerLoadAttempts) == "number"
+                    and ("; touch_load_attempts=" .. tostring(attempt.TouchTriggerLoadAttempts))
+                    or "")
         )
         if attempt.RemoteResultType then
             table.insert(
