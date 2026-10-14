@@ -769,7 +769,7 @@ local Config = {
                     Label = "World events",
                 },
                 { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Fist / Chalice window" },
-                { Kind = "statusValue", Key = "moon", Label = "Moon phase / game time" },
+                { Kind = "statusValue", Key = "moon", Label = "Moon phase / timing" },
                 { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
                 { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
                 { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },
@@ -5136,7 +5136,82 @@ local function formatNumber(value)
     return sign .. formatted
 end
 
-local function readMoonStatus()
+local function updateMoonClockRate(statusFeature, clockTime)
+    local now = os.clock()
+    local sample = statusFeature._moonClockSample
+    if not sample then
+        statusFeature._moonClockSample = {
+            clockTime = clockTime,
+            sampledAt = now,
+        }
+    else
+        local elapsed = now - sample.sampledAt
+        if elapsed > 45 then
+            statusFeature._moonSecondsPerGameHour = nil
+            statusFeature._moonRateUpdatedAt = nil
+            statusFeature._moonClockSample = {
+                clockTime = clockTime,
+                sampledAt = now,
+            }
+        elseif elapsed >= 8 then
+            local clockHours = (clockTime - sample.clockTime) % 24
+            if clockHours > 0.001 and clockHours < 6 then
+                local measuredRate = elapsed / clockHours
+                if measuredRate >= 1 and measuredRate <= 7200 then
+                    local previousRate = statusFeature._moonSecondsPerGameHour
+                    statusFeature._moonSecondsPerGameHour = previousRate
+                        and previousRate * 0.7 + measuredRate * 0.3
+                        or measuredRate
+                    statusFeature._moonRateUpdatedAt = now
+                end
+            end
+            statusFeature._moonClockSample = {
+                clockTime = clockTime,
+                sampledAt = now,
+            }
+        end
+    end
+
+    local rate = statusFeature._moonSecondsPerGameHour
+    if not rate or now - (statusFeature._moonRateUpdatedAt or -math.huge) > 120 then
+        return nil
+    end
+    return rate
+end
+
+-- Keep BNN/Vxeze's phase boundaries, but convert them with measured clock speed.
+local function moonForecast(phaseText, clockTime)
+    if phaseText == "Full Moon" then
+        if clockTime <= 5 then
+            return "Full Moon ends in", 5 - clockTime
+        elseif clockTime < 12 then
+            return "Fake Moon", nil
+        elseif clockTime < 18 then
+            return "Full Moon starts in", 18 - clockTime
+        end
+        return "Full Moon ends in", 30 - clockTime
+    elseif phaseText == "Next Night" then
+        local targetClock = clockTime <= 12 and 18 or 30
+        return "Next Full Moon in", targetClock - clockTime
+    end
+    return nil, nil
+end
+
+local function formatMoonEstimate(realSeconds)
+    local seconds = math.max(0, math.floor((tonumber(realSeconds) or 0) + 0.5))
+    if seconds < 60 then
+        return "<1 min real time (estimate)"
+    end
+    local minutes = math.floor(seconds / 60)
+    local hours = math.floor(minutes / 60)
+    local remainingMinutes = minutes % 60
+    if hours > 0 then
+        return string.format("~%dh %dm real time (estimate)", hours, remainingMinutes)
+    end
+    return string.format("~%dm real time (estimate)", minutes)
+end
+
+local function readMoonStatus(statusFeature)
     local lighting
     pcall(function()
         lighting = game:GetService("Lighting")
@@ -5177,15 +5252,22 @@ local function readMoonStatus()
 
     local clockTime = tonumber(readProperty(lighting, "ClockTime"))
     if not clockTime then
-        return phaseText
+        return phaseText .. " | timing unavailable"
     end
-    local hours = math.floor(clockTime) % 24
-    local minutes = math.floor((clockTime - math.floor(clockTime)) * 60 + 0.5)
-    if minutes >= 60 then
-        hours = (hours + 1) % 24
-        minutes = 0
+
+    local label, hoursRemaining = moonForecast(phaseText, clockTime)
+    if label == "Fake Moon" then
+        return "Full Moon | Fake Moon (daytime)"
     end
-    return phaseText .. " | game clock " .. string.format("%02d:%02d", hours, minutes)
+    if not label or not hoursRemaining then
+        return phaseText .. " | no timing estimate"
+    end
+
+    local rate = updateMoonClockRate(statusFeature, clockTime)
+    if not rate then
+        return label .. " calibrating game-clock speed"
+    end
+    return label .. " " .. formatMoonEstimate(hoursRemaining * rate)
 end
 
 local function readTikiEyes(map)
@@ -5242,7 +5324,7 @@ local function readEliteHunterStatus(workspace)
     return "No active target loaded"
 end
 
-local function readWorldEventValues(context)
+local function readWorldEventValues(context, statusFeature)
     local compatibility = context and context.Compatibility
     local workspace = compatibility and compatibility.Workspace
     local map = findChild(workspace, "Map")
@@ -5263,7 +5345,7 @@ local function readWorldEventValues(context)
     return {
         serverAge = serverElapsed and formatServerAge(serverElapsed) or "Unavailable",
         legendaryItemTimer = readLegendaryItemEstimate(workspace),
-        moon = readMoonStatus(),
+        moon = readMoonStatus(statusFeature),
         eliteHunter = readEliteHunterStatus(workspace),
         mirageIsland = presence(mirage, not map),
         prehistoricIsland = presence(prehistoric, not map),
@@ -5455,7 +5537,7 @@ function StatusFeature:_ReadValues()
         unknown = "Unknown",
         ["active-unknown"] = "Active (details unavailable)",
     }
-    local worldEvents = readWorldEventValues(context)
+    local worldEvents = readWorldEventValues(context, self)
     local remoteEvents = self.RemoteEventStatus or {}
 
     return {
@@ -5558,6 +5640,9 @@ function StatusFeature:Initialize(context)
     local generation = self._generation
     self._remoteRefreshBusy = nil
     self._lastRemoteRefreshAt = -math.huge
+    self._moonClockSample = nil
+    self._moonSecondsPerGameHour = nil
+    self._moonRateUpdatedAt = nil
     self.RemoteEventStatus = {
         leviathanSpy = "Waiting for status check",
         cakePrinceMobs = "Waiting for status check",
@@ -5617,6 +5702,9 @@ end
 function StatusFeature:Cleanup()
     self._generation = (self._generation or 0) + 1
     self._remoteRefreshBusy = nil
+    self._moonClockSample = nil
+    self._moonSecondsPerGameHour = nil
+    self._moonRateUpdatedAt = nil
     self.RemoteEventStatus = nil
     self.Context = nil
 end

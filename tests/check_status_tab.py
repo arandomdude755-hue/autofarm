@@ -75,13 +75,20 @@ require(
     and "prehistoricTimer" not in CONFIG
     and '"Health"' not in CONFIG
     and '"Character"' not in CONFIG
-    and "function readWorldEventValues(context)" in FEATURE
+    and "function readWorldEventValues(context, statusFeature)" in FEATURE
     and 'location:GetAttribute("TimeIn")' in FEATURE
     and "workspace:GetServerTimeNow()" in FEATURE
     and "tick() - 25200" in FEATURE
+    and "function updateMoonClockRate(statusFeature, clockTime)" in FEATURE
+    and "elapsed >= 8" in FEATURE
+    and "local function moonForecast(phaseText, clockTime)" in FEATURE
+    and 'return "Full Moon ends in", 5 - clockTime' in FEATURE
+    and 'return "Next Full Moon in", targetClock - clockTime' in FEATURE
+    and 'local function formatMoonEstimate(realSeconds)' in FEATURE
+    and '"game clock "' not in FEATURE
     and '" (estimate)"' in FEATURE
     and "ELITE_TARGET_NAMES" in FEATURE,
-    "Event Status includes BNN-style server age, moon, and requested world-event status without raid countdowns",
+    "Event Status estimates moon timing from measured real clock speed and omits raid countdowns",
 )
 require(
     "function StatusFeature:_ReadValues()" in FEATURE
