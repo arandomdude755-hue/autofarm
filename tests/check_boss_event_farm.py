@@ -262,8 +262,8 @@ require(
 )
 
 require(
-    "farmSettings[settingName] == true" in UI
-    and "currentValue = farmSettings[control.Setting] == true" in UI,
+    "settings[settingName] == true" in UI
+    and "currentValue = settings[control.Setting] == true" in UI,
     "The auto-quest toggle must display and toggle its configured setting",
 )
 

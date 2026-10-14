@@ -147,13 +147,13 @@ require("snapshot.featureEnabled[entry.Control.Action] == true" in refresh,
 require('entry.Label.Text = enabled and "ON" or "OFF"' in refresh,
         "UI must show the resulting enabled state")
 require("self.SelectorEntries" in refresh
-        and "farmSettings[entry.Setting]" in refresh
+        and "settings[entry.Setting]" in refresh
         and "option.Button.BackgroundColor3" in refresh,
         "UI must show the selected value using the shared setting")
 
 require("self.FeatureManager:Dispatch(actionId, payload)" in HUB,
         "Hub must route UI actions to FeatureManager")
-require("Modules = { MainFarm, PlaceholderFeatures }" in MANAGER,
+require("Modules = { MainFarm, TeleportFeature, PlaceholderFeatures }" in MANAGER,
         "FeatureManager must own the existing MainFarm module")
 dispatch = function_body(MANAGER, "function FeatureManager:Dispatch", "\nfunction FeatureManager:Cleanup")
 require('actionId == "farm.weaponCategory.select"' in dispatch

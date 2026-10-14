@@ -11,7 +11,6 @@ function PlaceholderFeatures:Handle(actionId, payload, context)
     local messages = {
         ["main.selfCheck"] = "UI action path is connected; no gameplay action was run.",
         ["player.status"] = "Player feature is a placeholder; no character data was read.",
-        ["teleport.status"] = "Travel feature is a placeholder; no movement or remote was invoked.",
     }
     local message = messages[actionId]
     if message then

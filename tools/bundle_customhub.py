@@ -17,12 +17,19 @@ MODULES = (
         {
             "require(script.Features.PlaceholderFeatures)": '__bundleLoad("CustomHub.Features.PlaceholderFeatures")',
             "require(script.Features.MainFarm)": '__bundleLoad("CustomHub.Features.MainFarm")',
+            "require(script.Features.TeleportFeature)": '__bundleLoad("CustomHub.Features.TeleportFeature")',
+            "require(script.Features.Farm.MovementService)": '__bundleLoad("CustomHub.Features.Farm.MovementService")',
         },
     ),
     ("CustomHub.UI", "src/ReplicatedStorage/CustomHub/UI.lua", {}),
     (
         "CustomHub.Features.PlaceholderFeatures",
         "src/ReplicatedStorage/CustomHub/Features/PlaceholderFeatures.lua",
+        {},
+    ),
+    (
+        "CustomHub.Features.TeleportFeature",
+        "src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua",
         {},
     ),
     (

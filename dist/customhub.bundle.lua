@@ -98,7 +98,7 @@ for materialName in pairs(farmMaterialTargets) do
     table.insert(farmMaterials, materialName)
 end
 table.sort(farmMaterials)
-local function farmMaterialsForCurrentSea(compatibility)
+local function getCurrentSeaIndex(compatibility)
     local seaChecks = {
         { Index = 1, Method = "IsFirstSea" },
         { Index = 2, Method = "IsSecondSea" },
@@ -117,17 +117,125 @@ local function farmMaterialsForCurrentSea(compatibility)
         end
     end
     if recognizedSeaCount ~= 1 then
+        return nil
+    end
+    return currentSeaIndex
+end
+
+local function farmMaterialsForCurrentSea(compatibility)
+    local currentSea = getCurrentSeaIndex(compatibility)
+    if not currentSea then
         return {}
     end
-
     local available = {}
     for _, materialName in ipairs(farmMaterials) do
-        local seaTargets = farmMaterialTargets[materialName][currentSeaIndex]
+        local seaTargets = farmMaterialTargets[materialName][currentSea]
         if type(seaTargets) == "table" and #seaTargets > 0 then
             table.insert(available, materialName)
         end
     end
     return available
+end
+local travelIslandDestinations = {
+    [1] = {
+        { Name = "Start Island", Position = Vector3.new(1071, 16, 1427) },
+        { Name = "Marine Start", Position = Vector3.new(-2573, 7, 2047) },
+        { Name = "Middle Town", Position = Vector3.new(-656, 8, 1437) },
+        { Name = "Jungle", Position = Vector3.new(-1250, 12, 341) },
+        { Name = "Pirate Village", Position = Vector3.new(-1122, 5, 3856) },
+        { Name = "Desert", Position = Vector3.new(1094, 6, 4193) },
+        { Name = "Frozen Village", Position = Vector3.new(1198, 27, -1212) },
+        { Name = "Marine Fortress", Position = Vector3.new(-4505, 21, 4261) },
+        { Name = "Colosseum", Position = Vector3.new(-1428, 7, -3014) },
+        { Name = "Skylands 1st Floor", Position = Vector3.new(-4970, 718, -2622) },
+        { Name = "Skylands 2nd Floor", Position = Vector3.new(-4813, 904, -1913) },
+        { Name = "Upper Skylands", Position = Vector3.new(-7952, 5546, -321) },
+        { Name = "Prison", Position = Vector3.new(4854, 6, 740) },
+        { Name = "Magma Village", Position = Vector3.new(-5232, 9, 8468) },
+        { Name = "Underwater City", Position = Vector3.new(61164, 12, 1819) },
+        { Name = "Fountain City", Position = Vector3.new(5133, 5, 4038) },
+        { Name = "Cyborg House", Position = Vector3.new(6263, 72, 3998) },
+        { Name = "Shanks Room", Position = Vector3.new(-1442, 30, -28) },
+        { Name = "Mob Leader Island", Position = Vector3.new(-2850, 8, 5355) },
+    },
+    [2] = {
+        { Name = "Starting Point", Position = Vector3.new(83, 18, 2835) },
+        { Name = "Kingdom of Rose", LocationName = "Kingdom of Rose" },
+        { Name = "Dark Arena", LocationName = "Dark Arena" },
+        { Name = "Flamingo Mansion", Position = Vector3.new(-390, 332, 673) },
+        { Name = "Flamingo Room", Position = Vector3.new(2302, 16, 664) },
+        { Name = "Green Bit", Position = Vector3.new(-2372, 73, -3167) },
+        { Name = "Cafe", Position = Vector3.new(-385, 73, 297) },
+        { Name = "Factory", Position = Vector3.new(430, 211, -433) },
+        { Name = "Colosseum", Position = Vector3.new(-1837, 45, 1360) },
+        { Name = "Ghost Island", Position = Vector3.new(-5572, 195, -795) },
+        { Name = "Ghost Island Lower", Position = Vector3.new(-5932, 6, -1189) },
+        { Name = "Snow Mountain", Position = Vector3.new(1384, 454, -4990) },
+        { Name = "Hot and Cold", Position = Vector3.new(-6027, 15, -5072) },
+        { Name = "Magma Side", Position = Vector3.new(-5479, 16, -5247) },
+        { Name = "Cursed Ship", Position = Vector3.new(902, 125, 33072) },
+        { Name = "Frosted Island", Position = Vector3.new(5400, 29, -6237) },
+        { Name = "Forgotten Island", Position = Vector3.new(-3043, 239, -10192) },
+        { Name = "Usoapp Island", Position = Vector3.new(4749, 9, 2850) },
+        { Name = "Raid Area", Position = Vector3.new(-5555, 330, -5930) },
+        { Name = "Mini Sky", Position = Vector3.new(-260, 49326, -35259) },
+    },
+    [3] = {
+        { Name = "Port Town", Position = Vector3.new(-287, 30, 5388) },
+        { Name = "Hydra Island", Position = Vector3.new(3399, 73, 1573) },
+        { Name = "Secret Temple", Position = Vector3.new(5247, 8, 1097) },
+        { Name = "Hydra House", Position = Vector3.new(5245, 603, 251) },
+        { Name = "Great Tree", Position = Vector3.new(2443, 37, -6573) },
+        { Name = "Castle on the Sea", Position = Vector3.new(-5500, 315, -2855) },
+        { Name = "Mansion", Position = Vector3.new(-12548, 338, -7481) },
+        { Name = "Floating Turtle", Position = Vector3.new(-10016, 333, -8326) },
+        { Name = "Haunted Castle", Position = Vector3.new(-9509, 143, 5535) },
+        { Name = "Peanut Island", Position = Vector3.new(-2131, 39, -10106) },
+        { Name = "Ice Cream Island", Position = Vector3.new(-950, 60, -10907) },
+        { Name = "Cake Loaf", Position = Vector3.new(-1762, 39, -11878) },
+        { Name = "Tiki Outpost", Position = Vector3.new(-16204, 10, 479) },
+    },
+}
+local function travelIslandsForCurrentSea(compatibility)
+    local currentSea = getCurrentSeaIndex(compatibility)
+    local destinations = currentSea and travelIslandDestinations[currentSea] or {}
+    local options = {}
+    for _, destination in ipairs(destinations) do
+        table.insert(options, destination.Name)
+    end
+    return options
+end
+local function travelNpcsForCurrentSea(compatibility)
+    if not getCurrentSeaIndex(compatibility) then
+        return {}
+    end
+    local workspace = compatibility and compatibility.Workspace
+    local npcFolder = workspace and workspace:FindFirstChild("NPCs")
+    if not npcFolder then
+        return {}
+    end
+    local names = {}
+    for _, npc in ipairs(npcFolder:GetChildren()) do
+        if npc:IsA("Model")
+            and not string.find(npc.Name, "Boat", 1, true)
+            and not string.find(npc.Name, "Set Home", 1, true)
+        then
+            local root = npc:FindFirstChild("HumanoidRootPart")
+            local humanoid = npc:FindFirstChildOfClass("Humanoid")
+            if root
+                and root:IsA("BasePart")
+                and (not humanoid or humanoid.Health > 0)
+            then
+                names[npc.Name] = true
+            end
+        end
+    end
+    local options = {}
+    for name in pairs(names) do
+        table.insert(options, name)
+    end
+    table.sort(options)
+    return options
 end
 local farmModeProfiles = {
     ["Farm Bones"] = {
@@ -213,6 +321,11 @@ end
 local Config = {
     Name = "Custom Hub",
     Version = "UI shell",
+    TravelSettings = {
+        Island = nil,
+        Npc = nil,
+    },
+    TravelDestinations = travelIslandDestinations,
     Defaults = {
         SelectedTab = "Main",
         Compact = false,
@@ -478,9 +591,51 @@ local Config = {
         Teleport = {
             Controls = {
                 {
+                    Kind = "sectionHeader",
+                    Label = "Island travel",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Island",
+                    Action = "teleport.island.select",
+                    Setting = "Island",
+                    SettingsKey = "TravelSettings",
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose island",
+                    OptionsProvider = travelIslandsForCurrentSea,
+                    EmptyOptionsLabel = "No islands available in this sea",
+                    UnavailableSelectionLabel = "Unavailable in this sea",
+                },
+                {
                     Kind = "button",
-                    Label = "Travel status",
-                    Action = "teleport.status",
+                    Label = "Travel to island",
+                    Action = "teleport.island.go",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "NPC travel",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "NPC",
+                    Action = "teleport.npc.select",
+                    Setting = "Npc",
+                    SettingsKey = "TravelSettings",
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose NPC",
+                    OptionsProvider = travelNpcsForCurrentSea,
+                    EmptyOptionsLabel = "No NPCs available in this sea",
+                    UnavailableSelectionLabel = "NPC unavailable",
+                },
+                {
+                    Kind = "button",
+                    Label = "Travel to NPC",
+                    Action = "teleport.npc.go",
+                },
+                {
+                    Kind = "button",
+                    Label = "Cancel travel",
+                    Action = "teleport.cancel",
                 },
             },
         },
@@ -1029,16 +1184,28 @@ __bundleFactories["CustomHub.FeatureManager"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/FeatureManager.lua
 local PlaceholderFeatures = __bundleLoad("CustomHub.Features.PlaceholderFeatures")
 local MainFarm = __bundleLoad("CustomHub.Features.MainFarm")
+local TeleportFeature = __bundleLoad("CustomHub.Features.TeleportFeature")
+local MovementService = __bundleLoad("CustomHub.Features.Farm.MovementService")
 
 local FeatureManager = {}
 FeatureManager.__index = FeatureManager
 
 function FeatureManager.new(state, compatibility, config)
+    local movementService = MovementService.new(compatibility, function(message, kind)
+        state:SetStatus(message, kind or "info")
+    end)
     return setmetatable({
         State = state,
-        Modules = { MainFarm, PlaceholderFeatures },
+        Modules = { MainFarm, TeleportFeature, PlaceholderFeatures },
         InitializedModules = {},
-        Context = { State = state, Compatibility = compatibility, Config = config },
+        Context = {
+            State = state,
+            Compatibility = compatibility,
+            Config = config,
+            MovementService = movementService,
+            MainFarm = MainFarm,
+            TeleportFeature = TeleportFeature,
+        },
     }, FeatureManager)
 end
 
@@ -1661,12 +1828,18 @@ function UI:_FindMatchingPageForTab(tabName, query)
     return nil
 end
 
+function UI:_GetControlSettings(control)
+    local settingsKey = control and control.SettingsKey or "FarmSettings"
+    local settings = self.Config[settingsKey]
+    return type(settings) == "table" and settings or {}
+end
+
 function UI:_GetControlOptions(control)
     if type(control.OptionsProvider) == "function" then
         local ok, options = pcall(
             control.OptionsProvider,
             self.Compatibility,
-            self.Config.FarmSettings
+            self:_GetControlSettings(control)
         )
         if ok and type(options) == "table" then
             return options
@@ -1698,9 +1871,14 @@ function UI:_RefreshDropdownOptions(entry, selectedValue)
         entry.SelectedValue = nil
         local emptyLabel = entry.Control.EmptyOptionsLabel
         local unavailableLabel = entry.Control.UnavailableSelectionLabel
-        local label = #entry.Options == 0 and emptyLabel
-            or unavailableLabel
-            or "Select"
+        local label
+        if not selectedValue then
+            label = entry.Control.PlaceholderLabel or "Select"
+        elseif #entry.Options == 0 then
+            label = emptyLabel or "No options available"
+        else
+            label = unavailableLabel or "Select"
+        end
         if entry.ValueLabel then
             entry.ValueLabel.Text = tostring(label)
         end
@@ -1805,8 +1983,8 @@ function UI:_Refresh(snapshot)
         elseif entry.Control.Kind == "settingToggle" then
             local settingName = entry.Control.Setting
             if settingName then
-                local farmSettings = self.Config.FarmSettings or {}
-                enabled = farmSettings[settingName] == true
+                local settings = self:_GetControlSettings(entry.Control)
+                enabled = settings[settingName] == true
             else
                 enabled = snapshot.compact
             end
@@ -1817,10 +1995,10 @@ function UI:_Refresh(snapshot)
     end
 
     for _, entry in ipairs(self.SelectorEntries) do
-        local farmSettings = self.Config.FarmSettings or {}
+        local settings = self:_GetControlSettings(entry.Control)
         local selectedValue = entry.Setting == "UiSize"
             and snapshot.uiSize
-            or farmSettings[entry.Setting]
+            or settings[entry.Setting]
         if entry.Kind == "dropdown" then
             self:_RefreshDropdownOptions(entry, selectedValue)
             if entry.ValueLabel then
@@ -2270,8 +2448,8 @@ function UI:_ActivateControl(control)
     elseif control.Kind == "settingToggle" then
         local currentValue = snapshot.compact
         if control.Setting then
-            local farmSettings = self.Config.FarmSettings or {}
-            currentValue = farmSettings[control.Setting] == true
+            local settings = self:_GetControlSettings(control)
+            currentValue = settings[control.Setting] == true
         end
         return self.Dispatch(control.Action, not currentValue)
     end
@@ -2318,10 +2496,10 @@ end
 
 function UI:_OpenDropdown(entry)
     self:_CloseDropdown()
-    local farmSettings = self.Config.FarmSettings or {}
+    local settings = self:_GetControlSettings(entry.Control)
     local selectedValue = entry.Setting == "UiSize"
         and self.State:GetSnapshot().uiSize
-        or farmSettings[entry.Setting]
+        or settings[entry.Setting]
     self:_RefreshDropdownOptions(entry, selectedValue)
     local options = entry.Options
     if not self.Gui or not self.Root or not entry.Button or #options == 0 then
@@ -2767,11 +2945,13 @@ function UI:_AddControl(control)
     elseif isDropdown then
         rowStroke.Transparency = 0.15
         local options = self:_GetControlOptions(control)
-        local farmSettings = self.Config.FarmSettings or {}
+        local settings = self:_GetControlSettings(control)
         local selectedValue = control.Setting == "UiSize"
             and self.State:GetSnapshot().uiSize
-            or farmSettings[control.Setting]
-            or options[1]
+            or settings[control.Setting]
+        if not selectedValue and not control.AllowNoSelection then
+            selectedValue = options[1]
+        end
         local valueFrame = create("Frame", {
             Name = "DropdownFace",
             AnchorPoint = Vector2.new(1, 0.5),
@@ -3788,7 +3968,6 @@ function PlaceholderFeatures:Handle(actionId, payload, context)
     local messages = {
         ["main.selfCheck"] = "UI action path is connected; no gameplay action was run.",
         ["player.status"] = "Player feature is a placeholder; no character data was read.",
-        ["teleport.status"] = "Travel feature is a placeholder; no movement or remote was invoked.",
     }
     local message = messages[actionId]
     if message then
@@ -3805,6 +3984,378 @@ end
 
 return PlaceholderFeatures
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Features/PlaceholderFeatures.lua
+end
+
+__bundleFactories["CustomHub.Features.TeleportFeature"] = function()
+-- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua
+local TeleportFeature = {
+    Context = nil,
+    MovementService = nil,
+    ActiveTravel = nil,
+    Generation = 0,
+    CharacterRemovingConnection = nil,
+}
+
+local function disconnect(connection)
+    if connection then
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+end
+
+local function currentSeaIndex(compatibility)
+    local checks = {
+        { Index = 1, Method = "IsFirstSea" },
+        { Index = 2, Method = "IsSecondSea" },
+        { Index = 3, Method = "IsThirdSea" },
+    }
+    local found
+    local count = 0
+    for _, sea in ipairs(checks) do
+        local check = compatibility and compatibility[sea.Method]
+        if type(check) == "function" then
+            local ok, result = pcall(check, compatibility)
+            if ok and result == true then
+                found = sea.Index
+                count += 1
+            end
+        end
+    end
+    return count == 1 and found or nil
+end
+
+function TeleportFeature:_SetStatus(message, kind)
+    if self.Context and self.Context.State then
+        self.Context.State:SetStatus(message, kind or "info")
+    end
+end
+
+function TeleportFeature:IsTraveling()
+    return self.ActiveTravel ~= nil
+end
+
+function TeleportFeature:_GetSelectedIsland()
+    local compatibility = self.Context and self.Context.Compatibility
+    local config = self.Context and self.Context.Config
+    local seaIndex = currentSeaIndex(compatibility)
+    if not seaIndex then
+        return nil, "Could not identify the current sea"
+    end
+
+    local selected = config and config.TravelSettings and config.TravelSettings.Island
+    if type(selected) ~= "string" then
+        return nil, "Select an island first"
+    end
+    for _, destination in ipairs((config.TravelDestinations or {})[seaIndex] or {}) do
+        if destination.Name == selected then
+            return destination
+        end
+    end
+    return nil, "That island is unavailable in this sea"
+end
+
+function TeleportFeature:_FindNpcRoot(name)
+    local compatibility = self.Context and self.Context.Compatibility
+    local workspace = compatibility and compatibility.Workspace
+    local npcFolder = workspace and workspace:FindFirstChild("NPCs")
+    if not npcFolder then
+        return nil, "Workspace.NPCs is unavailable"
+    end
+
+    local _, _, playerRoot = compatibility:GetCharacterParts()
+    local nearestRoot
+    local nearestDistance = math.huge
+    for _, npc in ipairs(npcFolder:GetChildren()) do
+        if npc:IsA("Model") and npc.Name == name then
+            local root = npc:FindFirstChild("HumanoidRootPart")
+            local humanoid = npc:FindFirstChildOfClass("Humanoid")
+            if root and root:IsA("BasePart") and (not humanoid or humanoid.Health > 0) then
+                local distance = playerRoot and (root.Position - playerRoot.Position).Magnitude or 0
+                if distance < nearestDistance then
+                    nearestRoot = root
+                    nearestDistance = distance
+                end
+            end
+        end
+    end
+    if not nearestRoot then
+        return nil, "The selected NPC is not currently loaded in Workspace.NPCs"
+    end
+    return nearestRoot
+end
+
+function TeleportFeature:_GetNpcDestination()
+    local compatibility = self.Context and self.Context.Compatibility
+    if not currentSeaIndex(compatibility) then
+        return nil, "Could not identify the current sea"
+    end
+    local selected = self.Context.Config.TravelSettings.Npc
+    if type(selected) ~= "string" then
+        return nil, "Select an NPC first"
+    end
+    local root, rootError = self:_FindNpcRoot(selected)
+    if not root then
+        return nil, rootError
+    end
+    return CFrame.new(root.Position + Vector3.new(0, 5, 0))
+end
+
+function TeleportFeature:_ResolveIslandCFrame(destination)
+    if destination.Position then
+        return CFrame.new(destination.Position + Vector3.new(0, 18, 0))
+    end
+    if destination.LocationName then
+        local workspace = self.Context.Compatibility.Workspace
+        local worldOrigin = workspace:FindFirstChild("_WorldOrigin")
+        local locations = worldOrigin and worldOrigin:FindFirstChild("Locations")
+        local location = locations and locations:FindFirstChild(destination.LocationName)
+        if location and location:IsA("BasePart") then
+            return location.CFrame + Vector3.new(0, 18, 0)
+        elseif location and location:IsA("Model") then
+            return location:GetPivot() + Vector3.new(0, 18, 0)
+        end
+        return nil, "The selected location is not currently available"
+    end
+    return nil, "The selected island has no usable destination"
+end
+
+function TeleportFeature:_FinishTravel(request, message, kind)
+    if self.ActiveTravel ~= request then
+        return
+    end
+    self.ActiveTravel = nil
+    self.Generation += 1
+    if self.MovementService then
+        self.MovementService:Cancel()
+        self.MovementService:SetFarmCollisionSuppression(false)
+    end
+    self:_SetStatus(message, kind)
+end
+
+function TeleportFeature:Cancel(message)
+    local request = self.ActiveTravel
+    if not request then
+        return false
+    end
+    self.ActiveTravel = nil
+    self.Generation += 1
+    if self.MovementService then
+        self.MovementService:Cancel()
+        self.MovementService:SetFarmCollisionSuppression(false)
+    end
+    if message then
+        self:_SetStatus(message, "warning")
+    else
+        self:_SetStatus("Travel cancelled.", "info")
+    end
+    return true
+end
+
+function TeleportFeature:_StartTravel(destination, destinationLabel)
+    local context = self.Context
+    local compatibility = context and context.Compatibility
+    local mainFarm = context and context.MainFarm
+    if mainFarm and mainFarm.Running then
+        self:_SetStatus("Turn off Start Farm before manual travel.", "warning")
+        return false, "Auto Farm is running"
+    end
+    local character, humanoid, root = compatibility:GetCharacterParts()
+    if not character or not humanoid or not root then
+        self:_SetStatus("Travel unavailable: character is not ready.", "error")
+        return false, "Character is unavailable"
+    end
+
+    if self.ActiveTravel then
+        self:Cancel("Previous travel request cancelled.")
+    end
+    local collisionCallOk, collisionReady, collisionError = pcall(function()
+        return self.MovementService:SetFarmCollisionSuppression(true)
+    end)
+    if not collisionCallOk then
+        collisionError = collisionReady
+        collisionReady = false
+    end
+    if not collisionReady then
+        self:_SetStatus("Travel collision setup failed: " .. tostring(collisionError), "error")
+        return false, collisionError
+    end
+
+    self.Generation += 1
+    local request = {
+        Generation = self.Generation,
+        Character = character,
+        StartedAt = os.clock(),
+        LastStallAt = self.MovementService.LastStallAt,
+        Label = destinationLabel,
+    }
+    self.ActiveTravel = request
+    local moveCallOk, moved, moveResult = pcall(function()
+        return self.MovementService:MoveTo(destination, {
+            Speed = 190,
+            Threshold = 8,
+            IsCurrent = function()
+                return self.ActiveTravel == request
+                    and self.Generation == request.Generation
+                    and compatibility.Player.Character == character
+                    and not (mainFarm and mainFarm.Running)
+            end,
+        })
+    end)
+    if not moveCallOk then
+        moveResult = moved
+        moved = false
+    end
+    if not moved then
+        self:_FinishTravel(
+            request,
+            "Travel could not start: " .. tostring(moveResult),
+            "error"
+        )
+        return false, moveResult
+    end
+    if moveResult == "arrived" then
+        self:_FinishTravel(request, "Arrived at " .. destinationLabel .. ".", "success")
+        return true
+    end
+
+    self:_SetStatus("Travelling to " .. destinationLabel .. ".", "info")
+    task.spawn(function()
+        while self.ActiveTravel == request do
+            if compatibility.Player.Character ~= character then
+                self:_FinishTravel(request, "Travel cancelled because the character changed.", "warning")
+                return
+            end
+            if mainFarm and mainFarm.Running then
+                self:_FinishTravel(request, "Travel cancelled because Auto Farm started.", "warning")
+                return
+            end
+
+            if not self.MovementService.Active then
+                if self.MovementService.LastStallAt ~= request.LastStallAt then
+                    self:_FinishTravel(
+                        request,
+                        "Travel stalled; copy the status report for movement details.",
+                        "warning"
+                    )
+                else
+                    self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
+                end
+                return
+            end
+            task.wait(0.1)
+        end
+    end)
+    return true
+end
+
+function TeleportFeature:_SelectSetting(setting, value, validOptions)
+    if type(value) ~= "string" then
+        self:_SetStatus("Travel selection must be a destination name.", "error")
+        return false, "Invalid selection"
+    end
+    for _, option in ipairs(validOptions) do
+        if option == value then
+            self.Context.Config.TravelSettings[setting] = value
+            self:_SetStatus("Selected " .. value .. ".", "success")
+            return true
+        end
+    end
+    self:_SetStatus("That destination is not available in the current sea.", "warning")
+    return false, "Destination is unavailable"
+end
+
+function TeleportFeature:Handle(actionId, payload)
+    local config = self.Context and self.Context.Config
+    if actionId == "teleport.island.select" then
+        local compatibility = self.Context.Compatibility
+        local seaIndex = currentSeaIndex(compatibility)
+        local options = {}
+        for _, destination in ipairs(
+            seaIndex and (config.TravelDestinations[seaIndex] or {}) or {}
+        ) do
+            table.insert(options, destination.Name)
+        end
+        return self:_SelectSetting("Island", payload, options)
+    elseif actionId == "teleport.npc.select" then
+        local workspace = self.Context.Compatibility.Workspace
+        local npcFolder = workspace and workspace:FindFirstChild("NPCs")
+        local options = {}
+        if currentSeaIndex(self.Context.Compatibility) and npcFolder then
+            local names = {}
+            for _, npc in ipairs(npcFolder:GetChildren()) do
+                local root = npc:IsA("Model") and npc:FindFirstChild("HumanoidRootPart")
+                local humanoid = npc:IsA("Model") and npc:FindFirstChildOfClass("Humanoid")
+                if npc:IsA("Model")
+                    and root
+                    and root:IsA("BasePart")
+                    and (not humanoid or humanoid.Health > 0)
+                    and not string.find(npc.Name, "Boat", 1, true)
+                    and not string.find(npc.Name, "Set Home", 1, true)
+                then
+                    names[npc.Name] = true
+                end
+            end
+            for name in pairs(names) do
+                table.insert(options, name)
+            end
+            table.sort(options)
+        end
+        return self:_SelectSetting("Npc", payload, options)
+    elseif actionId == "teleport.island.go" then
+        local destination, destinationError = self:_GetSelectedIsland()
+        if not destination then
+            self:_SetStatus(destinationError .. ".", "warning")
+            return false, destinationError
+        end
+        local cframe, resolveError = self:_ResolveIslandCFrame(destination)
+        if not cframe then
+            self:_SetStatus(resolveError .. ".", "warning")
+            return false, resolveError
+        end
+        return self:_StartTravel(cframe, destination.Name)
+    elseif actionId == "teleport.npc.go" then
+        local destination, destinationError = self:_GetNpcDestination()
+        if not destination then
+            self:_SetStatus(destinationError .. ".", "warning")
+            return false, destinationError
+        end
+        return self:_StartTravel(destination, "NPC " .. tostring(config.TravelSettings.Npc))
+    elseif actionId == "teleport.cancel" then
+        if not self:Cancel() then
+            self:_SetStatus("There is no active travel to cancel.", "info")
+        end
+        return true
+    end
+    return false
+end
+
+function TeleportFeature:Initialize(context)
+    self:Cleanup()
+    self.Context = context
+    self.Generation = 0
+    self.ActiveTravel = nil
+    self.MovementService = context.MovementService
+
+    local player = context.Compatibility.Player
+    if player then
+        self.CharacterRemovingConnection = player.CharacterRemoving:Connect(function()
+            self:Cancel("Travel cancelled because the character is resetting.")
+        end)
+    end
+    return true
+end
+
+function TeleportFeature:Cleanup()
+    self:Cancel("Travel cancelled during hub cleanup.")
+    disconnect(self.CharacterRemovingConnection)
+    self.CharacterRemovingConnection = nil
+    self.Context = nil
+    self.MovementService = nil
+end
+
+return TeleportFeature
+-- END SOURCE: src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua
 end
 
 __bundleFactories["CustomHub.Features.Farm.QuestService"] = function()
@@ -7893,9 +8444,12 @@ function MainFarm:_EnsureBaseServices()
     end
     self.QuestService = questService
     self.EnemyService = EnemyService.new(context.Compatibility)
-    self.MovementService = MovementService.new(context.Compatibility, function(message, kind)
-        self:_SetStatus(message, kind)
-    end)
+    self.MovementService = context.MovementService or MovementService.new(
+        context.Compatibility,
+        function(message, kind)
+            self:_SetStatus(message, kind)
+        end
+    )
     return true
 end
 
@@ -8316,6 +8870,15 @@ function MainFarm:CopyStatusReport()
 
     local movementDiagnostic = self.MovementService
         and self.MovementService.LastStallDiagnostic
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    local travelMovementDiagnostic = teleportFeature
+        and teleportFeature.MovementService
+        and teleportFeature.MovementService.LastStallDiagnostic
+    if travelMovementDiagnostic
+        and (not movementDiagnostic or travelMovementDiagnostic.At > movementDiagnostic.At)
+    then
+        movementDiagnostic = travelMovementDiagnostic
+    end
     local movementDiagnosticIncluded = false
     if movementDiagnostic
         and type(movementDiagnostic.Text) == "string"
@@ -11123,6 +11686,10 @@ end
 function MainFarm:Start()
     if self.Running then
         return true
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature:IsTraveling() then
+        teleportFeature:Cancel("Auto Farm started; manual travel was cancelled.")
     end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then

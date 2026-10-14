@@ -510,12 +510,18 @@ function UI:_FindMatchingPageForTab(tabName, query)
     return nil
 end
 
+function UI:_GetControlSettings(control)
+    local settingsKey = control and control.SettingsKey or "FarmSettings"
+    local settings = self.Config[settingsKey]
+    return type(settings) == "table" and settings or {}
+end
+
 function UI:_GetControlOptions(control)
     if type(control.OptionsProvider) == "function" then
         local ok, options = pcall(
             control.OptionsProvider,
             self.Compatibility,
-            self.Config.FarmSettings
+            self:_GetControlSettings(control)
         )
         if ok and type(options) == "table" then
             return options
@@ -547,9 +553,14 @@ function UI:_RefreshDropdownOptions(entry, selectedValue)
         entry.SelectedValue = nil
         local emptyLabel = entry.Control.EmptyOptionsLabel
         local unavailableLabel = entry.Control.UnavailableSelectionLabel
-        local label = #entry.Options == 0 and emptyLabel
-            or unavailableLabel
-            or "Select"
+        local label
+        if not selectedValue then
+            label = entry.Control.PlaceholderLabel or "Select"
+        elseif #entry.Options == 0 then
+            label = emptyLabel or "No options available"
+        else
+            label = unavailableLabel or "Select"
+        end
         if entry.ValueLabel then
             entry.ValueLabel.Text = tostring(label)
         end
@@ -654,8 +665,8 @@ function UI:_Refresh(snapshot)
         elseif entry.Control.Kind == "settingToggle" then
             local settingName = entry.Control.Setting
             if settingName then
-                local farmSettings = self.Config.FarmSettings or {}
-                enabled = farmSettings[settingName] == true
+                local settings = self:_GetControlSettings(entry.Control)
+                enabled = settings[settingName] == true
             else
                 enabled = snapshot.compact
             end
@@ -666,10 +677,10 @@ function UI:_Refresh(snapshot)
     end
 
     for _, entry in ipairs(self.SelectorEntries) do
-        local farmSettings = self.Config.FarmSettings or {}
+        local settings = self:_GetControlSettings(entry.Control)
         local selectedValue = entry.Setting == "UiSize"
             and snapshot.uiSize
-            or farmSettings[entry.Setting]
+            or settings[entry.Setting]
         if entry.Kind == "dropdown" then
             self:_RefreshDropdownOptions(entry, selectedValue)
             if entry.ValueLabel then
@@ -1119,8 +1130,8 @@ function UI:_ActivateControl(control)
     elseif control.Kind == "settingToggle" then
         local currentValue = snapshot.compact
         if control.Setting then
-            local farmSettings = self.Config.FarmSettings or {}
-            currentValue = farmSettings[control.Setting] == true
+            local settings = self:_GetControlSettings(control)
+            currentValue = settings[control.Setting] == true
         end
         return self.Dispatch(control.Action, not currentValue)
     end
@@ -1167,10 +1178,10 @@ end
 
 function UI:_OpenDropdown(entry)
     self:_CloseDropdown()
-    local farmSettings = self.Config.FarmSettings or {}
+    local settings = self:_GetControlSettings(entry.Control)
     local selectedValue = entry.Setting == "UiSize"
         and self.State:GetSnapshot().uiSize
-        or farmSettings[entry.Setting]
+        or settings[entry.Setting]
     self:_RefreshDropdownOptions(entry, selectedValue)
     local options = entry.Options
     if not self.Gui or not self.Root or not entry.Button or #options == 0 then
@@ -1616,11 +1627,13 @@ function UI:_AddControl(control)
     elseif isDropdown then
         rowStroke.Transparency = 0.15
         local options = self:_GetControlOptions(control)
-        local farmSettings = self.Config.FarmSettings or {}
+        local settings = self:_GetControlSettings(control)
         local selectedValue = control.Setting == "UiSize"
             and self.State:GetSnapshot().uiSize
-            or farmSettings[control.Setting]
-            or options[1]
+            or settings[control.Setting]
+        if not selectedValue and not control.AllowNoSelection then
+            selectedValue = options[1]
+        end
         local valueFrame = create("Frame", {
             Name = "DropdownFace",
             AnchorPoint = Vector2.new(1, 0.5),

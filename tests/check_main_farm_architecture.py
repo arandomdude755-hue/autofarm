@@ -41,7 +41,7 @@ enemy = (CUSTOM_HUB / "Features/Farm/EnemyService.lua").read_text(encoding="utf-
 movement = (CUSTOM_HUB / "Features/Farm/MovementService.lua").read_text(encoding="utf-8")
 combat = (CUSTOM_HUB / "Features/Farm/CombatService.lua").read_text(encoding="utf-8")
 
-require("MainFarm" in feature_manager and "Modules = { MainFarm, PlaceholderFeatures }" in feature_manager,
+require("MainFarm" in feature_manager and "Modules = { MainFarm, TeleportFeature, PlaceholderFeatures }" in feature_manager,
         "Feature manager does not register Main Farm")
 require('Action = "farm.main"' in config and 'Kind = "featureToggle"' in config,
         "Farm tab is not wired to the real feature toggle")

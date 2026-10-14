@@ -3,3 +3,4 @@
 - [BNN migration boundaries](bnn-migration-boundaries.md) — Mastery follows the current hotbar tool per category, recovers from swaps, and briefly pauses Gun M1 chasing after confirmed shots.
 - [Farm frame pacing](farm-frame-pacing.md) — Keep collision suppression event-driven; full character descendant scans on Heartbeat cause client frame drops.
 - [Farm settings terminology](farm-settings-terminology.md) — “Auto turn on aura” means Buso/Haki activation, separate from Aura Farm.
+- [Travel tab boundaries](travel-tab-boundaries.md) — travel is one-shot, current-sea-only, cancellable, and must not conflict with Auto Farm.

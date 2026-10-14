@@ -151,9 +151,12 @@ function MainFarm:_EnsureBaseServices()
     end
     self.QuestService = questService
     self.EnemyService = EnemyService.new(context.Compatibility)
-    self.MovementService = MovementService.new(context.Compatibility, function(message, kind)
-        self:_SetStatus(message, kind)
-    end)
+    self.MovementService = context.MovementService or MovementService.new(
+        context.Compatibility,
+        function(message, kind)
+            self:_SetStatus(message, kind)
+        end
+    )
     return true
 end
 
@@ -574,6 +577,15 @@ function MainFarm:CopyStatusReport()
 
     local movementDiagnostic = self.MovementService
         and self.MovementService.LastStallDiagnostic
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    local travelMovementDiagnostic = teleportFeature
+        and teleportFeature.MovementService
+        and teleportFeature.MovementService.LastStallDiagnostic
+    if travelMovementDiagnostic
+        and (not movementDiagnostic or travelMovementDiagnostic.At > movementDiagnostic.At)
+    then
+        movementDiagnostic = travelMovementDiagnostic
+    end
     local movementDiagnosticIncluded = false
     if movementDiagnostic
         and type(movementDiagnostic.Text) == "string"
@@ -3381,6 +3393,10 @@ end
 function MainFarm:Start()
     if self.Running then
         return true
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature:IsTraveling() then
+        teleportFeature:Cancel("Auto Farm started; manual travel was cancelled.")
     end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then

@@ -69,7 +69,7 @@ for materialName in pairs(farmMaterialTargets) do
     table.insert(farmMaterials, materialName)
 end
 table.sort(farmMaterials)
-local function farmMaterialsForCurrentSea(compatibility)
+local function getCurrentSeaIndex(compatibility)
     local seaChecks = {
         { Index = 1, Method = "IsFirstSea" },
         { Index = 2, Method = "IsSecondSea" },
@@ -88,17 +88,125 @@ local function farmMaterialsForCurrentSea(compatibility)
         end
     end
     if recognizedSeaCount ~= 1 then
+        return nil
+    end
+    return currentSeaIndex
+end
+
+local function farmMaterialsForCurrentSea(compatibility)
+    local currentSea = getCurrentSeaIndex(compatibility)
+    if not currentSea then
         return {}
     end
-
     local available = {}
     for _, materialName in ipairs(farmMaterials) do
-        local seaTargets = farmMaterialTargets[materialName][currentSeaIndex]
+        local seaTargets = farmMaterialTargets[materialName][currentSea]
         if type(seaTargets) == "table" and #seaTargets > 0 then
             table.insert(available, materialName)
         end
     end
     return available
+end
+local travelIslandDestinations = {
+    [1] = {
+        { Name = "Start Island", Position = Vector3.new(1071, 16, 1427) },
+        { Name = "Marine Start", Position = Vector3.new(-2573, 7, 2047) },
+        { Name = "Middle Town", Position = Vector3.new(-656, 8, 1437) },
+        { Name = "Jungle", Position = Vector3.new(-1250, 12, 341) },
+        { Name = "Pirate Village", Position = Vector3.new(-1122, 5, 3856) },
+        { Name = "Desert", Position = Vector3.new(1094, 6, 4193) },
+        { Name = "Frozen Village", Position = Vector3.new(1198, 27, -1212) },
+        { Name = "Marine Fortress", Position = Vector3.new(-4505, 21, 4261) },
+        { Name = "Colosseum", Position = Vector3.new(-1428, 7, -3014) },
+        { Name = "Skylands 1st Floor", Position = Vector3.new(-4970, 718, -2622) },
+        { Name = "Skylands 2nd Floor", Position = Vector3.new(-4813, 904, -1913) },
+        { Name = "Upper Skylands", Position = Vector3.new(-7952, 5546, -321) },
+        { Name = "Prison", Position = Vector3.new(4854, 6, 740) },
+        { Name = "Magma Village", Position = Vector3.new(-5232, 9, 8468) },
+        { Name = "Underwater City", Position = Vector3.new(61164, 12, 1819) },
+        { Name = "Fountain City", Position = Vector3.new(5133, 5, 4038) },
+        { Name = "Cyborg House", Position = Vector3.new(6263, 72, 3998) },
+        { Name = "Shanks Room", Position = Vector3.new(-1442, 30, -28) },
+        { Name = "Mob Leader Island", Position = Vector3.new(-2850, 8, 5355) },
+    },
+    [2] = {
+        { Name = "Starting Point", Position = Vector3.new(83, 18, 2835) },
+        { Name = "Kingdom of Rose", LocationName = "Kingdom of Rose" },
+        { Name = "Dark Arena", LocationName = "Dark Arena" },
+        { Name = "Flamingo Mansion", Position = Vector3.new(-390, 332, 673) },
+        { Name = "Flamingo Room", Position = Vector3.new(2302, 16, 664) },
+        { Name = "Green Bit", Position = Vector3.new(-2372, 73, -3167) },
+        { Name = "Cafe", Position = Vector3.new(-385, 73, 297) },
+        { Name = "Factory", Position = Vector3.new(430, 211, -433) },
+        { Name = "Colosseum", Position = Vector3.new(-1837, 45, 1360) },
+        { Name = "Ghost Island", Position = Vector3.new(-5572, 195, -795) },
+        { Name = "Ghost Island Lower", Position = Vector3.new(-5932, 6, -1189) },
+        { Name = "Snow Mountain", Position = Vector3.new(1384, 454, -4990) },
+        { Name = "Hot and Cold", Position = Vector3.new(-6027, 15, -5072) },
+        { Name = "Magma Side", Position = Vector3.new(-5479, 16, -5247) },
+        { Name = "Cursed Ship", Position = Vector3.new(902, 125, 33072) },
+        { Name = "Frosted Island", Position = Vector3.new(5400, 29, -6237) },
+        { Name = "Forgotten Island", Position = Vector3.new(-3043, 239, -10192) },
+        { Name = "Usoapp Island", Position = Vector3.new(4749, 9, 2850) },
+        { Name = "Raid Area", Position = Vector3.new(-5555, 330, -5930) },
+        { Name = "Mini Sky", Position = Vector3.new(-260, 49326, -35259) },
+    },
+    [3] = {
+        { Name = "Port Town", Position = Vector3.new(-287, 30, 5388) },
+        { Name = "Hydra Island", Position = Vector3.new(3399, 73, 1573) },
+        { Name = "Secret Temple", Position = Vector3.new(5247, 8, 1097) },
+        { Name = "Hydra House", Position = Vector3.new(5245, 603, 251) },
+        { Name = "Great Tree", Position = Vector3.new(2443, 37, -6573) },
+        { Name = "Castle on the Sea", Position = Vector3.new(-5500, 315, -2855) },
+        { Name = "Mansion", Position = Vector3.new(-12548, 338, -7481) },
+        { Name = "Floating Turtle", Position = Vector3.new(-10016, 333, -8326) },
+        { Name = "Haunted Castle", Position = Vector3.new(-9509, 143, 5535) },
+        { Name = "Peanut Island", Position = Vector3.new(-2131, 39, -10106) },
+        { Name = "Ice Cream Island", Position = Vector3.new(-950, 60, -10907) },
+        { Name = "Cake Loaf", Position = Vector3.new(-1762, 39, -11878) },
+        { Name = "Tiki Outpost", Position = Vector3.new(-16204, 10, 479) },
+    },
+}
+local function travelIslandsForCurrentSea(compatibility)
+    local currentSea = getCurrentSeaIndex(compatibility)
+    local destinations = currentSea and travelIslandDestinations[currentSea] or {}
+    local options = {}
+    for _, destination in ipairs(destinations) do
+        table.insert(options, destination.Name)
+    end
+    return options
+end
+local function travelNpcsForCurrentSea(compatibility)
+    if not getCurrentSeaIndex(compatibility) then
+        return {}
+    end
+    local workspace = compatibility and compatibility.Workspace
+    local npcFolder = workspace and workspace:FindFirstChild("NPCs")
+    if not npcFolder then
+        return {}
+    end
+    local names = {}
+    for _, npc in ipairs(npcFolder:GetChildren()) do
+        if npc:IsA("Model")
+            and not string.find(npc.Name, "Boat", 1, true)
+            and not string.find(npc.Name, "Set Home", 1, true)
+        then
+            local root = npc:FindFirstChild("HumanoidRootPart")
+            local humanoid = npc:FindFirstChildOfClass("Humanoid")
+            if root
+                and root:IsA("BasePart")
+                and (not humanoid or humanoid.Health > 0)
+            then
+                names[npc.Name] = true
+            end
+        end
+    end
+    local options = {}
+    for name in pairs(names) do
+        table.insert(options, name)
+    end
+    table.sort(options)
+    return options
 end
 local farmModeProfiles = {
     ["Farm Bones"] = {
@@ -184,6 +292,11 @@ end
 local Config = {
     Name = "Custom Hub",
     Version = "UI shell",
+    TravelSettings = {
+        Island = nil,
+        Npc = nil,
+    },
+    TravelDestinations = travelIslandDestinations,
     Defaults = {
         SelectedTab = "Main",
         Compact = false,
@@ -449,9 +562,51 @@ local Config = {
         Teleport = {
             Controls = {
                 {
+                    Kind = "sectionHeader",
+                    Label = "Island travel",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Island",
+                    Action = "teleport.island.select",
+                    Setting = "Island",
+                    SettingsKey = "TravelSettings",
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose island",
+                    OptionsProvider = travelIslandsForCurrentSea,
+                    EmptyOptionsLabel = "No islands available in this sea",
+                    UnavailableSelectionLabel = "Unavailable in this sea",
+                },
+                {
                     Kind = "button",
-                    Label = "Travel status",
-                    Action = "teleport.status",
+                    Label = "Travel to island",
+                    Action = "teleport.island.go",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "NPC travel",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "NPC",
+                    Action = "teleport.npc.select",
+                    Setting = "Npc",
+                    SettingsKey = "TravelSettings",
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose NPC",
+                    OptionsProvider = travelNpcsForCurrentSea,
+                    EmptyOptionsLabel = "No NPCs available in this sea",
+                    UnavailableSelectionLabel = "NPC unavailable",
+                },
+                {
+                    Kind = "button",
+                    Label = "Travel to NPC",
+                    Action = "teleport.npc.go",
+                },
+                {
+                    Kind = "button",
+                    Label = "Cancel travel",
+                    Action = "teleport.cancel",
                 },
             },
         },

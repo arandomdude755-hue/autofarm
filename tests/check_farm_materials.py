@@ -37,7 +37,7 @@ require(
 require(
     "local function farmMaterialsForCurrentSea(compatibility)" in CONFIG
     and "recognizedSeaCount ~= 1" in CONFIG
-    and "farmMaterialTargets[materialName][currentSeaIndex]" in CONFIG
+    and "farmMaterialTargets[materialName][currentSea]" in CONFIG
     and 'UnavailableSelectionLabel = "Unavailable in this sea"' in farm_page
     and 'EmptyOptionsLabel = "No materials in this sea"' in farm_page,
     "The material selector must only expose materials mapped for the detected sea",
