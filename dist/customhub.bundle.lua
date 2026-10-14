@@ -550,6 +550,12 @@ local Config = {
                     Action = "farm.mode.select",
                     Setting = "FarmMode",
                     Options = farmModes,
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose a method",
+                    LockedBySetting = "FarmMaterialsEnabled",
+                    LockedValue = "Farm Materials",
+                    LockedStatus = "Farm method locked to Farm Materials.",
+                    LockedPlayerMessage = "Turn off Farm Materials to choose a different farm method.",
                 },
                 {
                     Kind = "settingToggle",
@@ -832,8 +838,9 @@ function State:Subscribe(listener)
     }
 end
 
-function State:_QueueErrorNotification(playerMessage)
-    local title = "Action unavailable"
+function State:_QueueErrorNotification(playerMessage, kind)
+    local notificationKind = kind == "warning" and "warning" or "error"
+    local title = notificationKind == "warning" and "Action needed" or "Action unavailable"
     local body = tostring(
         playerMessage
             or "That action couldn't be completed. Check the hub status line for details."
@@ -850,7 +857,7 @@ function State:_QueueErrorNotification(playerMessage)
         Id = self._notificationSerial,
         Title = title,
         Message = body,
-        Kind = "error",
+        Kind = notificationKind,
     }
 end
 
@@ -861,8 +868,8 @@ function State:SetStatus(message, kind, playerMessage)
     end
     self._values.status = text
     self._values.statusKind = kind or "info"
-    if kind == "error" then
-        self:_QueueErrorNotification(playerMessage)
+    if kind == "error" or (kind == "warning" and playerMessage ~= nil) then
+        self:_QueueErrorNotification(playerMessage, kind)
     end
     self:_Notify()
 end
@@ -1941,7 +1948,9 @@ function UI:_RefreshDropdownOptions(entry, selectedValue)
 
     if type(entry.Control.OptionsProvider) ~= "function" then
         if entry.ValueLabel then
-            entry.ValueLabel.Text = tostring(selectedValue or "Select")
+            entry.ValueLabel.Text = tostring(
+                selectedValue or entry.Control.PlaceholderLabel or "Select"
+            )
         end
         return
     end
@@ -2089,9 +2098,17 @@ function UI:_Refresh(snapshot)
             and snapshot.uiSize
             or settings[entry.Setting]
         if entry.Kind == "dropdown" then
+            local lockSetting = entry.Control.LockedBySetting
+            entry.IsLocked = lockSetting ~= nil and settings[lockSetting] == true
+            if entry.IsLocked and self.ActiveDropdown and self.ActiveDropdown.Entry == entry then
+                self:_CloseDropdown()
+            end
+            if entry.IsLocked then
+                selectedValue = entry.Control.LockedValue or selectedValue
+            end
             self:_RefreshDropdownOptions(entry, selectedValue)
             if entry.ValueLabel then
-                entry.ValueLabel.TextColor3 = theme.Text
+                entry.ValueLabel.TextColor3 = entry.IsLocked and theme.MutedText or theme.Text
             end
             self:_SetDropdownOpenVisual(
                 entry,
@@ -2606,14 +2623,20 @@ function UI:_SetDropdownOpenVisual(entry, isOpen)
     local theme = self.Config.Theme
     if entry.Arrow then
         entry.Arrow.Text = isOpen and "▲" or "▼"
-        entry.Arrow.TextColor3 = isOpen and theme.Accent or theme.MutedText
+        entry.Arrow.TextColor3 = entry.IsLocked
+            and theme.Warning
+            or isOpen and theme.Accent
+            or theme.MutedText
     end
     if entry.ValueFrame then
-        entry.ValueFrame.BackgroundColor3 = isOpen and theme.Selected or theme.TabBar
+        entry.ValueFrame.BackgroundColor3 = isOpen
+            and theme.Selected
+            or entry.IsLocked and theme.Control
+            or theme.TabBar
     end
     if entry.ValueStroke then
         entry.ValueStroke.Color = theme.AccentBorder
-        entry.ValueStroke.Transparency = isOpen and 0.08 or 0.42
+        entry.ValueStroke.Transparency = entry.IsLocked and 0.55 or isOpen and 0.08 or 0.42
     end
 end
 
@@ -2784,6 +2807,19 @@ end
 function UI:_ToggleDropdown(entry)
     if self.ActiveDropdown and self.ActiveDropdown.Entry == entry then
         self:_CloseDropdown()
+        return
+    end
+    local control = entry.Control
+    local lockSetting = control and control.LockedBySetting
+    local settings = self:_GetControlSettings(control)
+    if lockSetting and settings[lockSetting] == true then
+        self:_CloseDropdown()
+        self.State:SetStatus(
+            control.LockedStatus or "Farm method is locked while Farm Materials is active.",
+            "warning",
+            control.LockedPlayerMessage
+                or "Turn off Farm Materials to choose a different farm method."
+        )
         return
     end
     self:_OpenDropdown(entry)
@@ -8765,15 +8801,19 @@ local function diagnosticSeaName(compatibility)
     return "Unknown"
 end
 
-function MainFarm:_SetStatus(message, kind)
+function MainFarm:_SetStatus(message, kind, playerMessage)
     local now = os.clock()
-    if self.LastStatus == message and now - (self.LastStatusAt or 0) < 1.5 then
+    if self.LastStatus == message
+        and self.LastStatusPlayerMessage == playerMessage
+        and now - (self.LastStatusAt or 0) < 1.5
+    then
         return
     end
     self.LastStatus = message
     self.LastStatusAt = now
+    self.LastStatusPlayerMessage = playerMessage
     if self.Context and self.Context.State then
-        self.Context.State:SetStatus(message, kind)
+        self.Context.State:SetStatus(message, kind, playerMessage)
     end
 end
 
@@ -11380,11 +11420,12 @@ function MainFarm:_Step(session)
     end
 
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
-    local farmMode = farmSettings.FarmMode or "Level Farm"
+    local farmMode = farmSettings.FarmMode
     local farmMaterialsEnabled = farmSettings.FarmMaterialsEnabled == true
     local modeProfiles = farmSettings.FarmModeProfiles
     local farmModeProfile = not farmMaterialsEnabled
         and type(modeProfiles) == "table"
+        and type(farmMode) == "string"
         and modeProfiles[farmMode]
         or nil
     if type(farmModeProfile) ~= "table" or farmModeProfile.TikiEventPhase ~= true then
@@ -11405,6 +11446,18 @@ function MainFarm:_Step(session)
     end
     if farmMaterialsEnabled then
         self:_StepFarmMaterials(session, root)
+        return
+    end
+    if type(farmMode) ~= "string" or farmMode == "" then
+        if self.Target then
+            self:_ClearTarget()
+        end
+        self:_HoldPosition(session)
+        self:_SetStatus(
+            "Choose a farm method to resume farming.",
+            "warning",
+            "Choose a farm method to resume farming."
+        )
         return
     end
     if farmMode == "Aura Farm" then
@@ -12045,6 +12098,18 @@ function MainFarm:Start()
         )
         return false, "Manual travel is active"
     end
+    local farmSettings = self.Context and self.Context.Config and self.Context.Config.FarmSettings
+    if farmSettings
+        and farmSettings.FarmMaterialsEnabled ~= true
+        and (type(farmSettings.FarmMode) ~= "string" or farmSettings.FarmMode == "")
+    then
+        self.Context.State:SetStatus(
+            "Choose a farm method before starting Auto Farm.",
+            "warning",
+            "Choose a farm method before turning on Start Farm."
+        )
+        return false, "Farm method must be selected"
+    end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then
         self:_SetStatus("Main Farm unavailable: " .. tostring(setupError), "error")
@@ -12158,10 +12223,18 @@ function MainFarm:Handle(actionId, payload)
             return false
         end
         farmSettings.FarmMastery = payload
-        self:_SetStatus(
-            "Farm Mastery " .. (payload and "enabled" or "disabled"),
-            "success"
-        )
+        if payload and not self.Running then
+            self:_SetStatus(
+                "Farm Mastery enabled; turn on Start Farm to use it.",
+                "warning",
+                "Turn on Start Farm to use Farm Mastery."
+            )
+        else
+            self:_SetStatus(
+                "Farm Mastery " .. (payload and "enabled" or "disabled"),
+                "success"
+            )
+        end
         return true
     end
     if actionId == "farm.mastery.category.select" then
@@ -12347,6 +12420,14 @@ function MainFarm:Handle(actionId, payload)
         return true
     end
     if actionId == "farm.mode.select" then
+        if farmSettings and farmSettings.FarmMaterialsEnabled == true then
+            self:_SetStatus(
+                "Farm method locked to Farm Materials.",
+                "warning",
+                "Turn off Farm Materials to choose a different farm method."
+            )
+            return true
+        end
         local selectedMode = nil
         for _, mode in ipairs(farmSettings and farmSettings.FarmModes or {}) do
             if mode == payload then
@@ -12395,17 +12476,38 @@ function MainFarm:Handle(actionId, payload)
             self:_SetStatus("Farm Materials setting is unavailable or invalid", "error")
             return false
         end
+        local wasEnabled = farmSettings.FarmMaterialsEnabled == true
         farmSettings.FarmMaterialsEnabled = payload
         if payload and not self.Running then
-            self:_SetStatus("Farm Materials enabled; turn on Start Farm to run it", "warning")
+            farmSettings.FarmMode = nil
+            self:_SetStatus(
+                "Farm Materials enabled; turn on Start Farm to run it.",
+                "warning",
+                "Turn on Start Farm to farm materials."
+            )
         elseif payload then
+            farmSettings.FarmMode = nil
             self:_SetStatus(
                 "Farm Materials enabled; it takes priority over the selected farm method",
                 "success"
             )
+        elseif wasEnabled and self.Running then
+            farmSettings.FarmMode = nil
+            self:_SetStatus(
+                "Farm Materials disabled; select a farm method to resume.",
+                "warning",
+                "Choose a farm method to resume farming."
+            )
+        elseif wasEnabled then
+            farmSettings.FarmMode = nil
+            self:_SetStatus(
+                "Farm Materials disabled; choose a farm method before starting.",
+                "warning",
+                "Choose a farm method before turning on Start Farm."
+            )
         else
             self:_SetStatus(
-                "Farm Materials disabled; the selected farm method resumes",
+                "Farm Materials is already off.",
                 "success"
             )
         end

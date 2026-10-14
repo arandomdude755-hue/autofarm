@@ -545,7 +545,9 @@ function UI:_RefreshDropdownOptions(entry, selectedValue)
 
     if type(entry.Control.OptionsProvider) ~= "function" then
         if entry.ValueLabel then
-            entry.ValueLabel.Text = tostring(selectedValue or "Select")
+            entry.ValueLabel.Text = tostring(
+                selectedValue or entry.Control.PlaceholderLabel or "Select"
+            )
         end
         return
     end
@@ -693,9 +695,17 @@ function UI:_Refresh(snapshot)
             and snapshot.uiSize
             or settings[entry.Setting]
         if entry.Kind == "dropdown" then
+            local lockSetting = entry.Control.LockedBySetting
+            entry.IsLocked = lockSetting ~= nil and settings[lockSetting] == true
+            if entry.IsLocked and self.ActiveDropdown and self.ActiveDropdown.Entry == entry then
+                self:_CloseDropdown()
+            end
+            if entry.IsLocked then
+                selectedValue = entry.Control.LockedValue or selectedValue
+            end
             self:_RefreshDropdownOptions(entry, selectedValue)
             if entry.ValueLabel then
-                entry.ValueLabel.TextColor3 = theme.Text
+                entry.ValueLabel.TextColor3 = entry.IsLocked and theme.MutedText or theme.Text
             end
             self:_SetDropdownOpenVisual(
                 entry,
@@ -1210,14 +1220,20 @@ function UI:_SetDropdownOpenVisual(entry, isOpen)
     local theme = self.Config.Theme
     if entry.Arrow then
         entry.Arrow.Text = isOpen and "▲" or "▼"
-        entry.Arrow.TextColor3 = isOpen and theme.Accent or theme.MutedText
+        entry.Arrow.TextColor3 = entry.IsLocked
+            and theme.Warning
+            or isOpen and theme.Accent
+            or theme.MutedText
     end
     if entry.ValueFrame then
-        entry.ValueFrame.BackgroundColor3 = isOpen and theme.Selected or theme.TabBar
+        entry.ValueFrame.BackgroundColor3 = isOpen
+            and theme.Selected
+            or entry.IsLocked and theme.Control
+            or theme.TabBar
     end
     if entry.ValueStroke then
         entry.ValueStroke.Color = theme.AccentBorder
-        entry.ValueStroke.Transparency = isOpen and 0.08 or 0.42
+        entry.ValueStroke.Transparency = entry.IsLocked and 0.55 or isOpen and 0.08 or 0.42
     end
 end
 
@@ -1388,6 +1404,19 @@ end
 function UI:_ToggleDropdown(entry)
     if self.ActiveDropdown and self.ActiveDropdown.Entry == entry then
         self:_CloseDropdown()
+        return
+    end
+    local control = entry.Control
+    local lockSetting = control and control.LockedBySetting
+    local settings = self:_GetControlSettings(control)
+    if lockSetting and settings[lockSetting] == true then
+        self:_CloseDropdown()
+        self.State:SetStatus(
+            control.LockedStatus or "Farm method is locked while Farm Materials is active.",
+            "warning",
+            control.LockedPlayerMessage
+                or "Turn off Farm Materials to choose a different farm method."
+        )
         return
     end
     self:_OpenDropdown(entry)

@@ -521,6 +521,12 @@ local Config = {
                     Action = "farm.mode.select",
                     Setting = "FarmMode",
                     Options = farmModes,
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose a method",
+                    LockedBySetting = "FarmMaterialsEnabled",
+                    LockedValue = "Farm Materials",
+                    LockedStatus = "Farm method locked to Farm Materials.",
+                    LockedPlayerMessage = "Turn off Farm Materials to choose a different farm method.",
                 },
                 {
                     Kind = "settingToggle",

@@ -67,8 +67,9 @@ function State:Subscribe(listener)
     }
 end
 
-function State:_QueueErrorNotification(playerMessage)
-    local title = "Action unavailable"
+function State:_QueueErrorNotification(playerMessage, kind)
+    local notificationKind = kind == "warning" and "warning" or "error"
+    local title = notificationKind == "warning" and "Action needed" or "Action unavailable"
     local body = tostring(
         playerMessage
             or "That action couldn't be completed. Check the hub status line for details."
@@ -85,7 +86,7 @@ function State:_QueueErrorNotification(playerMessage)
         Id = self._notificationSerial,
         Title = title,
         Message = body,
-        Kind = "error",
+        Kind = notificationKind,
     }
 end
 
@@ -96,8 +97,8 @@ function State:SetStatus(message, kind, playerMessage)
     end
     self._values.status = text
     self._values.statusKind = kind or "info"
-    if kind == "error" then
-        self:_QueueErrorNotification(playerMessage)
+    if kind == "error" or (kind == "warning" and playerMessage ~= nil) then
+        self:_QueueErrorNotification(playerMessage, kind)
     end
     self:_Notify()
 end

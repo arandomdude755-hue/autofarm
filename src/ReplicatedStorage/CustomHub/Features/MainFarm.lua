@@ -123,15 +123,19 @@ local function diagnosticSeaName(compatibility)
     return "Unknown"
 end
 
-function MainFarm:_SetStatus(message, kind)
+function MainFarm:_SetStatus(message, kind, playerMessage)
     local now = os.clock()
-    if self.LastStatus == message and now - (self.LastStatusAt or 0) < 1.5 then
+    if self.LastStatus == message
+        and self.LastStatusPlayerMessage == playerMessage
+        and now - (self.LastStatusAt or 0) < 1.5
+    then
         return
     end
     self.LastStatus = message
     self.LastStatusAt = now
+    self.LastStatusPlayerMessage = playerMessage
     if self.Context and self.Context.State then
-        self.Context.State:SetStatus(message, kind)
+        self.Context.State:SetStatus(message, kind, playerMessage)
     end
 end
 
@@ -2738,11 +2742,12 @@ function MainFarm:_Step(session)
     end
 
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
-    local farmMode = farmSettings.FarmMode or "Level Farm"
+    local farmMode = farmSettings.FarmMode
     local farmMaterialsEnabled = farmSettings.FarmMaterialsEnabled == true
     local modeProfiles = farmSettings.FarmModeProfiles
     local farmModeProfile = not farmMaterialsEnabled
         and type(modeProfiles) == "table"
+        and type(farmMode) == "string"
         and modeProfiles[farmMode]
         or nil
     if type(farmModeProfile) ~= "table" or farmModeProfile.TikiEventPhase ~= true then
@@ -2763,6 +2768,18 @@ function MainFarm:_Step(session)
     end
     if farmMaterialsEnabled then
         self:_StepFarmMaterials(session, root)
+        return
+    end
+    if type(farmMode) ~= "string" or farmMode == "" then
+        if self.Target then
+            self:_ClearTarget()
+        end
+        self:_HoldPosition(session)
+        self:_SetStatus(
+            "Choose a farm method to resume farming.",
+            "warning",
+            "Choose a farm method to resume farming."
+        )
         return
     end
     if farmMode == "Aura Farm" then
@@ -3403,6 +3420,18 @@ function MainFarm:Start()
         )
         return false, "Manual travel is active"
     end
+    local farmSettings = self.Context and self.Context.Config and self.Context.Config.FarmSettings
+    if farmSettings
+        and farmSettings.FarmMaterialsEnabled ~= true
+        and (type(farmSettings.FarmMode) ~= "string" or farmSettings.FarmMode == "")
+    then
+        self.Context.State:SetStatus(
+            "Choose a farm method before starting Auto Farm.",
+            "warning",
+            "Choose a farm method before turning on Start Farm."
+        )
+        return false, "Farm method must be selected"
+    end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then
         self:_SetStatus("Main Farm unavailable: " .. tostring(setupError), "error")
@@ -3516,10 +3545,18 @@ function MainFarm:Handle(actionId, payload)
             return false
         end
         farmSettings.FarmMastery = payload
-        self:_SetStatus(
-            "Farm Mastery " .. (payload and "enabled" or "disabled"),
-            "success"
-        )
+        if payload and not self.Running then
+            self:_SetStatus(
+                "Farm Mastery enabled; turn on Start Farm to use it.",
+                "warning",
+                "Turn on Start Farm to use Farm Mastery."
+            )
+        else
+            self:_SetStatus(
+                "Farm Mastery " .. (payload and "enabled" or "disabled"),
+                "success"
+            )
+        end
         return true
     end
     if actionId == "farm.mastery.category.select" then
@@ -3705,6 +3742,14 @@ function MainFarm:Handle(actionId, payload)
         return true
     end
     if actionId == "farm.mode.select" then
+        if farmSettings and farmSettings.FarmMaterialsEnabled == true then
+            self:_SetStatus(
+                "Farm method locked to Farm Materials.",
+                "warning",
+                "Turn off Farm Materials to choose a different farm method."
+            )
+            return true
+        end
         local selectedMode = nil
         for _, mode in ipairs(farmSettings and farmSettings.FarmModes or {}) do
             if mode == payload then
@@ -3753,17 +3798,38 @@ function MainFarm:Handle(actionId, payload)
             self:_SetStatus("Farm Materials setting is unavailable or invalid", "error")
             return false
         end
+        local wasEnabled = farmSettings.FarmMaterialsEnabled == true
         farmSettings.FarmMaterialsEnabled = payload
         if payload and not self.Running then
-            self:_SetStatus("Farm Materials enabled; turn on Start Farm to run it", "warning")
+            farmSettings.FarmMode = nil
+            self:_SetStatus(
+                "Farm Materials enabled; turn on Start Farm to run it.",
+                "warning",
+                "Turn on Start Farm to farm materials."
+            )
         elseif payload then
+            farmSettings.FarmMode = nil
             self:_SetStatus(
                 "Farm Materials enabled; it takes priority over the selected farm method",
                 "success"
             )
+        elseif wasEnabled and self.Running then
+            farmSettings.FarmMode = nil
+            self:_SetStatus(
+                "Farm Materials disabled; select a farm method to resume.",
+                "warning",
+                "Choose a farm method to resume farming."
+            )
+        elseif wasEnabled then
+            farmSettings.FarmMode = nil
+            self:_SetStatus(
+                "Farm Materials disabled; choose a farm method before starting.",
+                "warning",
+                "Choose a farm method before turning on Start Farm."
+            )
         else
             self:_SetStatus(
-                "Farm Materials disabled; the selected farm method resumes",
+                "Farm Materials is already off.",
                 "success"
             )
         end

@@ -19,10 +19,16 @@ def require(condition, message):
 
 require(
     "notification = self._values.notification" in STATE
-    and "function State:_QueueErrorNotification(playerMessage)" in STATE
-    and 'if kind == "error" then' in STATE
+    and "function State:_QueueErrorNotification(playerMessage, kind)" in STATE
+    and 'if kind == "error" or (kind == "warning" and playerMessage ~= nil) then' in STATE
     and '"That action couldn\'t be completed. Check the hub status line for details."' in STATE,
     "State must expose a player-readable error notification and keep generic errors non-technical",
+)
+require(
+    'kind == "warning" and playerMessage ~= nil' in STATE
+    and '"Action needed"' in STATE
+    and "Kind = notificationKind" in STATE,
+    "explicit player-facing warnings must use the same notification surface with warning styling",
 )
 require(
     'Name = "ActionErrorNotification"' in UI
@@ -32,6 +38,15 @@ require(
     and "task.delay(4.5" in UI
     and "theme.Error" in UI,
     "the error toast must use the hub theme, appear bottom-right, and dismiss automatically",
+)
+require(
+    "control.LockedBySetting" in UI
+    and "control.LockedPlayerMessage" in UI
+    and 'self.State:SetStatus(' in UI[
+        UI.index("function UI:_ToggleDropdown"):
+        UI.index("function UI:_UpdateSliderVisual")
+    ],
+    "locked dropdowns must stay visible and explain the lock when clicked",
 )
 require(
     "Turn off Start Farm first. Travel and farming can't run together." in TELEPORT

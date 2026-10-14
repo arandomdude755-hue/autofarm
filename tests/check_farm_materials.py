@@ -31,6 +31,10 @@ require(
     and 'Label = "Farm Materials"' in farm_page
     and 'Action = "farm.material.enabled"' in farm_page
     and 'Setting = "FarmMaterialsEnabled"' in farm_page
+    and 'LockedBySetting = "FarmMaterialsEnabled"' in farm_page
+    and 'LockedValue = "Farm Materials"' in farm_page
+    and 'PlaceholderLabel = "Choose a method"' in farm_page
+    and "AllowNoSelection = true" in farm_page
     and "FarmMaterialsEnabled = false" in CONFIG,
     "Farm Materials must have an independent enable toggle and material selector, separate from Farm method",
 )
@@ -86,8 +90,21 @@ require(
     'actionId == "farm.material.enabled"' in MAIN_FARM
     and "farmSettings.FarmMaterialsEnabled = payload" in MAIN_FARM
     and "it takes priority over the selected farm method" in MAIN_FARM
-    and "the selected farm method resumes" in MAIN_FARM,
-    "The dedicated material toggle must enable priority and restore the selected method when disabled",
+    and "farmSettings.FarmMode = nil" in MAIN_FARM
+    and "Farm Materials disabled; select a farm method to resume." in MAIN_FARM,
+    "The dedicated material toggle must lock the selector and require a fresh method selection when disabled",
+)
+require(
+    "if farmSettings and farmSettings.FarmMaterialsEnabled == true then" in MAIN_FARM
+    and "Farm method locked to Farm Materials." in MAIN_FARM
+    and "Choose a farm method to resume farming." in MAIN_FARM
+    and "Farm method must be selected" in MAIN_FARM,
+    "Farm method changes must be blocked while materials are active and farming must wait safely for reselection",
+)
+require(
+    "Turn on Start Farm to use Farm Mastery." in MAIN_FARM
+    and "Turn on Start Farm to farm materials." in MAIN_FARM,
+    "Farm Mastery and Farm Materials must explain through notifications that Start Farm is required",
 )
 
 farm_step = function_body(
