@@ -2,7 +2,6 @@ local weaponCategories = { "Melee", "Sword", "Blox Fruit" }
 local farmModes = {
     "Level Farm",
     "Aura Farm",
-    "Farm Materials",
     "Farm Bones",
     "Farm Cake Prince",
     "Farm Tyrant of the Skies",
@@ -170,6 +169,7 @@ local Config = {
         FarmMaterials = farmMaterials,
         FarmMaterialTargets = farmMaterialTargets,
         FarmMaterial = "Leather",
+        FarmMaterialsEnabled = false,
         FarmMasteryMethods = { "Blox Fruit", "Gun" },
         FarmMastery = false,
         MasteryCategory = "Blox Fruit",
@@ -331,6 +331,12 @@ local Config = {
                     Action = "farm.material.select",
                     Setting = "FarmMaterial",
                     Options = farmMaterials,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Farm Materials",
+                    Action = "farm.material.enabled",
+                    Setting = "FarmMaterialsEnabled",
                 },
                 {
                     Kind = "settingToggle",

@@ -43,6 +43,12 @@ Farm Materials must stay in the player's current sea. If a selected material is 
 
 **How to apply:** resolve the current sea before target selection, use only that sea's material mob list, and never invoke cross-sea travel for this mode.
 
+Farm Materials is an independent priority toggle, not a Farm method option. While Start Farm is active, enabling it overrides the selected normal method's target loop; disabling it resumes that method. Keep target engagement shared so Farm Mastery can still run on material targets.
+
+**Why:** the user wants materials and ordinary farm methods to be mutually exclusive, while Mastery remains compatible. This also matches BNN's separate material toggle and Start Farm gate.
+
+**How to apply:** keep material selection/toggle outside the Farm method options, dispatch material targeting before normal modes, and preserve the shared Mastery-aware engagement path.
+
 Changing the target, Mastery method, or selected tool during a farm must not leave a stale skill input or preparation state blocking the current farm. Re-evaluate the active context and safely release/reset stale state when it changes.
 
 **Why:** the user explicitly wants switching weapons or modes mid-farm to recover rather than break any farm function.

@@ -20,12 +20,16 @@ def function_body(source, signature, next_signature):
 
 farm_page = CONFIG[CONFIG.index("        Farm = {"):CONFIG.index("        Player = {")]
 require(
-    '"Farm Materials"' in CONFIG
+    '"Farm Materials"' not in CONFIG[CONFIG.index("local farmModes = {"):CONFIG.index("local farmMaterialTargets = {")]
     and 'Label = "Farm material"' in farm_page
     and 'Action = "farm.material.select"' in farm_page
     and 'Setting = "FarmMaterial"' in farm_page
-    and "Options = farmMaterials" in farm_page,
-    "Farm Materials must be selectable and expose a material dropdown",
+    and "Options = farmMaterials" in farm_page
+    and 'Label = "Farm Materials"' in farm_page
+    and 'Action = "farm.material.enabled"' in farm_page
+    and 'Setting = "FarmMaterialsEnabled"' in farm_page
+    and "FarmMaterialsEnabled = false" in CONFIG,
+    "Farm Materials must have an independent enable toggle and material selector, separate from Farm method",
 )
 require(
     "local farmMaterialTargets = {" in CONFIG
@@ -67,18 +71,35 @@ require(
     and "farmSettings.FarmMaterial = selectedMaterial" in MAIN_FARM,
     "The material dropdown action must validate and update the selected material",
 )
+require(
+    'actionId == "farm.material.enabled"' in MAIN_FARM
+    and "farmSettings.FarmMaterialsEnabled = payload" in MAIN_FARM
+    and "it takes priority over the selected farm method" in MAIN_FARM
+    and "the selected farm method resumes" in MAIN_FARM,
+    "The dedicated material toggle must enable priority and restore the selected method when disabled",
+)
 
 farm_step = function_body(
     MAIN_FARM,
     "function MainFarm:_Step(session)",
     "\nfunction MainFarm:_Run(session)",
 )
-materials_route = farm_step.index('if farmMode == "Farm Materials" then')
+materials_route = farm_step.index("if farmMaterialsEnabled then")
+normal_mode_route = farm_step.index('if farmMode == "Aura Farm" then')
 quest_read = farm_step.index("self.QuestService:GetActiveQuestState()")
 require(
-    materials_route < quest_read
+    materials_route < normal_mode_route < quest_read
     and "self:_StepFarmMaterials(session, root)" in farm_step,
-    "Farm Materials must route before quest reading and never depend on an active quest",
+    "Enabled Farm Materials must override normal farm modes and route before quest reading",
+)
+require(
+    "local farmModeProfile = not farmMaterialsEnabled" in farm_step
+    and 'self:_EngageModeTarget(target, false, root, session, "material")' in material_step
+    and "self:_GetMasteryCategory(" in MAIN_FARM[
+        MAIN_FARM.index("function MainFarm:_EngageModeTarget"):
+        MAIN_FARM.index("function MainFarm:_RefreshTikiEventState")
+    ],
+    "Material priority must cancel competing event-mode routing while retaining shared Mastery combat",
 )
 
 print("PASS: Farm Materials selection, sea mapping, and manual-travel behavior")

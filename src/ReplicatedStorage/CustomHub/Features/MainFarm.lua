@@ -1183,6 +1183,8 @@ function MainFarm:_SyncFarmSkillContext(
         FarmSkillsEnabled = masteryCategory == nil
             and farmSettings
             and farmSettings.UseFarmSkills == true,
+        FarmMaterialsEnabled = farmSettings
+            and farmSettings.FarmMaterialsEnabled == true,
         MasteryEnabled = masteryIsAllowed == true,
         MasteryMethod = masteryIsAllowed and farmSettings.MasteryCategory,
         MasteryThreshold = masteryIsAllowed and farmSettings.MasteryHealthPercent,
@@ -1197,6 +1199,7 @@ function MainFarm:_SyncFarmSkillContext(
         or oldContext.Target ~= nextContext.Target
         or oldContext.WeaponCategory ~= nextContext.WeaponCategory
         or oldContext.FarmSkillsEnabled ~= nextContext.FarmSkillsEnabled
+        or oldContext.FarmMaterialsEnabled ~= nextContext.FarmMaterialsEnabled
         or oldContext.MasteryEnabled ~= nextContext.MasteryEnabled
         or oldContext.MasteryMethod ~= nextContext.MasteryMethod
         or oldContext.MasteryThreshold ~= nextContext.MasteryThreshold
@@ -1516,6 +1519,7 @@ function MainFarm:_TryStartFarmSkill(
                                 ) == masteryCategory)
                             or (
                                 not masteryCategory
+                                and currentSettings.FarmMaterialsEnabled ~= true
                                 and currentSettings.UseFarmSkills == true
                                 and self:_GetMasteryCategory(
                                     target,
@@ -2704,8 +2708,12 @@ function MainFarm:_Step(session)
 
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local farmMode = farmSettings.FarmMode or "Level Farm"
+    local farmMaterialsEnabled = farmSettings.FarmMaterialsEnabled == true
     local modeProfiles = farmSettings.FarmModeProfiles
-    local farmModeProfile = type(modeProfiles) == "table" and modeProfiles[farmMode] or nil
+    local farmModeProfile = not farmMaterialsEnabled
+        and type(modeProfiles) == "table"
+        and modeProfiles[farmMode]
+        or nil
     if type(farmModeProfile) ~= "table" or farmModeProfile.TikiEventPhase ~= true then
         self.TikiEventComplete = false
         self.NextTikiBossSearchAt = 0
@@ -2722,12 +2730,12 @@ function MainFarm:_Step(session)
             return
         end
     end
-    if farmMode == "Aura Farm" then
-        self:_StepAura(session, root)
+    if farmMaterialsEnabled then
+        self:_StepFarmMaterials(session, root)
         return
     end
-    if farmMode == "Farm Materials" then
-        self:_StepFarmMaterials(session, root)
+    if farmMode == "Aura Farm" then
+        self:_StepAura(session, root)
         return
     end
     if farmMode ~= "Level Farm" and type(farmModeProfile) ~= "table" then
@@ -3698,6 +3706,27 @@ function MainFarm:Handle(actionId, payload)
         end
         farmSettings.FarmMaterial = selectedMaterial
         self:_SetStatus("Farm material: " .. selectedMaterial, "success")
+        return true
+    end
+    if actionId == "farm.material.enabled" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Farm Materials setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.FarmMaterialsEnabled = payload
+        if payload and not self.Running then
+            self:_SetStatus("Farm Materials enabled; turn on Start Farm to run it", "warning")
+        elseif payload then
+            self:_SetStatus(
+                "Farm Materials enabled; it takes priority over the selected farm method",
+                "success"
+            )
+        else
+            self:_SetStatus(
+                "Farm Materials disabled; the selected farm method resumes",
+                "success"
+            )
+        end
         return true
     end
     if actionId == "farm.auraDistance.set" then

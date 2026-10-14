@@ -38,8 +38,10 @@ require('Label = "Farm method"' in farm_config
         and '"Farm Bones"' in CONFIG
         and '"Farm Cake Prince"' in CONFIG
         and '"Farm Tyrant of the Skies"' in CONFIG
-        and '"Farm Materials"' in CONFIG,
-        "Farm page must offer the implemented level, aura, material, bone, cake, and Tiki modes")
+        and '"Farm Materials"' not in CONFIG[CONFIG.index("local farmModes = {"):CONFIG.index("local farmMaterialTargets = {")]
+        and 'Label = "Farm Materials"' in farm_config
+        and 'Action = "farm.material.enabled"' in farm_config,
+        "Farm Materials must be a separate priority toggle, not a Farm method")
 require('Label = "Auto quest for modes"' in farm_config
         and 'Action = "farm.autoModeQuest"' in farm_config
         and 'Setting = "AutoModeQuest"' in farm_config
