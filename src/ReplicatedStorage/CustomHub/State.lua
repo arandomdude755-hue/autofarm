@@ -12,6 +12,7 @@ function State.new(defaults)
         uiSize = defaults.UiSize,
         status = "Hub UI ready; Main Farm is available but disabled.",
         statusKind = "info",
+        statusValues = {},
         notification = nil,
         featureEnabled = {},
     }
@@ -26,12 +27,17 @@ function State:GetSnapshot()
     for key, value in pairs(self._values.featureEnabled) do
         featureEnabled[key] = value
     end
+    local statusValues = {}
+    for key, value in pairs(self._values.statusValues) do
+        statusValues[key] = value
+    end
     return {
         selectedTab = self._values.selectedTab,
         compact = self._values.compact,
         uiSize = self._values.uiSize,
         status = self._values.status,
         statusKind = self._values.statusKind,
+        statusValues = statusValues,
         notification = self._values.notification,
         featureEnabled = featureEnabled,
     }
@@ -120,6 +126,17 @@ end
 
 function State:SetFeatureEnabled(actionId, enabled)
     self._values.featureEnabled[actionId] = enabled == true
+    self:_Notify()
+end
+
+function State:SetStatusValues(values)
+    local nextValues = {}
+    if type(values) == "table" then
+        for key, value in pairs(values) do
+            nextValues[key] = tostring(value)
+        end
+    end
+    self._values.statusValues = nextValues
     self:_Notify()
 end
 

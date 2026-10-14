@@ -61,7 +61,7 @@ local Theme = {
     MonoFont = Enum.Font.Code,
 }
 
-local Tabs = { "Main", "Farm", "Player", "Teleport", "Settings" }
+local Tabs = { "Main", "Farm", "Player", "Teleport", "StatusServer", "Settings" }
 local Pages = {
     Main = {
         Controls = {
@@ -1456,7 +1456,7 @@ task.spawn(function()
         return screenGui ~= nil and screenGui.Parent == playerGui and countTestGuis() == 1
     end)
 
-    test("all five tabs exist", function()
+    test("all six tabs exist", function()
         for _, tabName in ipairs(Tabs) do
             if not tabButtons[tabName] or not tabButtons[tabName]:IsA("TextButton") then
                 return false

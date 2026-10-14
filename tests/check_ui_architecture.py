@@ -280,7 +280,7 @@ for path in [
             f"Trailing whitespace: {path.relative_to(ROOT)}")
 
 print("PASS: standalone Rojo mapping and no-module packaging")
-print("PASS: five tabs, UI-only actions, and local cleanup lifecycle")
+print("PASS: six tabs, UI-only actions, and local cleanup lifecycle")
 print("PASS: client self-test and manual-inspection reporting hooks")
 print("PASS: no remotes, dynamic loading, or executor-only APIs")
 print("PASS: documentation and whitespace checks")

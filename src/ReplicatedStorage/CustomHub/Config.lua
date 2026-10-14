@@ -497,6 +497,7 @@ local Config = {
         "Farm",
         "Player",
         "Teleport",
+        "StatusServer",
         "Settings",
     },
     TabSubsections = {
@@ -667,6 +668,45 @@ local Config = {
                     Label = "Travel to NPC",
                     Action = "teleport.npc",
                 },
+            },
+        },
+        StatusServer = {
+            Title = "Status & Server",
+            SingleColumn = true,
+            Controls = {
+                {
+                    Kind = "button",
+                    Label = "Refresh status",
+                    Action = "status.refresh",
+                },
+                {
+                    Kind = "button",
+                    Label = "Copy status report",
+                    Action = "status.copy",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Player",
+                },
+                { Kind = "statusValue", Key = "sea", Label = "Sea" },
+                { Kind = "statusValue", Key = "level", Label = "Level" },
+                { Kind = "statusValue", Key = "race", Label = "Race" },
+                { Kind = "statusValue", Key = "character", Label = "Character" },
+                { Kind = "statusValue", Key = "health", Label = "Health" },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Farm",
+                },
+                { Kind = "statusValue", Key = "autoFarm", Label = "Auto Farm" },
+                { Kind = "statusValue", Key = "farmMastery", Label = "Farm Mastery" },
+                { Kind = "statusValue", Key = "farmMaterials", Label = "Farm Materials" },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Server",
+                },
+                { Kind = "statusValue", Key = "players", Label = "Players" },
+                { Kind = "statusValue", Key = "placeId", Label = "Place ID" },
+                { Kind = "statusValue", Key = "jobId", Label = "Server ID" },
             },
         },
         Settings = {

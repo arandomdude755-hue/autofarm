@@ -31,7 +31,9 @@ local function addCorner(parent, radius)
 end
 
 local function displayTabName(tabName)
-    return tabName == "Farm" and "Farming" or tabName
+    return tabName == "Farm" and "Farming"
+        or tabName == "StatusServer" and "Status"
+        or tabName
 end
 
 local function normalizeSearchText(text)
@@ -155,6 +157,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         ActiveSubsectionLabel = nil,
         ToggleLabels = {},
         SelectorEntries = {},
+        StatusValueEntries = {},
         SliderEntries = {},
         ActiveSlider = nil,
         ActiveDropdown = nil,
@@ -626,6 +629,9 @@ function UI:_Refresh(snapshot)
     if self.RestorePing then
         self.RestorePing.BackgroundColor3 = self.StatusLabel.TextColor3
     end
+    for _, entry in ipairs(self.StatusValueEntries) do
+        entry.ValueLabel.Text = tostring(snapshot.statusValues[entry.Key] or "—")
+    end
     if snapshot.notification then
         self:_ShowNotification(snapshot.notification)
     end
@@ -810,6 +816,7 @@ function UI:_ClearPage()
     disconnectAll(self.PageConnections)
     self.ToggleLabels = {}
     self.SelectorEntries = {}
+    self.StatusValueEntries = {}
     self.SliderEntries = {}
     self.ActiveSlider = nil
     self.ControlsContainer = nil
@@ -885,6 +892,8 @@ function UI:_ControlNodeName(control)
         return "Subsection_" .. tostring(control.Label):gsub("[^%w]", "_")
     elseif control.Kind == "collapsibleHeader" then
         return "GroupHeader_" .. tostring(control.GroupId):gsub("[^%w]", "_")
+    elseif control.Kind == "statusValue" then
+        return "StatusValue_" .. tostring(control.Key):gsub("[^%w]", "_")
     end
     return "Action_" .. tostring(control.Action):gsub("[^%w]", "_")
 end
@@ -1635,6 +1644,52 @@ end
 function UI:_AddControl(control)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
+    if control.Kind == "statusValue" then
+        local row = create("Frame", {
+            Name = self:_ControlNodeName(control),
+            Size = UDim2.new(1, 0, 0, layout.RowHeight),
+            BackgroundColor3 = theme.Control,
+            BorderSizePixel = 0,
+            LayoutOrder = #self.ControlsContainer:GetChildren(),
+        }, self.ControlsContainer)
+        addCorner(row, 4)
+        create("UIStroke", {
+            Color = theme.Border,
+            Thickness = layout.BorderThickness,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Transparency = 0.15,
+        }, row)
+        create("TextLabel", {
+            Name = "Title",
+            Position = UDim2.fromOffset(layout.RowInset, 0),
+            Size = UDim2.new(0.45, -layout.RowInset, 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.Font,
+            Text = control.Label,
+            TextColor3 = theme.Text,
+            TextSize = theme.TextSizes.Control,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+        local valueLabel = create("TextLabel", {
+            Name = "Value",
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -layout.RowInset, 0, 0),
+            Size = UDim2.new(0.55, -layout.RowInset * 2, 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.MonoFont,
+            Text = "—",
+            TextColor3 = theme.MutedText,
+            TextSize = theme.TextSizes.Status,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+        table.insert(self.StatusValueEntries, {
+            Key = control.Key,
+            ValueLabel = valueLabel,
+        })
+        return row
+    end
     if control.Kind == "sectionHeader" or control.Kind == "collapsibleHeader" then
         local isCollapsible = control.Kind == "collapsibleHeader"
         local row = create(isCollapsible and "TextButton" or "Frame", {

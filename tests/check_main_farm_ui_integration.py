@@ -153,7 +153,7 @@ require("self.SelectorEntries" in refresh
 
 require("self.FeatureManager:Dispatch(actionId, payload)" in HUB,
         "Hub must route UI actions to FeatureManager")
-require("Modules = { MainFarm, TeleportFeature, PlaceholderFeatures }" in MANAGER,
+require("Modules = { MainFarm, TeleportFeature, StatusFeature, PlaceholderFeatures }" in MANAGER,
         "FeatureManager must own the existing MainFarm module")
 dispatch = function_body(MANAGER, "function FeatureManager:Dispatch", "\nfunction FeatureManager:Cleanup")
 require('actionId == "farm.weaponCategory.select"' in dispatch

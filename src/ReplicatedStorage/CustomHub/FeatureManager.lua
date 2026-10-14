@@ -1,6 +1,7 @@
 local PlaceholderFeatures = require(script.Features.PlaceholderFeatures)
 local MainFarm = require(script.Features.MainFarm)
 local TeleportFeature = require(script.Features.TeleportFeature)
+local StatusFeature = require(script.Features.StatusFeature)
 local MovementService = require(script.Features.Farm.MovementService)
 
 local FeatureManager = {}
@@ -12,7 +13,7 @@ function FeatureManager.new(state, compatibility, config)
     end)
     return setmetatable({
         State = state,
-        Modules = { MainFarm, TeleportFeature, PlaceholderFeatures },
+        Modules = { MainFarm, TeleportFeature, StatusFeature, PlaceholderFeatures },
         InitializedModules = {},
         Context = {
             State = state,
