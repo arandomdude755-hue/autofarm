@@ -44,6 +44,13 @@ function TeleportFeature:_SetStatus(message, kind)
     end
 end
 
+function TeleportFeature:_SetFeatureEnabled(actionId, enabled)
+    local state = self.Context and self.Context.State
+    if state and actionId then
+        state:SetFeatureEnabled(actionId, enabled)
+    end
+end
+
 function TeleportFeature:IsTraveling()
     return self.ActiveTravel ~= nil
 end
@@ -71,31 +78,54 @@ end
 function TeleportFeature:_FindNpcRoot(name)
     local compatibility = self.Context and self.Context.Compatibility
     local workspace = compatibility and compatibility.Workspace
-    local npcFolder = workspace and workspace:FindFirstChild("NPCs")
-    if not npcFolder then
-        return nil, "Workspace.NPCs is unavailable"
-    end
+    local replicatedStorage = compatibility and compatibility.ReplicatedStorage
+    local sources = {
+        {
+            Folder = workspace and workspace:FindFirstChild("NPCs"),
+            IsLive = true,
+            Priority = 0,
+        },
+        {
+            Folder = replicatedStorage and replicatedStorage:FindFirstChild("NPCs"),
+            IsLive = false,
+            Priority = 1,
+        },
+    }
 
     local _, _, playerRoot = compatibility:GetCharacterParts()
-    local nearestRoot
+    local selectedRoot
+    local selectedPriority = math.huge
     local nearestDistance = math.huge
-    for _, npc in ipairs(npcFolder:GetChildren()) do
-        if npc:IsA("Model") and npc.Name == name then
-            local root = npc:FindFirstChild("HumanoidRootPart")
-            local humanoid = npc:FindFirstChildOfClass("Humanoid")
-            if root and root:IsA("BasePart") and (not humanoid or humanoid.Health > 0) then
-                local distance = playerRoot and (root.Position - playerRoot.Position).Magnitude or 0
-                if distance < nearestDistance then
-                    nearestRoot = root
-                    nearestDistance = distance
+    for _, source in ipairs(sources) do
+        for _, npc in ipairs(source.Folder and source.Folder:GetChildren() or {}) do
+            if npc:IsA("Model") and npc.Name == name then
+                local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+                local humanoid = source.IsLive and npc:FindFirstChildOfClass("Humanoid")
+                local templateInSea = source.IsLive
+                    or self.Context.Config.IsTravelNpcPositionInCurrentSea(
+                        compatibility,
+                        root and root.Position
+                    )
+                if root and root:IsA("BasePart")
+                    and (not humanoid or humanoid.Health > 0)
+                    and templateInSea
+                then
+                    local distance = playerRoot and (root.Position - playerRoot.Position).Magnitude or 0
+                    if source.Priority < selectedPriority
+                        or source.Priority == selectedPriority and distance < nearestDistance
+                    then
+                        selectedRoot = root
+                        selectedPriority = source.Priority
+                        nearestDistance = distance
+                    end
                 end
             end
         end
     end
-    if not nearestRoot then
-        return nil, "The selected NPC is not currently loaded in Workspace.NPCs"
+    if not selectedRoot then
+        return nil, "The selected NPC has no usable live or template position"
     end
-    return nearestRoot
+    return selectedRoot
 end
 
 function TeleportFeature:_GetNpcDestination()
@@ -111,11 +141,32 @@ function TeleportFeature:_GetNpcDestination()
     if not root then
         return nil, rootError
     end
-    return CFrame.new(root.Position + Vector3.new(0, 5, 0))
+    return root.CFrame * CFrame.new(0, 0, -4)
 end
 
 function TeleportFeature:_ResolveIslandCFrame(destination)
     if destination.Position then
+        if destination.SurfaceSnap == true then
+            local compatibility = self.Context and self.Context.Compatibility
+            local workspace = compatibility and compatibility.Workspace
+            if not workspace then
+                return nil, "Workspace is unavailable for surface lookup"
+            end
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {
+                compatibility.Player and compatibility.Player.Character,
+            }
+            pcall(function()
+                params.RespectCanCollide = true
+            end)
+            local origin = destination.Position + Vector3.new(0, 1200, 0)
+            local hit = workspace:Raycast(origin, Vector3.new(0, -2400, 0), params)
+            if not hit then
+                return nil, "Could not find a safe surface at " .. destination.Name
+            end
+            return CFrame.new(hit.Position + Vector3.new(0, 5, 0))
+        end
         return CFrame.new(destination.Position + Vector3.new(0, 18, 0))
     end
     if destination.LocationName then
@@ -143,6 +194,7 @@ function TeleportFeature:_FinishTravel(request, message, kind)
         self.MovementService:Cancel()
         self.MovementService:SetFarmCollisionSuppression(false)
     end
+    self:_SetFeatureEnabled(request.Action, false)
     self:_SetStatus(message, kind)
 end
 
@@ -157,6 +209,7 @@ function TeleportFeature:Cancel(message)
         self.MovementService:Cancel()
         self.MovementService:SetFarmCollisionSuppression(false)
     end
+    self:_SetFeatureEnabled(request.Action, false)
     if message then
         self:_SetStatus(message, "warning")
     else
@@ -165,16 +218,18 @@ function TeleportFeature:Cancel(message)
     return true
 end
 
-function TeleportFeature:_StartTravel(destination, destinationLabel)
+function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local context = self.Context
     local compatibility = context and context.Compatibility
     local mainFarm = context and context.MainFarm
     if mainFarm and mainFarm.Running then
+        self:_SetFeatureEnabled(actionId, false)
         self:_SetStatus("Turn off Start Farm before manual travel.", "warning")
         return false, "Auto Farm is running"
     end
     local character, humanoid, root = compatibility:GetCharacterParts()
     if not character or not humanoid or not root then
+        self:_SetFeatureEnabled(actionId, false)
         self:_SetStatus("Travel unavailable: character is not ready.", "error")
         return false, "Character is unavailable"
     end
@@ -190,6 +245,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel)
         collisionReady = false
     end
     if not collisionReady then
+        self:_SetFeatureEnabled(actionId, false)
         self:_SetStatus("Travel collision setup failed: " .. tostring(collisionError), "error")
         return false, collisionError
     end
@@ -201,10 +257,12 @@ function TeleportFeature:_StartTravel(destination, destinationLabel)
         StartedAt = os.clock(),
         LastStallAt = self.MovementService.LastStallAt,
         Label = destinationLabel,
+        Action = actionId,
         Destination = destination,
         StallRetries = 0,
     }
     self.ActiveTravel = request
+    self:_SetFeatureEnabled(actionId, true)
 
     local function issueMovement()
         return self.MovementService:MoveTo(request.Destination, {
@@ -335,24 +393,41 @@ function TeleportFeature:Handle(actionId, payload)
         ) do
             table.insert(options, destination.Name)
         end
-        return self:_SelectSetting("Island", payload, options)
+        self:_SelectSetting("Island", payload, options)
+        return true
     elseif actionId == "teleport.npc.select" then
-        local workspace = self.Context.Compatibility.Workspace
-        local npcFolder = workspace and workspace:FindFirstChild("NPCs")
+        local compatibility = self.Context.Compatibility
+        local workspace = compatibility.Workspace
+        local replicatedStorage = compatibility.ReplicatedStorage
+        local npcSources = {}
+        local liveNpcFolder = workspace and workspace:FindFirstChild("NPCs")
+        local templateNpcFolder = replicatedStorage and replicatedStorage:FindFirstChild("NPCs")
+        if liveNpcFolder then
+            table.insert(npcSources, { Folder = liveNpcFolder, IsLive = true })
+        end
+        if templateNpcFolder then
+            table.insert(npcSources, { Folder = templateNpcFolder, IsLive = false })
+        end
         local options = {}
-        if currentSeaIndex(self.Context.Compatibility) and npcFolder then
+        if currentSeaIndex(compatibility) then
             local names = {}
-            for _, npc in ipairs(npcFolder:GetChildren()) do
-                local root = npc:IsA("Model") and npc:FindFirstChild("HumanoidRootPart")
-                local humanoid = npc:IsA("Model") and npc:FindFirstChildOfClass("Humanoid")
-                if npc:IsA("Model")
-                    and root
-                    and root:IsA("BasePart")
-                    and (not humanoid or humanoid.Health > 0)
-                    and not string.find(npc.Name, "Boat", 1, true)
-                    and not string.find(npc.Name, "Set Home", 1, true)
-                then
-                    names[npc.Name] = true
+            for _, source in ipairs(npcSources) do
+                for _, npc in ipairs(source.Folder:GetChildren()) do
+                    local isLive = source.IsLive
+                    local root = npc:IsA("Model")
+                        and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart)
+                    local humanoid = isLive and npc:IsA("Model")
+                        and npc:FindFirstChildOfClass("Humanoid")
+                    if npc:IsA("Model")
+                        and root
+                        and root:IsA("BasePart")
+                        and (not humanoid or humanoid.Health > 0)
+                        and (isLive or config.IsTravelNpcPositionInCurrentSea(compatibility, root.Position))
+                        and not string.find(npc.Name, "Boat", 1, true)
+                        and not string.find(npc.Name, "Set Home", 1, true)
+                    then
+                        names[npc.Name] = true
+                    end
                 end
             end
             for name in pairs(names) do
@@ -360,30 +435,38 @@ function TeleportFeature:Handle(actionId, payload)
             end
             table.sort(options)
         end
-        return self:_SelectSetting("Npc", payload, options)
-    elseif actionId == "teleport.island.go" then
-        local destination, destinationError = self:_GetSelectedIsland()
+        self:_SelectSetting("Npc", payload, options)
+        return true
+    elseif actionId == "teleport.island" or actionId == "teleport.npc" then
+        if payload ~= true then
+            if self.ActiveTravel and self.ActiveTravel.Action == actionId then
+                self:Cancel()
+            else
+                self:_SetFeatureEnabled(actionId, false)
+            end
+            return true
+        end
+
+        local destinationLabel
+        local destination
+        local destinationError
+        if actionId == "teleport.island" then
+            local island
+            island, destinationError = self:_GetSelectedIsland()
+            if island then
+                destinationLabel = island.Name
+                destination, destinationError = self:_ResolveIslandCFrame(island)
+            end
+        else
+            destination, destinationError = self:_GetNpcDestination()
+            destinationLabel = "NPC " .. tostring(config.TravelSettings.Npc)
+        end
         if not destination then
-            self:_SetStatus(destinationError .. ".", "warning")
-            return false, destinationError
+            self:_SetFeatureEnabled(actionId, false)
+            self:_SetStatus(tostring(destinationError or "Travel target is unavailable") .. ".", "warning")
+            return true
         end
-        local cframe, resolveError = self:_ResolveIslandCFrame(destination)
-        if not cframe then
-            self:_SetStatus(resolveError .. ".", "warning")
-            return false, resolveError
-        end
-        return self:_StartTravel(cframe, destination.Name)
-    elseif actionId == "teleport.npc.go" then
-        local destination, destinationError = self:_GetNpcDestination()
-        if not destination then
-            self:_SetStatus(destinationError .. ".", "warning")
-            return false, destinationError
-        end
-        return self:_StartTravel(destination, "NPC " .. tostring(config.TravelSettings.Npc))
-    elseif actionId == "teleport.cancel" then
-        if not self:Cancel() then
-            self:_SetStatus("There is no active travel to cancel.", "info")
-        end
+        self:_StartTravel(destination, destinationLabel, actionId)
         return true
     end
     return false

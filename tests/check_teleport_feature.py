@@ -29,12 +29,19 @@ require(
 require(
     all(action in CONFIG for action in (
         'Action = "teleport.island.select"',
-        'Action = "teleport.island.go"',
         'Action = "teleport.npc.select"',
-        'Action = "teleport.npc.go"',
-        'Action = "teleport.cancel"',
+        'Kind = "featureToggle"',
+        'Action = "teleport.island"',
+        'Action = "teleport.npc"',
     )),
-    "Teleport page is missing a selection, one-shot travel, or cancel action",
+    "Teleport page must use selectable destinations and independent travel toggles",
+)
+require(
+    'Action = "teleport.cancel"' not in CONFIG
+    and 'Label = "Cancel travel"' not in CONFIG
+    and "self:_SetFeatureEnabled(request.Action, false)" in FEATURE
+    and "self:_SetFeatureEnabled(actionId, true)" in FEATURE,
+    "travel toggles must replace Cancel travel and turn off when travel finishes",
 )
 require(
     all(token in CONFIG for token in (
@@ -51,17 +58,17 @@ require(
     "the UI must support dropdowns backed by settings outside FarmSettings",
 )
 require(
-    "local npcFolder = workspace and workspace:FindFirstChild(\"NPCs\")" in FEATURE
+    'replicatedStorage and replicatedStorage:FindFirstChild("NPCs")' in FEATURE
     and 'npc.Name == name' in FEATURE
-    and 'npc:FindFirstChild("HumanoidRootPart")' in FEATURE
+    and 'npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart' in FEATURE
     and "nearestDistance" in FEATURE,
-    "NPC travel must resolve an exact live Workspace NPC and choose the nearest duplicate",
+    "NPC travel must search live NPCs and ReplicatedStorage templates, preferring the live instance",
 )
 require(
     "mainFarm and mainFarm.Running" in FEATURE
     and 'teleportFeature:Cancel("Auto Farm started; manual travel was cancelled.")' in MAIN_FARM
     and "function TeleportFeature:Cancel(message)" in FEATURE,
-    "travel and Auto Farm must be mutually exclusive and travel must be cancellable",
+    "travel and Auto Farm must be mutually exclusive and Auto Farm must stop active travel",
 )
 require(
     "MovementService.new(compatibility" in MANAGER
@@ -85,9 +92,17 @@ require(
 )
 require(
     "TeleportService" not in FEATURE
-    and "ReplicatedStorage" not in FEATURE
     and 'Action = "teleport.status"' not in CONFIG,
-    "manual travel must not add server hopping, template NPCs, or the old placeholder",
+    "manual travel must not add server hopping or the old placeholder",
+)
+require(
+    'Name = "Hydra House"' in CONFIG
+    and "Position = Vector3.new(5245, 602, 251)" in CONFIG
+    and "SurfaceSnap = true" in CONFIG
+    and "if destination.SurfaceSnap == true then" in FEATURE
+    and "workspace:Raycast(origin, Vector3.new(0, -2400, 0), params)" in FEATURE
+    and "return CFrame.new(destination.Position + Vector3.new(0, 18, 0))" in FEATURE,
+    "island travel must use exact reference coordinates and resolve Hydra House onto a real surface",
 )
 
-print("PASS: current-sea island/NPC travel, cancellation, and shared movement ownership")
+print("PASS: toggle-based island/NPC travel, reference NPC fallback, Hydra surface resolution, and shared movement ownership")

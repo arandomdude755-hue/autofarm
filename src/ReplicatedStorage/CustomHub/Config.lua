@@ -155,7 +155,11 @@ local travelIslandDestinations = {
         { Name = "Port Town", Position = Vector3.new(-287, 30, 5388) },
         { Name = "Hydra Island", Position = Vector3.new(3399, 73, 1573) },
         { Name = "Secret Temple", Position = Vector3.new(5247, 8, 1097) },
-        { Name = "Hydra House", Position = Vector3.new(5245, 603, 251) },
+        {
+            Name = "Hydra House",
+            Position = Vector3.new(5245, 602, 251),
+            SurfaceSnap = true,
+        },
         { Name = "Great Tree", Position = Vector3.new(2443, 37, -6573) },
         { Name = "Castle on the Sea", Position = Vector3.new(-5500, 315, -2855) },
         { Name = "Mansion", Position = Vector3.new(-12548, 338, -7481) },
@@ -176,28 +180,76 @@ local function travelIslandsForCurrentSea(compatibility)
     end
     return options
 end
+local function travelNpcSources(compatibility)
+    local workspace = compatibility and compatibility.Workspace
+    local replicatedStorage = compatibility and compatibility.ReplicatedStorage
+    return {
+        {
+            Folder = workspace and workspace:FindFirstChild("NPCs"),
+            IsLive = true,
+        },
+        {
+            Folder = replicatedStorage and replicatedStorage:FindFirstChild("NPCs"),
+            IsLive = false,
+        },
+    }
+end
+
+local function travelNpcRoot(npc)
+    local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+    return root and root:IsA("BasePart") and root or nil
+end
+
+local function isTravelNpcPositionInCurrentSea(compatibility, position)
+    local seaIndex = getCurrentSeaIndex(compatibility)
+    if not seaIndex or typeof(position) ~= "Vector3" then
+        return false
+    end
+
+    local workspace = compatibility and compatibility.Workspace
+    local locations = workspace
+        and workspace:FindFirstChild("_WorldOrigin")
+        and workspace._WorldOrigin:FindFirstChild("Locations")
+    for _, destination in ipairs(travelIslandDestinations[seaIndex] or {}) do
+        local anchor = destination.Position
+        if not anchor and destination.LocationName and locations then
+            local location = locations:FindFirstChild(destination.LocationName)
+            if location and location:IsA("BasePart") then
+                anchor = location.Position
+            elseif location and location:IsA("Model") then
+                anchor = location:GetPivot().Position
+            end
+        end
+        if anchor
+            and Vector2.new(position.X, position.Z).Magnitude > 100
+            and (Vector2.new(position.X - anchor.X, position.Z - anchor.Z)).Magnitude <= 5000
+        then
+            return true
+        end
+    end
+    return false
+end
+
 local function travelNpcsForCurrentSea(compatibility)
     if not getCurrentSeaIndex(compatibility) then
         return {}
     end
-    local workspace = compatibility and compatibility.Workspace
-    local npcFolder = workspace and workspace:FindFirstChild("NPCs")
-    if not npcFolder then
-        return {}
-    end
     local names = {}
-    for _, npc in ipairs(npcFolder:GetChildren()) do
-        if npc:IsA("Model")
-            and not string.find(npc.Name, "Boat", 1, true)
-            and not string.find(npc.Name, "Set Home", 1, true)
-        then
-            local root = npc:FindFirstChild("HumanoidRootPart")
-            local humanoid = npc:FindFirstChildOfClass("Humanoid")
-            if root
-                and root:IsA("BasePart")
-                and (not humanoid or humanoid.Health > 0)
+    for _, source in ipairs(travelNpcSources(compatibility)) do
+        for _, npc in ipairs(source.Folder and source.Folder:GetChildren() or {}) do
+            if npc:IsA("Model")
+                and not string.find(npc.Name, "Boat", 1, true)
+                and not string.find(npc.Name, "Set Home", 1, true)
+                and travelNpcRoot(npc)
             then
-                names[npc.Name] = true
+                local humanoid = source.IsLive and npc:FindFirstChildOfClass("Humanoid")
+                local root = travelNpcRoot(npc)
+                if (not humanoid or humanoid.Health > 0)
+                    and (source.IsLive
+                        or isTravelNpcPositionInCurrentSea(compatibility, root.Position))
+                then
+                    names[npc.Name] = true
+                end
             end
         end
     end
@@ -297,6 +349,7 @@ local Config = {
         Npc = nil,
     },
     TravelDestinations = travelIslandDestinations,
+    IsTravelNpcPositionInCurrentSea = isTravelNpcPositionInCurrentSea,
     Defaults = {
         SelectedTab = "Main",
         Compact = false,
@@ -578,9 +631,9 @@ local Config = {
                     UnavailableSelectionLabel = "Unavailable in this sea",
                 },
                 {
-                    Kind = "button",
+                    Kind = "featureToggle",
                     Label = "Travel to island",
-                    Action = "teleport.island.go",
+                    Action = "teleport.island",
                 },
                 {
                     Kind = "sectionHeader",
@@ -599,14 +652,9 @@ local Config = {
                     UnavailableSelectionLabel = "NPC unavailable",
                 },
                 {
-                    Kind = "button",
+                    Kind = "featureToggle",
                     Label = "Travel to NPC",
-                    Action = "teleport.npc.go",
-                },
-                {
-                    Kind = "button",
-                    Label = "Cancel travel",
-                    Action = "teleport.cancel",
+                    Action = "teleport.npc",
                 },
             },
         },
