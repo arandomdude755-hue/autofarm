@@ -169,6 +169,11 @@ local travelIslandDestinations = {
         { Name = "Ice Cream Island", Position = Vector3.new(-950, 60, -10907) },
         { Name = "Cake Loaf", Position = Vector3.new(-1762, 39, -11878) },
         { Name = "Tiki Outpost", Position = Vector3.new(-16204, 10, 479) },
+        {
+            Name = "Dragon Dojo",
+            Position = Vector3.new(5700, 1210, 860),
+            ExactPosition = true,
+        },
     },
 }
 local function travelIslandsForCurrentSea(compatibility)

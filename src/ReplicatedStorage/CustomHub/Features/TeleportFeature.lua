@@ -483,7 +483,7 @@ function TeleportFeature:_FinishTravel(request, message, kind)
     self:_SetStatus(message, kind)
 end
 
-function TeleportFeature:Cancel(message)
+function TeleportFeature:Cancel(message, keepActionEnabled)
     local request = self.ActiveTravel
     if not request then
         return false
@@ -494,9 +494,13 @@ function TeleportFeature:Cancel(message)
         self.MovementService:Cancel()
         self.MovementService:SetFarmCollisionSuppression(false)
     end
-    self:_SetFeatureEnabled(request.Action, false)
+    if not keepActionEnabled then
+        self:_SetFeatureEnabled(request.Action, false)
+    end
     if message then
         self:_SetStatus(message, "warning")
+    elseif keepActionEnabled then
+        self:_SetStatus("Updating travel destination.", "info")
     else
         self:_SetStatus("Travel cancelled.", "info")
     end
@@ -591,6 +595,39 @@ function TeleportFeature:_SelectSetting(setting, value, validOptions)
     return false, "Destination is unavailable"
 end
 
+function TeleportFeature:_RetargetActiveIslandTravel()
+    local request = self.ActiveTravel
+    if not request or request.Action ~= "teleport.island" then
+        return false
+    end
+
+    local island, islandError = self:_GetSelectedIsland()
+    if not island then
+        self:Cancel(
+            "Island travel stopped: "
+                .. tostring(islandError or "the selected destination is unavailable")
+                .. "."
+        )
+        return false
+    end
+    if request.Label == island.Name then
+        return true
+    end
+
+    local destination, destinationError = self:_ResolveIslandCFrame(island)
+    if not destination then
+        self:Cancel(
+            "Island travel stopped: "
+                .. tostring(destinationError or "the selected destination is unavailable")
+                .. "."
+        )
+        return false
+    end
+
+    self:Cancel(nil, true)
+    return self:_StartTravel(destination, island.Name, request.Action)
+end
+
 function TeleportFeature:Handle(actionId, payload)
     local config = self.Context and self.Context.Config
     if actionId == "teleport.island.select" then
@@ -602,7 +639,10 @@ function TeleportFeature:Handle(actionId, payload)
         ) do
             table.insert(options, destination.Name)
         end
-        self:_SelectSetting("Island", payload, options)
+        local selected = self:_SelectSetting("Island", payload, options)
+        if selected then
+            self:_RetargetActiveIslandTravel()
+        end
         return true
     elseif actionId == "teleport.npc.select" then
         local compatibility = self.Context.Compatibility

@@ -33,6 +33,12 @@ require(
     "island destinations must be filtered to the recognized current sea",
 )
 require(
+    'Name = "Dragon Dojo"' in CONFIG
+    and "Position = Vector3.new(5700, 1210, 860)" in CONFIG
+    and "ExactPosition = true" in CONFIG,
+    "Dragon Dojo must appear at the requested exact Third Sea coordinates",
+)
+require(
     all(action in CONFIG for action in (
         'Action = "teleport.island.select"',
         'Action = "teleport.npc.select"',
@@ -74,8 +80,15 @@ require(
     "mainFarm and mainFarm.Running" in FEATURE
     and "Turn off Travel to Island or Travel to NPC before starting Auto Farm." in MAIN_FARM
     and "Turn off Start Farm first. Travel and farming can't run together." in FEATURE
-    and "function TeleportFeature:Cancel(message)" in FEATURE,
+    and "function TeleportFeature:Cancel(message, keepActionEnabled)" in FEATURE,
     "travel and Auto Farm conflicts must be blocked with player-facing explanations",
+)
+require(
+    "function TeleportFeature:_RetargetActiveIslandTravel()" in FEATURE
+    and "self:_RetargetActiveIslandTravel()" in FEATURE
+    and "self:Cancel(nil, true)" in FEATURE
+    and "return self:_StartTravel(destination, island.Name, request.Action)" in FEATURE,
+    "changing the Island dropdown during island travel must restart the active trip without turning its toggle off",
 )
 require(
     "MovementService.new(compatibility" in MANAGER
