@@ -152,6 +152,13 @@ require(
     "gateway diagnostics must distinguish planning, approach, activation, and arrival failures",
 )
 require(
+    "local GATEWAY_ACTIVATION_TIMEOUT = 8" in GATEWAYS
+    and "local REMOTE_RETRY_INTERVAL = 0.3" in GATEWAYS
+    and "remoteCallCount += 1" in GATEWAYS
+    and "and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL" in GATEWAYS,
+    "requestEntrance must retry at the Vxeze cadence until arrival or the bounded timeout",
+)
+require(
     "TeleportService" not in FEATURE
     and 'Action = "teleport.status"' not in CONFIG,
     "manual travel must not add server hopping or the old placeholder",

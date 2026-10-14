@@ -4,6 +4,8 @@ MapGatewayService.__index = MapGatewayService
 local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
 local FAILED_ROUTE_COOLDOWN = 120
+local GATEWAY_ACTIVATION_TIMEOUT = 8
+local REMOTE_RETRY_INTERVAL = 0.3
 
 local SEA_LABELS = {
     [1] = "First Sea",
@@ -389,7 +391,56 @@ function MapGatewayService:Use(route, isCurrent)
         RemoteCallStatus = "not started",
         ActivationFailure = nil,
     })
-    local requestResult
+    local remote
+    local remoteCallPending = false
+    local remoteCallCount = 0
+    local lastRemoteCallAt = -math.huge
+    local function invokeEntrance()
+        if remoteCallPending or not isCurrent() then
+            return
+        end
+        remoteCallPending = true
+        remoteCallCount += 1
+        lastRemoteCallAt = os.clock()
+        if diagnostic and diagnostic.LastAttempt
+            and diagnostic.LastAttempt.Route == route.Name
+        then
+            diagnostic.LastAttempt.RemoteCallCount = remoteCallCount
+            diagnostic.LastAttempt.RemoteCallStatus = "in progress"
+        end
+        task.spawn(function()
+            if not isCurrent() then
+                remoteCallPending = false
+                return
+            end
+            local ok, result = pcall(function()
+                return remote:InvokeServer(
+                    "requestEntrance",
+                    route.Argument or route.Destination
+                )
+            end)
+            remoteCallPending = false
+            if diagnostic and diagnostic.LastAttempt
+                and diagnostic.LastAttempt.Route == route.Name
+            then
+                diagnostic.LastAttempt.RemoteCallStatus = ok
+                        and "InvokeServer returned"
+                    or "InvokeServer errored"
+                diagnostic.LastAttempt.RemoteResultType = type(result)
+                if type(result) == "string" or type(result) == "number"
+                    or type(result) == "boolean"
+                then
+                    diagnostic.LastAttempt.RemoteResultSummary = formatScalar(result, 100)
+                end
+                if ok then
+                    diagnostic.LastAttempt.ActivationFailure = nil
+                else
+                    diagnostic.LastAttempt.ActivationFailure = formatScalar(result)
+                end
+            end
+        end)
+    end
+
     if route.TouchTarget then
         local touchOk, touchError = compatibility:TouchPart(
             root,
@@ -411,7 +462,8 @@ function MapGatewayService:Use(route, isCurrent)
             return false, touchError
         end
     else
-        local remote, remoteError = compatibility:GetCommF()
+        local remoteError
+        remote, remoteError = compatibility:GetCommF()
         if not remote then
             self:RecordTravelPhase("gateway remote unavailable", route, {
                 Failure = remoteError,
@@ -419,42 +471,12 @@ function MapGatewayService:Use(route, isCurrent)
             })
             return false, remoteError
         end
-        if diagnostic and diagnostic.LastAttempt then
-            diagnostic.LastAttempt.RemoteCallCount = 1
-            diagnostic.LastAttempt.RemoteCallStatus = "in progress"
-        end
-        task.spawn(function()
-            if not isCurrent() then
-                requestResult = { Ok = false, Result = "Travel was cancelled" }
-                return
-            end
-            local ok, result = pcall(function()
-                return remote:InvokeServer(
-                    "requestEntrance",
-                    route.Argument or route.Destination
-                )
-            end)
-            requestResult = { Ok = ok, Result = result }
-            if diagnostic and diagnostic.LastAttempt
-                and diagnostic.LastAttempt.Route == route.Name
-            then
-                diagnostic.LastAttempt.RemoteCallStatus = ok
-                        and "InvokeServer returned"
-                    or "InvokeServer errored"
-                diagnostic.LastAttempt.RemoteResultType = type(result)
-                if type(result) == "string" or type(result) == "number"
-                    or type(result) == "boolean"
-                then
-                    diagnostic.LastAttempt.RemoteResultSummary = formatScalar(result, 100)
-                end
-                if not ok then
-                    diagnostic.LastAttempt.ActivationFailure = formatScalar(result)
-                end
-            end
-        end)
     end
 
-    local deadline = os.clock() + 8
+    local deadline = os.clock() + GATEWAY_ACTIVATION_TIMEOUT
+    if remote then
+        invokeEntrance()
+    end
     while isCurrent() and os.clock() < deadline do
         local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
         if currentCharacter ~= character or not currentRoot then
@@ -483,14 +505,10 @@ function MapGatewayService:Use(route, isCurrent)
             })
             return true
         end
-        if requestResult and not requestResult.Ok then
-            self:MarkFailed(route)
-            local failure = "Gateway request failed: " .. formatScalar(requestResult.Result)
-            self:RecordTravelPhase("gateway request failed", route, {
-                PositionAfterActivation = currentRoot.Position,
-                Failure = failure,
-            })
-            return false, failure
+        if remote and not remoteCallPending
+            and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL
+        then
+            invokeEntrance()
         end
         task.wait(0.1)
     end
@@ -507,7 +525,9 @@ function MapGatewayService:Use(route, isCurrent)
         DistanceAfterActivation = finalRoot
                 and distance(finalRoot.Position, route.Destination)
             or nil,
-        Failure = "Gateway did not confirm arrival within 8 seconds",
+        Failure = "Gateway did not confirm arrival within "
+            .. tostring(GATEWAY_ACTIVATION_TIMEOUT)
+            .. " seconds",
     })
     return false, "Gateway did not confirm arrival"
 end
