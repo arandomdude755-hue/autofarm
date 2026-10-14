@@ -130,8 +130,42 @@ require(
     and "MAX_ROUTE_HOPS = 4" in GATEWAYS
     and "HasOwnedInventoryItem" in GATEWAYS
     and '"Valkyrie Helm"' in GATEWAYS
-    and '"Feathered Visage"' in GATEWAYS,
+    and '"Feathered Visage"' in GATEWAYS
+    and 'RequiresTitle = "Liberator of the Sky"' in GATEWAYS
+    and GATEWAYS.count('RequiresTitle = "Liberator of the Sky"') == 2,
     "map gateway routes must be sea-scoped, distance-gated, and require owned items where Vxeze does",
+)
+title_access = COMPATIBILITY[
+    COMPATIBILITY.index("function Compatibility:HasUnlockedTitle(titleName)"):
+    COMPATIBILITY.index("\nfunction Compatibility:BuildTitleAccessDiagnosticReport()")
+]
+route_access = GATEWAYS[
+    GATEWAYS.index("function MapGatewayService:_GetAvailableRoutes(seaIndex)"):
+    GATEWAYS.index("\nfunction MapGatewayService:FindPlan")
+]
+require(
+    "function Compatibility:HasUnlockedTitle(titleName)" in title_access
+    and 'FindFirstChild("scrollingFrame")' in title_access
+    and 'FindFirstChild("titleName", true)' in title_access
+    and 'FindFirstChild("lockedImage", true)' in title_access
+    and 'FindFirstChild("Open")' in title_access
+    and "openEvent:Fire()" in title_access
+    and "TITLE_MENU_PROBE_TIMEOUT = 0.5" in COMPATIBILITY
+    and "activeFrame.Visible = false" in title_access
+    and "TITLE_STATE_CACHE_TTL = 30" in COMPATIBILITY
+    and "InvokeServer" not in title_access
+    and "FireServer" not in title_access,
+    "title access lookup must read the loaded TitlesMenu, hide/restore a bounded UI probe, cache results, and avoid unknown remotes",
+)
+require(
+    route_access.index("compatibility.HasOwnedInventoryItem")
+    < route_access.index("compatibility.HasUnlockedTitle")
+    and "source.RequiresTitle" in route_access
+    and "candidate.TitleRequirementOwned" in route_access
+    and "candidate.AccessBy" in route_access
+    and "fallback_title=" in GATEWAYS
+    and "title_owned=" in GATEWAYS,
+    "Tiki gateway eligibility must check Feathered Visage first, then an unlocked-title fallback, with diagnostics",
 )
 require(
     '"requestEntrance"' in GATEWAYS

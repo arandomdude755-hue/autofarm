@@ -924,6 +924,10 @@ local CollectionService = game:GetService("CollectionService")
 local Compatibility = {}
 Compatibility.__index = Compatibility
 
+local TITLE_MENU_PROBE_TIMEOUT = 0.5
+local TITLE_MENU_PROBE_INTERVAL = 0.05
+local TITLE_STATE_CACHE_TTL = 30
+
 function Compatibility.new()
     return setmetatable({
         Player = Players.LocalPlayer,
@@ -1243,6 +1247,228 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     self.OwnedInventoryCache[itemName] = found == true
     self.OwnedInventoryCacheAt = now
     return found == true
+end
+
+function Compatibility:HasUnlockedTitle(titleName)
+    if type(titleName) ~= "string" or titleName == "" then
+        return nil, "title name is unavailable"
+    end
+
+    local now = os.clock()
+    self.TitleOwnershipCache = self.TitleOwnershipCache or {}
+    local targetLower = string.lower(titleName)
+
+    local function getMenuParts()
+        local playerGui = self.Player and self.Player:FindFirstChildOfClass("PlayerGui")
+        local titlesMenu = playerGui and playerGui:FindFirstChild("TitlesMenu")
+        local root = titlesMenu and titlesMenu:FindFirstChild("ROOT")
+        local frame = root and root:FindFirstChild("Frame")
+        local content = frame and frame:FindFirstChild("content")
+        local list = content and content:FindFirstChild("scrollingFrame")
+        return titlesMenu, frame, list
+    end
+
+    local function readTitleState()
+        local titlesMenu, frame, list = getMenuParts()
+        if not titlesMenu then
+            return nil, "TitlesMenu is unavailable", titlesMenu, frame, list
+        end
+        if not list then
+            return nil, "title list is not populated", titlesMenu, frame, list
+        end
+
+        local row = list:FindFirstChild(titleName)
+        if not row then
+            for _, child in ipairs(list:GetChildren()) do
+                if string.lower(tostring(child.Name)) == targetLower then
+                    row = child
+                    break
+                end
+            end
+        end
+        if not row or not row:IsA("GuiObject") then
+            return nil, "title row is not present in the loaded list", titlesMenu, frame, list
+        end
+        if not row.Visible then
+            return nil, "title row is hidden in the loaded list", titlesMenu, frame, list
+        end
+
+        local titleLabel = row:FindFirstChild("titleName", true)
+        local titleText = titleLabel and titleLabel:IsA("TextLabel")
+                and tostring(titleLabel.Text)
+            or ""
+        local titleTextLower = string.lower(titleText)
+        local lockedImage = row:FindFirstChild("lockedImage", true)
+        local isLocked = string.find(titleTextLower, "(locked)", 1, true) ~= nil
+        if lockedImage and lockedImage:IsA("GuiObject") and lockedImage.Visible then
+            isLocked = true
+        end
+        if isLocked then
+            return false, "title row is marked locked", titlesMenu, frame, list
+        end
+        if titleTextLower ~= ""
+            and string.find(titleTextLower, targetLower, 1, true)
+        then
+            return true, "unlocked title row is visible", titlesMenu, frame, list
+        end
+        return nil, "title row has no readable unlocked/locked marker", titlesMenu, frame, list
+    end
+
+    local function safeReadTitleState()
+        local readOk, state, reason, titlesMenu, frame, list = pcall(readTitleState)
+        if not readOk then
+            return nil, "title UI scan failed: " .. tostring(state), nil, nil, nil
+        end
+        return state, reason, titlesMenu, frame, list
+    end
+
+    local state, reason, titlesMenu, frame = safeReadTitleState()
+    if state ~= nil then
+        self.TitleOwnershipCache[titleName] = {
+            Value = state,
+            Reason = reason,
+            At = now,
+            ExpiresAt = state and math.huge or now + TITLE_STATE_CACHE_TTL,
+        }
+        return state, reason
+    end
+
+    local cache = self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return cache.Value, cache.Reason
+    end
+
+    local menuIsVisible = false
+    pcall(function()
+        menuIsVisible = titlesMenu.Enabled == true and frame and frame.Visible == true
+    end)
+    local openedForProbe = false
+    local originalFrame = frame
+    local originalFrameVisible = frame and frame.Visible
+    local originalEnabled
+    if titlesMenu and titlesMenu:IsA("LayerCollector") then
+        originalEnabled = titlesMenu.Enabled
+    end
+
+    local visibilityConnections = {}
+    local function suppressProbeMenu()
+        pcall(function()
+            local _, activeFrame = getMenuParts()
+            if activeFrame and activeFrame:IsA("GuiObject") then
+                activeFrame.Visible = false
+            end
+        end)
+    end
+    local function watchFrame(activeFrame)
+        if not activeFrame or not activeFrame:IsA("GuiObject") then
+            return
+        end
+        local connectOk, connection = pcall(function()
+            return activeFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+                pcall(function()
+                    if openedForProbe and activeFrame.Visible then
+                        activeFrame.Visible = false
+                    end
+                end)
+            end)
+        end)
+        if connectOk and connection then
+            table.insert(visibilityConnections, connection)
+        end
+        if openedForProbe and activeFrame.Visible then
+            activeFrame.Visible = false
+        end
+    end
+
+    if not menuIsVisible then
+        local openEvent = titlesMenu and titlesMenu:FindFirstChild("Open")
+        if not openEvent or not openEvent:IsA("BindableEvent") then
+            reason = "TitlesMenu.Open is unavailable"
+        else
+            if frame then
+                watchFrame(frame)
+            end
+            local descendantConnection
+            if titlesMenu then
+                descendantConnection = titlesMenu.DescendantAdded:Connect(function(instance)
+                    if instance.Name == "Frame"
+                        and instance.Parent
+                        and instance.Parent.Name == "ROOT"
+                    then
+                            pcall(watchFrame, instance)
+                    end
+                end)
+            end
+            local fired, fireError = pcall(function()
+                openEvent:Fire()
+            end)
+            if fired then
+                openedForProbe = true
+                suppressProbeMenu()
+            else
+                reason = "TitlesMenu.Open failed: " .. tostring(fireError)
+            end
+            if descendantConnection then
+                table.insert(visibilityConnections, descendantConnection)
+            end
+        end
+    end
+
+    local function waitForTitleState()
+        local deadline = os.clock() + TITLE_MENU_PROBE_TIMEOUT
+        repeat
+            state, reason = safeReadTitleState()
+            if state ~= nil or (not openedForProbe and not menuIsVisible) then
+                break
+            end
+            if openedForProbe then
+                suppressProbeMenu()
+            end
+            if os.clock() >= deadline then
+                reason = "title list did not populate within "
+                    .. tostring(TITLE_MENU_PROBE_TIMEOUT)
+                    .. " seconds"
+                break
+            end
+            task.wait(TITLE_MENU_PROBE_INTERVAL)
+        until false
+        return state, reason
+    end
+    local probeOk, probeState, probeReason = pcall(waitForTitleState)
+    if probeOk then
+        state, reason = probeState, probeReason
+    else
+        state = nil
+        reason = "title menu probe failed: " .. tostring(probeState)
+    end
+
+    if openedForProbe then
+        pcall(function()
+            local _, activeFrame = getMenuParts()
+            if activeFrame and activeFrame:IsA("GuiObject") then
+                activeFrame.Visible = originalFrame and originalFrameVisible == true or false
+            end
+            if titlesMenu and originalEnabled ~= nil then
+                titlesMenu.Enabled = originalEnabled
+            end
+        end)
+    end
+    for _, connection in ipairs(visibilityConnections) do
+        pcall(function()
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end)
+    end
+
+    now = os.clock()
+    self.TitleOwnershipCache[titleName] = {
+        Value = state,
+        Reason = reason,
+        At = now,
+        ExpiresAt = state == true and math.huge or now + TITLE_STATE_CACHE_TTL,
+    }
+    return state, reason
 end
 
 function Compatibility:BuildTitleAccessDiagnosticReport()
@@ -4709,6 +4935,7 @@ local ROUTES_BY_SEA = {
             Map = "Boat Castle",
             Touch = "MapTeleportC",
             Requires = "Feathered Visage",
+            RequiresTitle = "Liberator of the Sky",
         },
         {
             Name = "Tiki to Castle",
@@ -4717,6 +4944,7 @@ local ROUTES_BY_SEA = {
             Map = "TikiOutpost",
             Touch = "MapTeleportC",
             Requires = "Feathered Visage",
+            RequiresTitle = "Liberator of the Sky",
         },
         {
             Name = "Enter Beautiful Pirate Domain",
@@ -4839,6 +5067,7 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
         local candidate = {
             Name = source.Name,
             Requirement = source.Requires,
+            FallbackTitle = source.RequiresTitle,
             Activation = source.Touch and "touch" or "requestEntrance",
             Eligible = false,
         }
@@ -4855,13 +5084,38 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
                     source.Requires
                 )
                 available = checkOk and owned == true
-                candidate.RequirementOwned = available
-                if not available then
+                candidate.ItemRequirementOwned = available
+                if available then
+                    candidate.AccessBy = source.Requires
+                elseif source.RequiresTitle then
+                    local titleCheckOk, titleOwned, titleError = pcall(
+                        compatibility.HasUnlockedTitle,
+                        compatibility,
+                        source.RequiresTitle
+                    )
+                    if titleCheckOk and type(titleOwned) == "boolean" then
+                        candidate.TitleRequirementOwned = titleOwned
+                    end
+                    if titleCheckOk and titleOwned == true then
+                        available = true
+                        candidate.AccessBy = source.RequiresTitle
+                    else
+                        local itemReason = checkOk
+                                and (inventoryError or "required item not found in inventory")
+                            or ("inventory check failed: " .. formatScalar(owned))
+                        local titleReason = titleCheckOk
+                                and (titleError
+                                    or (titleOwned == false and "title is locked" or "title state is unknown"))
+                            or ("title check failed: " .. formatScalar(titleOwned))
+                        candidate.Reason = itemReason .. "; " .. titleReason
+                    end
+                else
                     candidate.Reason = checkOk
                             and (inventoryError or "required item not found in inventory")
                         or ("inventory check failed: " .. formatScalar(owned))
                 end
             end
+            candidate.RequirementOwned = available
 
             local stand = available and self:_ResolveStand(source) or nil
             if available and typeof(stand) ~= "Vector3" then
@@ -5233,6 +5487,21 @@ function MapGatewayService:BuildDiagnosticReport()
                 .. (candidate.RequirementOwned == nil
                     and "n/a"
                     or tostring(candidate.RequirementOwned))
+                .. (candidate.ItemRequirementOwned ~= nil
+                    and ("; item_owned=" .. tostring(candidate.ItemRequirementOwned))
+                    or "")
+                .. (candidate.FallbackTitle
+                    and ("; fallback_title=" .. tostring(candidate.FallbackTitle))
+                    or "")
+                .. (candidate.FallbackTitle
+                    and (
+                        "; title_owned="
+                            .. (candidate.TitleRequirementOwned == nil
+                                and "unknown"
+                                or tostring(candidate.TitleRequirementOwned))
+                    )
+                    or "")
+                .. (candidate.AccessBy and ("; access_by=" .. tostring(candidate.AccessBy)) or "")
                 .. "; reason="
                 .. formatScalar(candidate.Reason or "available")
                 .. (type(candidate.StandDistance) == "number"

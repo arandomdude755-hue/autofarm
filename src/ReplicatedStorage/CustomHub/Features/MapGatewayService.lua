@@ -70,6 +70,7 @@ local ROUTES_BY_SEA = {
             Map = "Boat Castle",
             Touch = "MapTeleportC",
             Requires = "Feathered Visage",
+            RequiresTitle = "Liberator of the Sky",
         },
         {
             Name = "Tiki to Castle",
@@ -78,6 +79,7 @@ local ROUTES_BY_SEA = {
             Map = "TikiOutpost",
             Touch = "MapTeleportC",
             Requires = "Feathered Visage",
+            RequiresTitle = "Liberator of the Sky",
         },
         {
             Name = "Enter Beautiful Pirate Domain",
@@ -200,6 +202,7 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
         local candidate = {
             Name = source.Name,
             Requirement = source.Requires,
+            FallbackTitle = source.RequiresTitle,
             Activation = source.Touch and "touch" or "requestEntrance",
             Eligible = false,
         }
@@ -216,13 +219,38 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
                     source.Requires
                 )
                 available = checkOk and owned == true
-                candidate.RequirementOwned = available
-                if not available then
+                candidate.ItemRequirementOwned = available
+                if available then
+                    candidate.AccessBy = source.Requires
+                elseif source.RequiresTitle then
+                    local titleCheckOk, titleOwned, titleError = pcall(
+                        compatibility.HasUnlockedTitle,
+                        compatibility,
+                        source.RequiresTitle
+                    )
+                    if titleCheckOk and type(titleOwned) == "boolean" then
+                        candidate.TitleRequirementOwned = titleOwned
+                    end
+                    if titleCheckOk and titleOwned == true then
+                        available = true
+                        candidate.AccessBy = source.RequiresTitle
+                    else
+                        local itemReason = checkOk
+                                and (inventoryError or "required item not found in inventory")
+                            or ("inventory check failed: " .. formatScalar(owned))
+                        local titleReason = titleCheckOk
+                                and (titleError
+                                    or (titleOwned == false and "title is locked" or "title state is unknown"))
+                            or ("title check failed: " .. formatScalar(titleOwned))
+                        candidate.Reason = itemReason .. "; " .. titleReason
+                    end
+                else
                     candidate.Reason = checkOk
                             and (inventoryError or "required item not found in inventory")
                         or ("inventory check failed: " .. formatScalar(owned))
                 end
             end
+            candidate.RequirementOwned = available
 
             local stand = available and self:_ResolveStand(source) or nil
             if available and typeof(stand) ~= "Vector3" then
@@ -594,6 +622,21 @@ function MapGatewayService:BuildDiagnosticReport()
                 .. (candidate.RequirementOwned == nil
                     and "n/a"
                     or tostring(candidate.RequirementOwned))
+                .. (candidate.ItemRequirementOwned ~= nil
+                    and ("; item_owned=" .. tostring(candidate.ItemRequirementOwned))
+                    or "")
+                .. (candidate.FallbackTitle
+                    and ("; fallback_title=" .. tostring(candidate.FallbackTitle))
+                    or "")
+                .. (candidate.FallbackTitle
+                    and (
+                        "; title_owned="
+                            .. (candidate.TitleRequirementOwned == nil
+                                and "unknown"
+                                or tostring(candidate.TitleRequirementOwned))
+                    )
+                    or "")
+                .. (candidate.AccessBy and ("; access_by=" .. tostring(candidate.AccessBy)) or "")
                 .. "; reason="
                 .. formatScalar(candidate.Reason or "available")
                 .. (type(candidate.StandDistance) == "number"
