@@ -156,9 +156,9 @@ local travelIslandDestinations = {
         { Name = "Hydra Island", Position = Vector3.new(3399, 73, 1573) },
         { Name = "Secret Temple", Position = Vector3.new(5247, 8, 1097) },
         {
-            Name = "Hydra House",
-            Position = Vector3.new(5245, 602, 251),
-            SurfaceSnap = true,
+            Name = "Hydra Town",
+            Position = Vector3.new(5290, 1005.4, 393.6),
+            ExactPosition = true,
         },
         { Name = "Great Tree", Position = Vector3.new(2443, 37, -6573) },
         { Name = "Castle on the Sea", Position = Vector3.new(-5500, 315, -2855) },

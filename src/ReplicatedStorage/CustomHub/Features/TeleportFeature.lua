@@ -146,26 +146,8 @@ end
 
 function TeleportFeature:_ResolveIslandCFrame(destination)
     if destination.Position then
-        if destination.SurfaceSnap == true then
-            local compatibility = self.Context and self.Context.Compatibility
-            local workspace = compatibility and compatibility.Workspace
-            if not workspace then
-                return nil, "Workspace is unavailable for surface lookup"
-            end
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {
-                compatibility.Player and compatibility.Player.Character,
-            }
-            pcall(function()
-                params.RespectCanCollide = true
-            end)
-            local origin = destination.Position + Vector3.new(0, 1200, 0)
-            local hit = workspace:Raycast(origin, Vector3.new(0, -2400, 0), params)
-            if not hit then
-                return nil, "Could not find a safe surface at " .. destination.Name
-            end
-            return CFrame.new(hit.Position + Vector3.new(0, 5, 0))
+        if destination.ExactPosition == true then
+            return CFrame.new(destination.Position)
         end
         return CFrame.new(destination.Position + Vector3.new(0, 18, 0))
     end

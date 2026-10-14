@@ -97,13 +97,13 @@ require(
     "manual travel must not add server hopping or the old placeholder",
 )
 require(
-    'Name = "Hydra House"' in CONFIG
-    and "Position = Vector3.new(5245, 602, 251)" in CONFIG
-    and "SurfaceSnap = true" in CONFIG
-    and "if destination.SurfaceSnap == true then" in FEATURE
-    and "workspace:Raycast(origin, Vector3.new(0, -2400, 0), params)" in FEATURE
+    'Name = "Hydra Town"' in CONFIG
+    and "Position = Vector3.new(5290, 1005.4, 393.6)" in CONFIG
+    and "ExactPosition = true" in CONFIG
+    and "if destination.ExactPosition == true then" in FEATURE
+    and "return CFrame.new(destination.Position)" in FEATURE
     and "return CFrame.new(destination.Position + Vector3.new(0, 18, 0))" in FEATURE,
-    "island travel must use exact reference coordinates and resolve Hydra House onto a real surface",
+    "Hydra Town must use the requested exact coordinates without the normal vertical offset",
 )
 
-print("PASS: toggle-based island/NPC travel, reference NPC fallback, Hydra surface resolution, and shared movement ownership")
+print("PASS: toggle-based island/NPC travel, reference NPC fallback, exact Hydra Town destination, and shared movement ownership")
