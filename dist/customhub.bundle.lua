@@ -1288,7 +1288,7 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
         matchCount += 1
     end
 
-    local function scanRoot(sourceName, root)
+    local function scanRoot(sourceName, root, maxDescendants, includeTitleNames, includeAllText)
         if not root then
             lines[#lines + 1] = sourceName .. ": unavailable"
             return
@@ -1298,7 +1298,7 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
             lines[#lines + 1] = sourceName .. ": descendants could not be read"
             return
         end
-        local scanned = math.min(#descendants, scanLimit)
+        local scanned = math.min(#descendants, tonumber(maxDescendants) or scanLimit)
         local relevantCount = 0
         for index = 1, scanned do
             local instance = descendants[index]
@@ -1308,6 +1308,7 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
             end)
             local nameLower = string.lower(tostring(name))
             local valueText
+            local isTextControl = false
             local valueOk = pcall(function()
                 if instance:IsA("ValueBase") then
                     valueText = tostring(instance.Value)
@@ -1316,6 +1317,7 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
                     or instance:IsA("TextBox")
                 then
                     valueText = tostring(instance.Text)
+                    isTextControl = true
                 end
             end)
             if not valueOk then
@@ -1323,7 +1325,22 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
             end
             local valueLower = type(valueText) == "string" and string.lower(valueText) or ""
             local exactTitleMatch = string.find(valueLower, targetLower, 1, true) ~= nil
-            if string.find(nameLower, "title", 1, true) or exactTitleMatch then
+            local exactTitleName = string.find(nameLower, targetLower, 1, true) ~= nil
+            local titleNamed = includeTitleNames == true
+                and string.find(nameLower, "title", 1, true) ~= nil
+            local ownershipMarker = includeAllText == true
+                and (
+                    string.find(nameLower, "unlock", 1, true)
+                    or string.find(nameLower, "owned", 1, true)
+                    or string.find(nameLower, "claim", 1, true)
+                    or string.find(nameLower, "equipped", 1, true)
+                    or string.find(nameLower, "locked", 1, true)
+                    or string.find(nameLower, "available", 1, true)
+                )
+            if titleNamed or exactTitleMatch or exactTitleName
+                or (includeAllText == true and isTextControl)
+                or ownershipMarker
+            then
                 relevantCount += 1
                 addMatch(sourceName, instance, valueText)
             end
@@ -1334,7 +1351,8 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
                     local attributeNameLower = string.lower(tostring(attributeName))
                     local attributeText = tostring(attributeValue)
                     local attributeValueLower = string.lower(attributeText)
-                    if string.find(attributeNameLower, "title", 1, true)
+                    if (includeTitleNames == true
+                            and string.find(attributeNameLower, "title", 1, true))
                         or string.find(attributeValueLower, targetLower, 1, true)
                     then
                         relevantCount += 1
@@ -1358,18 +1376,33 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
 
     local player = self.Player
     local playerData = player and player:FindFirstChild("Data")
-    scanRoot("Player.Data", playerData)
+    scanRoot("Player.Data", playerData, scanLimit, true, false)
 
     local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
-    scanRoot("PlayerGui", playerGui)
     local titlesMenu = playerGui and playerGui:FindFirstChild("TitlesMenu")
     local mainTitles = playerGui
         and playerGui:FindFirstChild("Main")
         and playerGui.Main:FindFirstChild("Titles")
+    scanRoot("PlayerGui exact-title scan", playerGui, 10000, false, false)
+    scanRoot("TitlesMenu", titlesMenu, 10000, true, true)
+    local function describeGuiRoot(instance)
+        if not instance then
+            return "missing"
+        end
+        local state = instance.ClassName .. "; present"
+        pcall(function()
+            if instance:IsA("LayerCollector") then
+                state ..= "; Enabled=" .. tostring(instance.Enabled)
+            elseif instance:IsA("GuiObject") then
+                state ..= "; Visible=" .. tostring(instance.Visible)
+            end
+        end)
+        return state
+    end
     lines[#lines + 1] = "TitlesMenu root: "
-        .. (titlesMenu and (titlesMenu.ClassName .. "; present") or "missing")
+        .. describeGuiRoot(titlesMenu)
     lines[#lines + 1] = "Main.Titles root: "
-        .. (mainTitles and (mainTitles.ClassName .. "; present") or "missing")
+        .. describeGuiRoot(mainTitles)
 
     local replicatedStorage = self.ReplicatedStorage
     local remoteCandidates = {}
@@ -1399,6 +1432,10 @@ function Compatibility:BuildTitleAccessDiagnosticReport()
         .. (#remoteCandidates > 0 and table.concat(remoteCandidates, ", ") or "none found")
     lines[#lines + 1] = "Title-related modules: "
         .. (#moduleCandidates > 0 and table.concat(moduleCandidates, ", ") or "none found")
+    local remotesFolder = replicatedStorage and replicatedStorage:FindFirstChild("Remotes")
+    local commF = remotesFolder and remotesFolder:FindFirstChild("CommF_")
+    lines[#lines + 1] = "Generic CommF_ remote: "
+        .. (commF and (commF.ClassName .. "; present; not invoked") or "missing")
 
     local npcFolder = self.Workspace and self.Workspace:FindFirstChild("NPCs")
     local titleNpcs = {}

@@ -199,6 +199,10 @@ require(
     "Liberator of the Sky" in title_diagnostic
     and "Player.Data" in title_diagnostic
     and "PlayerGui" in title_diagnostic
+    and 'scanRoot("TitlesMenu", titlesMenu, 10000, true, true)' in title_diagnostic
+    and 'scanRoot("PlayerGui exact-title scan", playerGui, 10000, false, false)' in title_diagnostic
+    and 'FindFirstChild("CommF_")' in title_diagnostic
+    and "Generic CommF_ remote:" in title_diagnostic
     and "RemoteFunction" in title_diagnostic
     and "generic remote; not invoked" in title_diagnostic
     and "InvokeServer" not in title_diagnostic
