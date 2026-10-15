@@ -76,6 +76,28 @@ require(
     and "nearestDistance" in FEATURE,
     "NPC travel must search live NPCs and ReplicatedStorage templates, preferring the live instance",
 )
+npc_report = FEATURE[
+    FEATURE.index("function TeleportFeature:BuildNpcAvailabilityReport()") :
+    FEATURE.index("\nfunction TeleportFeature:_FinishTravel")
+]
+require(
+    'Action = "teleport.npc.report"' in CONFIG
+    and 'Label = "Copy NPC availability report"' in CONFIG
+    and all(name in FEATURE for name in (
+        "Titles Specialist",
+        "Awakening Expert",
+        "Blox Fruits Gacha",
+    ))
+    and 'FindFirstChild("NPCs")' in npc_report
+    and "GetDescendants()" in npc_report
+    and "discoverable_by_current_dropdown=" in npc_report
+    and "IsTravelNpcPositionInCurrentSea" in npc_report
+    and "setclipboard(report)" in FEATURE
+    and "InvokeServer" not in npc_report
+    and "FireServer" not in npc_report
+    and "_StartTravel" not in npc_report,
+    "NPC availability report must be read-only, explain source/root filtering, and copy results",
+)
 require(
     "mainFarm and mainFarm.Running" in FEATURE
     and "Turn off Travel to Island or Travel to NPC before starting Auto Farm." in MAIN_FARM

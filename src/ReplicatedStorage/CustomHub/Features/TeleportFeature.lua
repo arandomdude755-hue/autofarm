@@ -16,6 +16,11 @@ local MAX_STALL_RETRIES = 2
 local STALL_RETRY_DELAY = 1.1
 local MAX_TRAVEL_TIMEOUT = 150
 local TITLE_ACCESS_RECHECK_WINDOW = 1
+local NPC_DIAGNOSTIC_TARGETS = {
+    { Label = "Titles Specialist", Names = { "titles specialist" } },
+    { Label = "Awakening Expert", Names = { "awakening expert" } },
+    { Label = "Blox Fruits Gacha", Names = { "blox fruit gacha", "blox fruits gacha" } },
+}
 
 local function disconnect(connection)
     if connection then
@@ -517,6 +522,198 @@ function TeleportFeature:BuildGatewayDiagnosticReport()
         or nil
 end
 
+function TeleportFeature:BuildNpcAvailabilityReport()
+    local context = self.Context
+    local compatibility = context and context.Compatibility
+    local config = context and context.Config
+    local workspace = compatibility and compatibility.Workspace
+    local replicatedStorage = compatibility and compatibility.ReplicatedStorage
+    if not compatibility or not workspace or not replicatedStorage then
+        return "===== [TravelNpcDiagnostic] REPORT BEGIN =====\nNPC lookup services are unavailable.\n===== [TravelNpcDiagnostic] REPORT END ====="
+    end
+
+    local function normalizeName(name)
+        local normalized = string.lower(tostring(name or "")):gsub("[^%w]", "")
+        return normalized
+    end
+
+    local function targetForName(name)
+        local normalized = normalizeName(name)
+        for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
+            for _, alias in ipairs(target.Names) do
+                if normalized == normalizeName(alias) then
+                    return target
+                end
+            end
+        end
+        return nil
+    end
+
+    local function pathOf(instance)
+        local ok, path = pcall(function()
+            return instance:GetFullName()
+        end)
+        return ok and path or tostring(instance.Name)
+    end
+
+    local function positionOf(root)
+        if not root or not root:IsA("BasePart") then
+            return "none"
+        end
+        local position = root.Position
+        return string.format("(%.1f, %.1f, %.1f)", position.X, position.Y, position.Z)
+    end
+
+    local function isTemplatePositionCurrentSea(root)
+        if not root or not root:IsA("BasePart")
+            or not config
+            or type(config.IsTravelNpcPositionInCurrentSea) ~= "function"
+        then
+            return false
+        end
+        local ok, result = pcall(
+            config.IsTravelNpcPositionInCurrentSea,
+            compatibility,
+            root.Position
+        )
+        return ok and result == true
+    end
+
+    local function describeModel(model, sourceLabel, isLive, isDirectNpcSource, seenPaths, lines)
+        local modelPath = pathOf(model)
+        if seenPaths[modelPath] then
+            return false
+        end
+        seenPaths[modelPath] = true
+        local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+        local validRoot = root and root:IsA("BasePart")
+        local humanoid = isLive and model:FindFirstChildOfClass("Humanoid")
+        local alive = not humanoid or humanoid.Health > 0
+        local templatePositionCurrentSea = isLive or isTemplatePositionCurrentSea(root)
+        local selectable = isDirectNpcSource and validRoot and alive and templatePositionCurrentSea
+        local reason
+        if not isDirectNpcSource then
+            reason = "model is outside the direct NPC folders currently searched by travel"
+        elseif not validRoot then
+            reason = "no direct HumanoidRootPart or PrimaryPart"
+        elseif not alive then
+            reason = "live NPC is not alive"
+        elseif not templatePositionCurrentSea then
+            reason = "template root is outside the current-sea travel area"
+        else
+            reason = "available"
+        end
+        table.insert(
+            lines,
+            "  Model: "
+                .. modelPath
+                .. "; source="
+                .. sourceLabel
+                .. "; discoverable_by_current_dropdown="
+                .. tostring(selectable == true)
+                .. "; root="
+                .. (validRoot and (root.Name .. " (" .. root.ClassName .. ")") or "none")
+                .. "; position="
+                .. positionOf(root)
+                .. (isLive
+                    and "; current_sea_source=live Workspace model"
+                    or ("; template_current_sea=" .. tostring(templatePositionCurrentSea)))
+                .. (humanoid and ("; health=" .. string.format("%.1f", humanoid.Health)) or "")
+                .. "; reason="
+                .. reason
+        )
+        return true
+    end
+
+    local liveFolder = workspace:FindFirstChild("NPCs")
+    local templateFolder = replicatedStorage:FindFirstChild("NPCs")
+    local sourceFolders = {
+        { Folder = liveFolder, Label = "Workspace.NPCs", IsLive = true },
+        { Folder = templateFolder, Label = "ReplicatedStorage.NPCs", IsLive = false },
+    }
+    local matches = {}
+    local seenPaths = {}
+    local lines = {
+        "===== [TravelNpcDiagnostic] REPORT BEGIN =====",
+        "Sea index: " .. tostring(currentSeaIndex(compatibility) or "unknown"),
+        "Scan scope: NPCs folders plus exact-name descendants of Workspace and ReplicatedStorage; read-only; no remotes invoked",
+    }
+
+    for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
+        matches[target] = 0
+        table.insert(lines, "")
+        table.insert(lines, "Target: " .. target.Label)
+    end
+
+    for _, source in ipairs(sourceFolders) do
+        if source.Folder then
+            for _, child in ipairs(source.Folder:GetChildren()) do
+                if child:IsA("Model") then
+                    local target = targetForName(child.Name)
+                    if target then
+                        local added = describeModel(
+                            child,
+                            source.Label,
+                            source.IsLive,
+                            true,
+                            seenPaths,
+                            lines
+                        )
+                        if added then
+                            matches[target] += 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local scanRoots = {
+        { Instance = workspace, Label = "Workspace" },
+        { Instance = replicatedStorage, Label = "ReplicatedStorage" },
+    }
+    local scanLimit = 20000
+    for _, scanRoot in ipairs(scanRoots) do
+        local descendants = scanRoot.Instance:GetDescendants()
+        local scanCount = math.min(#descendants, scanLimit)
+        for index = 1, scanCount do
+            local instance = descendants[index]
+            if instance:IsA("Model") then
+                local target = targetForName(instance.Name)
+                if target then
+                    local added = describeModel(
+                        instance,
+                        scanRoot.Label .. " descendant (outside direct NPC listing unless stated)",
+                        instance:IsDescendantOf(workspace),
+                        false,
+                        seenPaths,
+                        lines
+                    )
+                    if added then
+                        matches[target] += 1
+                    end
+                end
+            end
+        end
+        if #descendants > scanLimit then
+            table.insert(
+                lines,
+                scanRoot.Label .. " descendant scan capped at " .. tostring(scanLimit)
+            )
+        end
+    end
+
+    for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
+        if matches[target] == 0 then
+            table.insert(lines, "  No exact-name model found in the scanned folders or descendants.")
+        end
+    end
+    table.insert(lines, "")
+    table.insert(lines, "A template position is only reported as evidence; travel still requires a validated current-sea root.")
+    table.insert(lines, "===== [TravelNpcDiagnostic] REPORT END =====")
+    return table.concat(lines, "\n")
+end
+
 function TeleportFeature:_FinishTravel(request, message, kind)
     if request.IsFarmTask == true then
         if self.ActiveFarmTravel ~= request then
@@ -799,7 +996,23 @@ end
 
 function TeleportFeature:Handle(actionId, payload)
     local config = self.Context and self.Context.Config
-    if actionId == "teleport.island.select" then
+    if actionId == "teleport.npc.report" then
+        local report = self:BuildNpcAvailabilityReport()
+        local copied = false
+        local clipboardOk = pcall(function()
+            if type(setclipboard) == "function" then
+                setclipboard(report)
+                copied = true
+            end
+        end)
+        if clipboardOk and copied then
+            self:_SetStatus("NPC availability report copied.", "success")
+        else
+            print(report)
+            self:_SetStatus("Clipboard unavailable; NPC report printed to output.", "warning")
+        end
+        return true
+    elseif actionId == "teleport.island.select" then
         local compatibility = self.Context.Compatibility
         local seaIndex = currentSeaIndex(compatibility)
         local options = {}

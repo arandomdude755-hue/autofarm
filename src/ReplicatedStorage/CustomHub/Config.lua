@@ -672,6 +672,11 @@ local Config = {
                     Label = "Travel to NPC",
                     Action = "teleport.npc",
                 },
+                {
+                    Kind = "button",
+                    Label = "Copy NPC availability report",
+                    Action = "teleport.npc.report",
+                },
             },
         },
         StatusServer = {
