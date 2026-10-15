@@ -21,7 +21,84 @@ function Compatibility.new()
         Workspace = Workspace,
         RunService = RunService,
         CollectionService = CollectionService,
+        NpcManager = nil,
+        NpcCatalogNames = nil,
     }, Compatibility)
+end
+
+function Compatibility:GetNpcManager()
+    if self.NpcManager then
+        return self.NpcManager
+    end
+    local managerModule = self.ReplicatedStorage
+        and self.ReplicatedStorage:FindFirstChild("NPCManager")
+    if not managerModule or not managerModule:IsA("ModuleScript") then
+        return nil, "NPCManager module is unavailable"
+    end
+    local ok, manager = pcall(require, managerModule)
+    if not ok or type(manager) ~= "table"
+        or type(manager.getNPCsByName) ~= "function"
+    then
+        return nil, "NPCManager lookup is unavailable: " .. tostring(manager)
+    end
+    self.NpcManager = manager
+    return manager
+end
+
+function Compatibility:GetNpcCatalogNames()
+    if self.NpcCatalogNames then
+        return table.clone(self.NpcCatalogNames)
+    end
+    local managerModule = self.ReplicatedStorage
+        and self.ReplicatedStorage:FindFirstChild("NPCManager")
+    local npcListModule = managerModule
+        and managerModule:FindFirstChild("NPCList")
+    if not npcListModule or not npcListModule:IsA("ModuleScript") then
+        return nil, "NPCManager.NPCList module is unavailable"
+    end
+    local ok, npcList = pcall(require, npcListModule)
+    local list = ok and type(npcList) == "table" and npcList.List
+    if type(list) ~= "table" then
+        return nil, "NPCManager NPC list is unavailable: " .. tostring(npcList)
+    end
+    local names = {}
+    for name in pairs(list) do
+        if type(name) == "string" and name ~= "" then
+            table.insert(names, name)
+        end
+    end
+    table.sort(names)
+    self.NpcCatalogNames = names
+    return table.clone(names)
+end
+
+function Compatibility:GetNpcModelsByName(name)
+    if type(name) ~= "string" or name == "" then
+        return {}, "NPC name is invalid"
+    end
+    local manager, managerError = self:GetNpcManager()
+    if not manager then
+        return {}, managerError
+    end
+    local ok, entries = pcall(manager.getNPCsByName, name)
+    if not ok or type(entries) ~= "table" then
+        return {}, ok and "NPCManager returned no entry list" or tostring(entries)
+    end
+    local models = {}
+    local seen = {}
+    for _, entry in ipairs(entries) do
+        local stateOk, model = pcall(function()
+            local modelState = entry and entry._modelState
+            return modelState and modelState._instance
+        end)
+        if stateOk and model and typeof(model) == "Instance"
+            and model:IsA("Model") and not seen[model]
+        then
+            seen[model] = true
+            table.insert(models, model)
+        end
+    end
+    return models
 end
 
 function Compatibility:GetPlayerGui()

@@ -205,6 +205,14 @@ local function travelNpcRoot(npc)
     return root and root:IsA("BasePart") and root or nil
 end
 
+local TRAVEL_NPC_OPTIONS_CACHE_TTL = 5
+local travelNpcOptionsCache = {
+    Compatibility = nil,
+    Sea = nil,
+    At = 0,
+    Options = {},
+}
+
 local function isTravelNpcPositionInCurrentSea(compatibility, position)
     local seaIndex = getCurrentSeaIndex(compatibility)
     if not seaIndex or typeof(position) ~= "Vector3" then
@@ -236,33 +244,80 @@ local function isTravelNpcPositionInCurrentSea(compatibility, position)
 end
 
 local function travelNpcsForCurrentSea(compatibility)
-    if not getCurrentSeaIndex(compatibility) then
+    local seaIndex = getCurrentSeaIndex(compatibility)
+    if not seaIndex then
         return {}
     end
+    local now = os.clock()
+    if travelNpcOptionsCache.Compatibility == compatibility
+        and travelNpcOptionsCache.Sea == seaIndex
+        and now - travelNpcOptionsCache.At < TRAVEL_NPC_OPTIONS_CACHE_TTL
+    then
+        return table.clone(travelNpcOptionsCache.Options)
+    end
+
     local names = {}
+    local function considerNpc(npc, isLive, requireCurrentSea)
+        if not npc:IsA("Model")
+            or string.find(npc.Name, "Boat", 1, true)
+            or string.find(npc.Name, "Set Home", 1, true)
+        then
+            return
+        end
+        local root = travelNpcRoot(npc)
+        if not root then
+            return
+        end
+        local humanoid = isLive and npc:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health <= 0 then
+            return
+        end
+        if (isLive and not requireCurrentSea)
+            or isTravelNpcPositionInCurrentSea(compatibility, root.Position)
+        then
+            names[npc.Name] = true
+        end
+    end
+
     for _, source in ipairs(travelNpcSources(compatibility)) do
         for _, npc in ipairs(source.Folder and source.Folder:GetChildren() or {}) do
-            if npc:IsA("Model")
-                and not string.find(npc.Name, "Boat", 1, true)
-                and not string.find(npc.Name, "Set Home", 1, true)
-                and travelNpcRoot(npc)
-            then
-                local humanoid = source.IsLive and npc:FindFirstChildOfClass("Humanoid")
-                local root = travelNpcRoot(npc)
-                if (not humanoid or humanoid.Health > 0)
-                    and (source.IsLive
-                        or isTravelNpcPositionInCurrentSea(compatibility, root.Position))
-                then
-                    names[npc.Name] = true
+            considerNpc(npc, source.IsLive, false)
+        end
+    end
+
+    local registryNames = compatibility
+        and type(compatibility.GetNpcCatalogNames) == "function"
+        and compatibility:GetNpcCatalogNames()
+    for _, name in ipairs(type(registryNames) == "table" and registryNames or {}) do
+        if not string.find(name, "Boat", 1, true)
+            and not string.find(name, "Set Home", 1, true)
+            and type(compatibility.GetNpcModelsByName) == "function"
+        then
+            local models = compatibility:GetNpcModelsByName(name)
+            for _, npc in ipairs(type(models) == "table" and models or {}) do
+                considerNpc(
+                    npc,
+                    npc:IsDescendantOf(compatibility.Workspace),
+                    true
+                )
+                if names[name] then
+                    break
                 end
             end
         end
     end
+
     local options = {}
     for name in pairs(names) do
         table.insert(options, name)
     end
     table.sort(options)
+    travelNpcOptionsCache = {
+        Compatibility = compatibility,
+        Sea = seaIndex,
+        At = now,
+        Options = options,
+    }
     return options
 end
 local farmModeProfiles = {
@@ -355,6 +410,7 @@ local Config = {
     },
     TravelDestinations = travelIslandDestinations,
     IsTravelNpcPositionInCurrentSea = isTravelNpcPositionInCurrentSea,
+    TravelNpcsForCurrentSea = travelNpcsForCurrentSea,
     Defaults = {
         SelectedTab = "Main",
         Compact = false,

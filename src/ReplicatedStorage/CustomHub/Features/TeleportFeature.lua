@@ -135,6 +135,27 @@ function TeleportFeature:_FindNpcRoot(name)
             end
         end
     end
+    if not selectedRoot and type(compatibility.GetNpcModelsByName) == "function" then
+        local models = compatibility:GetNpcModelsByName(name)
+        for _, npc in ipairs(type(models) == "table" and models or {}) do
+            local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+            local humanoid = npc:IsDescendantOf(workspace)
+                and npc:FindFirstChildOfClass("Humanoid")
+            local safePosition = root
+                and root:IsA("BasePart")
+                and self.Context.Config.IsTravelNpcPositionInCurrentSea(
+                    compatibility,
+                    root.Position
+                )
+            if safePosition and (not humanoid or humanoid.Health > 0) then
+                local distance = playerRoot and (root.Position - playerRoot.Position).Magnitude or 0
+                if distance < nearestDistance then
+                    selectedRoot = root
+                    nearestDistance = distance
+                end
+            end
+        end
+    end
     if not selectedRoot then
         return nil, "The selected NPC has no usable live or template position"
     end
@@ -707,70 +728,38 @@ function TeleportFeature:BuildNpcAvailabilityReport()
         end
     end
 
-    local managerModule = replicatedStorage:FindFirstChild("NPCManager")
-    local managerOk, npcManager
-    if managerModule and managerModule:IsA("ModuleScript") then
-        managerOk, npcManager = pcall(require, managerModule)
-    else
-        managerOk = false
-        npcManager = "NPCManager ModuleScript is unavailable"
-    end
     local managerFound = {}
     for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
         local foundManagerModel = false
-        if managerOk and type(npcManager) == "table"
-            and type(npcManager.getNPCsByName) == "function"
-        then
-            for _, lookupName in ipairs(target.Names) do
-                local lookupOk, entries = pcall(npcManager.getNPCsByName, lookupName)
-                local entryCount = lookupOk and type(entries) == "table" and #entries or 0
-                table.insert(
-                    lines,
-                    "NPCManager lookup "
-                        .. lookupName
-                        .. ": "
-                        .. (lookupOk
-                            and (tostring(entryCount) .. " entr(y/ies)")
-                            or ("failed: " .. tostring(entries)))
-                )
-                if lookupOk and type(entries) == "table" then
-                    for index, entry in ipairs(entries) do
-                        if index > 5 then
-                            break
-                        end
-                        local modelOk, model = pcall(function()
-                            local modelState = entry and entry._modelState
-                            return modelState and modelState._instance
-                        end)
-                        if modelOk and model and typeof(model) == "Instance" then
-                            foundManagerModel = true
-                            local isLive = model:IsDescendantOf(workspace)
-                            local isDirectNpcSource = model.Parent == liveFolder
-                                or model.Parent == templateFolder
-                            describeModel(
-                                model,
-                                "NPCManager.getNPCsByName",
-                                isLive,
-                                isDirectNpcSource,
-                                seenPaths,
-                                lines
-                            )
-                        else
-                            table.insert(
-                                lines,
-                                "  NPCManager entry "
-                                    .. tostring(index)
-                                    .. " has no model instance in _modelState._instance"
-                            )
-                        end
-                    end
-                end
-            end
-        else
+        for _, lookupName in ipairs(target.Names) do
+            local models, lookupError = compatibility:GetNpcModelsByName(lookupName)
             table.insert(
                 lines,
-                "NPCManager lookup unavailable: "
-                    .. tostring(npcManager or "getNPCsByName is unavailable")
+                "NPCManager lookup "
+                    .. lookupName
+                    .. ": "
+                    .. (lookupError and ("failed: " .. tostring(lookupError))
+                        or (tostring(#models) .. " model(s)"))
+            )
+            for _, model in ipairs(models) do
+                foundManagerModel = true
+                local isLive = model:IsDescendantOf(workspace)
+                local isDirectNpcSource = model.Parent == liveFolder
+                    or model.Parent == templateFolder
+                describeModel(
+                    model,
+                    "NPCManager.getNPCsByName",
+                    isLive,
+                    isDirectNpcSource,
+                    seenPaths,
+                    lines
+                )
+            end
+        end
+        if not compatibility.GetNpcModelsByName then
+            table.insert(
+                lines,
+                "NPCManager lookup unavailable: Compatibility resolver is missing"
             )
         end
         managerFound[target] = foundManagerModel
@@ -1106,44 +1095,9 @@ function TeleportFeature:Handle(actionId, payload)
         return true
     elseif actionId == "teleport.npc.select" then
         local compatibility = self.Context.Compatibility
-        local workspace = compatibility.Workspace
-        local replicatedStorage = compatibility.ReplicatedStorage
-        local npcSources = {}
-        local liveNpcFolder = workspace and workspace:FindFirstChild("NPCs")
-        local templateNpcFolder = replicatedStorage and replicatedStorage:FindFirstChild("NPCs")
-        if liveNpcFolder then
-            table.insert(npcSources, { Folder = liveNpcFolder, IsLive = true })
-        end
-        if templateNpcFolder then
-            table.insert(npcSources, { Folder = templateNpcFolder, IsLive = false })
-        end
-        local options = {}
-        if currentSeaIndex(compatibility) then
-            local names = {}
-            for _, source in ipairs(npcSources) do
-                for _, npc in ipairs(source.Folder:GetChildren()) do
-                    local isLive = source.IsLive
-                    local root = npc:IsA("Model")
-                        and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart)
-                    local humanoid = isLive and npc:IsA("Model")
-                        and npc:FindFirstChildOfClass("Humanoid")
-                    if npc:IsA("Model")
-                        and root
-                        and root:IsA("BasePart")
-                        and (not humanoid or humanoid.Health > 0)
-                        and (isLive or config.IsTravelNpcPositionInCurrentSea(compatibility, root.Position))
-                        and not string.find(npc.Name, "Boat", 1, true)
-                        and not string.find(npc.Name, "Set Home", 1, true)
-                    then
-                        names[npc.Name] = true
-                    end
-                end
-            end
-            for name in pairs(names) do
-                table.insert(options, name)
-            end
-            table.sort(options)
-        end
+        local options = type(config.TravelNpcsForCurrentSea) == "function"
+            and config.TravelNpcsForCurrentSea(compatibility)
+            or {}
         self:_SelectSetting("Npc", payload, options)
         return true
     elseif actionId == "teleport.island" or actionId == "teleport.npc" then

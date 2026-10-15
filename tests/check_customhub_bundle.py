@@ -101,6 +101,7 @@ expected_external_require_arguments = {
     "itemConfigModule",
     "realmScript",
     "managerModule",
+    "npcListModule",
 }
 require(
     external_require_arguments == expected_external_require_arguments,

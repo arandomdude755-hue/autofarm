@@ -64,6 +64,16 @@ require(
     "travel dropdowns must use separate settings and avoid selecting a destination implicitly",
 )
 require(
+    "GetNpcCatalogNames" in CONFIG
+    and "GetNpcModelsByName(name)" in CONFIG
+    and "TravelNpcsForCurrentSea = travelNpcsForCurrentSea" in CONFIG
+    and "TRAVEL_NPC_OPTIONS_CACHE_TTL = 5" in CONFIG
+    and "isTravelNpcPositionInCurrentSea(compatibility, root.Position)" in CONFIG
+    and "function Compatibility:GetNpcCatalogNames()" in COMPATIBILITY
+    and "function Compatibility:GetNpcModelsByName(name)" in COMPATIBILITY,
+    "NPC dropdown options must include registry models with a current-sea root and a short cache",
+)
+require(
     "function UI:_GetControlSettings(control)" in UI
     and "control.SettingsKey or \"FarmSettings\"" in UI
     and "self:_GetControlSettings(control)" in UI,
@@ -73,8 +83,10 @@ require(
     'replicatedStorage and replicatedStorage:FindFirstChild("NPCs")' in FEATURE
     and 'npc.Name == name' in FEATURE
     and 'npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart' in FEATURE
+    and "compatibility:GetNpcModelsByName(name)" in FEATURE
+    and "self.Context.Config.IsTravelNpcPositionInCurrentSea" in FEATURE
     and "nearestDistance" in FEATURE,
-    "NPC travel must search live NPCs and ReplicatedStorage templates, preferring the live instance",
+    "NPC travel must search live/templates first and safely resolve registry-backed current-sea NPCs",
 )
 npc_report = FEATURE[
     FEATURE.index("function TeleportFeature:BuildNpcAvailabilityReport()") :
@@ -92,8 +104,7 @@ require(
     and 'FindFirstChild(lookupName, true)' in npc_report
     and "discoverable_by_current_dropdown=" in npc_report
     and "IsTravelNpcPositionInCurrentSea" in npc_report
-    and "pcall(require, managerModule)" in npc_report
-    and "npcManager.getNPCsByName" in npc_report
+    and "compatibility:GetNpcModelsByName(lookupName)" in npc_report
     and "No exact-name model found for " in npc_report
     and "GetDescendants()" not in npc_report
     and "setclipboard(report)" in FEATURE
@@ -101,6 +112,11 @@ require(
     and "FireServer" not in npc_report
     and "_StartTravel" not in npc_report,
     "NPC availability report must be read-only, explain source/root filtering, and copy results",
+)
+require(
+    'config.TravelNpcsForCurrentSea(compatibility)' in FEATURE
+    and 'Action = "teleport.npc.select"' in CONFIG,
+    "NPC selection validation must reuse the same registry-backed current-sea option provider",
 )
 require(
     "mainFarm and mainFarm.Running" in FEATURE
