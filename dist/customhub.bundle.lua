@@ -5708,11 +5708,30 @@ local function readMoonStatus(statusFeature)
         .. formatMoonEstimate(hoursRemaining * rate)
 end
 
-local function readTikiEyes(map)
+local function readTikiEyes(map, statusFeature)
+    local serverId
+    pcall(function()
+        serverId = tostring(game.JobId)
+    end)
+    if serverId == "" then
+        serverId = nil
+    end
+
+    local cached = statusFeature and statusFeature._tikiEyesCache
+    if cached and serverId and cached.ServerId ~= serverId then
+        statusFeature._tikiEyesCache = nil
+        cached = nil
+    end
+    local cachedValue = cached
+            and serverId
+            and cached.ServerId == serverId
+            and cached.Value
+        or nil
+
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        return "Not loaded"
+        return cachedValue or "Not loaded"
     end
     local cleared = 0
     local found = 0
@@ -5727,11 +5746,24 @@ local function readTikiEyes(map)
         end
     end
     if found == 0 then
-        return "Not loaded"
+        return cachedValue or "Not loaded"
+    end
+
+    if cached and cached.ServerId == serverId then
+        cleared = math.max(cleared, cached.Cleared)
+        found = math.max(found, cached.Found)
     end
     local value = tostring(cleared) .. " / 4 cleared"
     if found < 4 then
-        return value .. " (Partial)"
+        value ..= " (Partial)"
+    end
+    if statusFeature and serverId then
+        statusFeature._tikiEyesCache = {
+            ServerId = serverId,
+            Cleared = cleared,
+            Found = found,
+            Value = value,
+        }
     end
     return value
 end
@@ -5822,7 +5854,7 @@ local function readWorldEventValues(context, statusFeature)
         frozenDimension = thirdSea
                 and readEventPresence(frozenDimension)
             or "Third Sea only",
-        tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
+        tikiEyes = thirdSea and readTikiEyes(map, statusFeature) or "Third Sea only",
     }
 end
 

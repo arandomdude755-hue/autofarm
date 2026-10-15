@@ -160,11 +160,16 @@ require(
     and "ELITE_TARGET_NAMES" in FEATURE
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' not in FEATURE
-    and "function readTikiEyes(map)" in FEATURE
+    and "function readTikiEyes(map, statusFeature)" in FEATURE
     and "if found == 0 then" in FEATURE
-    and 'return value .. " (Partial)"' in FEATURE
-    and 'return "Not loaded"' in FEATURE
+    and 'value ..= " (Partial)"' in FEATURE
+    and 'or "Not loaded"' in FEATURE
     and 'Eye" .. tostring(index)' in FEATURE
+    and "statusFeature._tikiEyesCache" in FEATURE
+    and "cached.ServerId ~= serverId" in FEATURE
+    and "math.max(cleared, cached.Cleared)" in FEATURE
+    and "math.max(found, cached.Found)" in FEATURE
+    and "readTikiEyes(map, statusFeature)" in FEATURE
     and "Third Sea only" in FEATURE
     and 'gsub("<[^>]+>", "")' in FEATURE,
     "Event Status follows BNN's event sources and shows compact moon and island states",
@@ -194,6 +199,10 @@ require(
     and 'snapshot.selectedTab == "EventStatus"' in FEATURE
     and "now - (self._lastRemoteRefreshAt or -math.huge) < 15" in FEATURE
     and "task.wait(1)" in FEATURE
+    and 'local values = self:_ReadValues()' in FEATURE
+    and 'self.Context.State:SetStatusValues(values)' in FEATURE
+    and 'if snapshot.selectedTab == "EventStatus" then' in FEATURE
+    and 'self:_RequestEventStatusRefresh(self.Context, self._generation)' in FEATURE
     and "self._generation = (self._generation or 0) + 1" in FEATURE,
     "local status refreshes only on the two status pages and remote checks are rate-limited",
 )

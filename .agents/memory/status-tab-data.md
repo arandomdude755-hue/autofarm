@@ -7,4 +7,10 @@ Status navigation has a top-level Status tab with Event Status first and Server 
 
 **Why:** In same-server comparisons, `HasMirageIsland` was true while BNN reported Mirage absent and the Workspace.Map model was missing; BNN's elite check returns alive named models from ReplicatedStorage before checking Workspace.Enemies. The user clarified that Event Status is meant to check state while away, asked for plain labels, and confirmed Tiki can simply be unloaded because the island itself does not need to spawn. Tiki's travel marker does not establish eye progress. The user chose BNN-style partial eye counts, marked partial so missing local objects are not mistaken for a complete result. A general Sea Events row is unnecessary. Held legendary items can come from Elite Hunter rather than a chest. BNN and Vxeze use the same moon phase thresholds but label differences in game-clock hours as minutes; measuring clock speed keeps the estimate understandable. A four-hour timer marks an estimated cycle boundary, not proof that no item can currently be held. Their Cake Prince portal-opening call must not be reproduced by status-only code.
 
+Tiki eye progress is server-scoped and monotonic: keep the best observed cleared count across refreshes and temporary streaming gaps, and reset it only when the server JobId changes.
+
+**Why:** the user observed a confirmed 4/4 count regress to partial and then “Not loaded” after repeated status refreshes.
+
+**How to apply:** while the island is present, update the remembered count from live eye objects; when objects stream out, keep the last known value instead of downgrading it. Do not carry it into a different server.
+
 **How to apply:** add status fields through StatusFeature and existing status-value rows; keep quest acceptance logic in QuestService, preserve unknown states, rate-limit remote reads, label timing as an estimate, allow calibration to gather samples, and avoid Heartbeat polling.
