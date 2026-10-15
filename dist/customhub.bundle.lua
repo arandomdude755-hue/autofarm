@@ -5494,7 +5494,7 @@ local function updateMoonClockRate(statusFeature, clockTime)
                 clockTime = clockTime,
                 sampledAt = now,
             }
-        elseif elapsed >= 8 then
+        elseif elapsed >= 3 then
             local clockHours = (clockTime - sample.clockTime) % 24
             if clockHours > 0.001 and clockHours < 6 then
                 local measuredRate = elapsed / clockHours
@@ -5518,6 +5518,17 @@ local function updateMoonClockRate(statusFeature, clockTime)
         return nil
     end
     return rate
+end
+
+local function sampleMoonClockRate(statusFeature)
+    local lighting
+    pcall(function()
+        lighting = game:GetService("Lighting")
+    end)
+    local clockTime = tonumber(readProperty(lighting, "ClockTime"))
+    if clockTime then
+        updateMoonClockRate(statusFeature, clockTime)
+    end
 end
 
 -- Keep BNN/Vxeze's phase boundaries, but convert them with measured clock speed.
@@ -5656,10 +5667,11 @@ local function readMoonStatus(statusFeature)
         .. formatMoonEstimate(hoursRemaining * rate)
 end
 
-local function readTikiEyes(map)
+local function readTikiEyes(statusFeature, map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
+        statusFeature._tikiEyeSnapshot = nil
         return "Not loaded"
     end
     local cleared = 0
@@ -5674,15 +5686,19 @@ local function readTikiEyes(map)
             end
         end
     end
-    if found == 0 then
+    if found < 4 then
+        local previous = statusFeature._tikiEyeSnapshot
+        if previous and previous.islandModel == islandModel then
+            return previous.value
+        end
         return "Not loaded"
-    elseif found < 4 then
-        return tostring(cleared)
-            .. " cleared; "
-            .. tostring(4 - found)
-            .. " not visible"
     end
-    return tostring(cleared) .. " / 4 cleared"
+    local value = tostring(cleared) .. " / 4 cleared"
+    statusFeature._tikiEyeSnapshot = {
+        islandModel = islandModel,
+        value = value,
+    }
+    return value
 end
 
 local ELITE_TARGET_NAMES = {
@@ -5771,7 +5787,7 @@ local function readWorldEventValues(context, statusFeature)
         frozenDimension = thirdSea
                 and readEventPresence(frozenDimension)
             or "Third Sea only",
-        tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
+        tikiEyes = thirdSea and readTikiEyes(statusFeature, map) or "Third Sea only",
     }
 end
 
@@ -6612,6 +6628,7 @@ function StatusFeature:Initialize(context)
     self._moonClockSample = nil
     self._moonSecondsPerGameHour = nil
     self._moonRateUpdatedAt = nil
+    self._tikiEyeSnapshot = nil
     self.RemoteEventStatus = {
         leviathanSpy = "Waiting for status check",
         cakePrinceMobs = "Waiting for status check",
@@ -6622,6 +6639,7 @@ function StatusFeature:Initialize(context)
         while self.Context == context and self._generation == generation do
             task.wait(1)
             if self.Context == context and self._generation == generation then
+                sampleMoonClockRate(self)
                 local snapshot = context.State:GetSnapshot()
                 if snapshot.selectedTab == "StatusServer"
                     or snapshot.selectedTab == "EventStatus"
@@ -6675,6 +6693,7 @@ function StatusFeature:Cleanup()
     self._moonClockSample = nil
     self._moonSecondsPerGameHour = nil
     self._moonRateUpdatedAt = nil
+    self._tikiEyeSnapshot = nil
     self.RemoteEventStatus = nil
     self.Context = nil
 end

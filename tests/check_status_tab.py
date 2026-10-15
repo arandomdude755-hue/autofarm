@@ -142,7 +142,9 @@ require(
     and '" · Calculating"' in FEATURE
     and 'Tiki Outpost location entry is a travel-location marker; it does not prove eye-event state.' in FEATURE
     and "function updateMoonClockRate(statusFeature, clockTime)" in FEATURE
-    and "elapsed >= 8" in FEATURE
+    and "elapsed >= 3" in FEATURE
+    and "local function sampleMoonClockRate(statusFeature)" in FEATURE
+    and "sampleMoonClockRate(self)" in FEATURE
     and "local function moonForecast(phaseText, clockTime, phaseNumber)" in FEATURE
     and "Phase %d (%d nights until Full Moon)" in FEATURE
     and 'return "Full Moon ends in", 5 - clockTime' in FEATURE
@@ -158,9 +160,10 @@ require(
     and "ELITE_TARGET_NAMES" in FEATURE
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' not in FEATURE
-    and "function readTikiEyes(map)" in FEATURE
+    and "function readTikiEyes(statusFeature, map)" in FEATURE
+    and "if found < 4 then" in FEATURE
+    and "previous.islandModel == islandModel" in FEATURE
     and 'return "Not loaded"' in FEATURE
-    and '" not visible"' in FEATURE
     and 'Eye" .. tostring(index)' in FEATURE
     and "Third Sea only" in FEATURE
     and 'gsub("<[^>]+>", "")' in FEATURE,
