@@ -88,23 +88,34 @@ require(
     and "prehistoricTimer" not in CONFIG
     and '"Health"' not in CONFIG
     and '"Character"' not in CONFIG
+    and 'Label = "Chalice / Fist status"' in CONFIG
     and "function readWorldEventValues(context, statusFeature)" in FEATURE
     and 'location:GetAttribute("TimeIn")' in FEATURE
     and "workspace:GetServerTimeNow()" in FEATURE
     and "tick() - 25200" in FEATURE
+    and "local function readLegendaryItemStatus(context, workspace, elapsed)" in FEATURE
+    and '"Chest window active; next cycle in "' in FEATURE
+    and 'itemName .. " held by "' in FEATURE
+    and "Fist of Darkness" in FEATURE
+    and "Used: " in FEATURE
     and "function updateMoonClockRate(statusFeature, clockTime)" in FEATURE
     and "elapsed >= 8" in FEATURE
-    and "local function moonForecast(phaseText, clockTime)" in FEATURE
+    and "local function moonForecast(phaseText, clockTime, phaseNumber)" in FEATURE
+    and "Phase %d (%d nights until Full Moon)" in FEATURE
     and 'return "Full Moon ends in", 5 - clockTime' in FEATURE
     and 'return "Next Full Moon in", targetClock - clockTime' in FEATURE
     and 'local function formatMoonEstimate(realSeconds)' in FEATURE
     and '"game clock "' not in FEATURE
+    and '" | no timing estimate"' not in FEATURE
     and '" (estimate)"' in FEATURE
     and "ELITE_TARGET_NAMES" in FEATURE
-    and "Template loaded: " in FEATURE
+    and '"Not spawned"' in FEATURE
+    and '"Not spawned (template loaded: "' in FEATURE
+    and "function readTikiEyes(map)" in FEATURE
+    and "return value and \"Spawned\" or \"Not spawned\"" in FEATURE
     and "Third Sea only" in FEATURE
     and 'gsub("<[^>]+>", "")' in FEATURE,
-    "Event Status uses calibrated moon timing and Vxeze-style event checks without raid countdowns",
+    "Event Status distinguishes found items, reports moon phases and estimates, and labels absent events consistently",
 )
 require(
     "function StatusFeature:_ReadValues()" in FEATURE
@@ -114,8 +125,9 @@ require(
     and 'InvokeServer("InfoLeviathan", "1")' in FEATURE
     and 'InvokeServer("CakePrinceSpawner", true)' in FEATURE
     and 'InvokeServer("CakePrinceSpawner")' not in FEATURE
-    and '"Ready to hunt"' in FEATURE
-    and '"Buy the hint from the Spy"' in FEATURE
+    and '"Leviathan is out"' in FEATURE
+    and '"I DONT KNOW"' in FEATURE
+    and '"Bribe the Spy"' in FEATURE
     and "enemies left" in FEATURE
     and 'string.find(normalized, "open the portal", 1, true)' in FEATURE
     and "StatusFeature" in MANAGER,

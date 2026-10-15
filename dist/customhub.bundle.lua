@@ -771,7 +771,7 @@ local Config = {
                     Kind = "sectionHeader",
                     Label = "World events",
                 },
-                { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Fist / Chalice window" },
+                { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Chalice / Fist status" },
                 { Kind = "statusValue", Key = "moon", Label = "Moon phase / timing" },
                 { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
                 { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
@@ -5116,14 +5116,98 @@ local function readServerElapsed(workspace)
     return nil, "TimeIn clock mismatch"
 end
 
-local function readLegendaryItemEstimate(workspace)
-    local elapsed, reason = readServerElapsed(workspace)
-    if not elapsed then
-        return "Unavailable (" .. tostring(reason) .. ")"
+local LEGENDARY_ITEM_NAMES = {
+    "God's Chalice",
+    "Sweet Chalice",
+    "Fist of Darkness",
+}
+
+local function findActiveLegendaryBoss(workspace)
+    local enemies = findChild(workspace, "Enemies")
+    local childrenOk, children = pcall(function()
+        return enemies and enemies:GetChildren()
+    end)
+    if not childrenOk or type(children) ~= "table" then
+        return nil
     end
+    for _, enemy in ipairs(children) do
+        local name = string.lower(tostring(enemy.Name))
+        if string.find(name, "indra", 1, true)
+            or string.find(name, "dough king", 1, true)
+            or string.find(name, "darkbeard", 1, true)
+        then
+            local humanoid = enemy:FindFirstChildWhichIsA("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                return enemy.Name
+            end
+        end
+    end
+    return nil
+end
+
+local function findHeldLegendaryItem(playersService)
+    if not playersService then
+        return nil
+    end
+    local playersOk, players = pcall(function()
+        return playersService:GetPlayers()
+    end)
+    if not playersOk or type(players) ~= "table" then
+        return nil
+    end
+
+    for _, player in ipairs(players) do
+        local containers = {}
+        local character = readProperty(player, "Character")
+        local backpack = findChild(player, "Backpack")
+        if character then
+            table.insert(containers, character)
+        end
+        if backpack then
+            table.insert(containers, backpack)
+        end
+        for _, container in ipairs(containers) do
+            for _, itemName in ipairs(LEGENDARY_ITEM_NAMES) do
+                if findChild(container, itemName) then
+                    local displayName = readProperty(player, "DisplayName")
+                        or readProperty(player, "Name")
+                        or "player"
+                    return itemName .. " held by " .. tostring(displayName)
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function readLegendaryItemStatus(context, workspace, elapsed)
+    local bossName = findActiveLegendaryBoss(workspace)
+    if bossName then
+        return "Used: " .. tostring(bossName) .. " active"
+    end
+
+    local playersService = context and context.Compatibility
+        and context.Compatibility.Players
+    local heldItem = findHeldLegendaryItem(playersService)
+    if heldItem then
+        return heldItem
+    end
+
+    if not elapsed then
+        local _, reason = readServerElapsed(workspace)
+        return "Unknown (" .. tostring(reason) .. ")"
+    end
+
     local cycleSeconds = 4 * 60 * 60
-    local remaining = cycleSeconds - (elapsed % cycleSeconds)
-    return formatDuration(remaining) .. " (estimate)"
+    local untilNextCycle = cycleSeconds - (elapsed % cycleSeconds)
+    if elapsed < cycleSeconds then
+        return "No item detected; chest window in "
+            .. formatDuration(untilNextCycle)
+            .. " (estimate)"
+    end
+    return "Chest window active; next cycle in "
+        .. formatDuration(untilNextCycle)
+        .. " (estimate)"
 end
 
 local function formatNumber(value)
@@ -5183,7 +5267,7 @@ local function updateMoonClockRate(statusFeature, clockTime)
 end
 
 -- Keep BNN/Vxeze's phase boundaries, but convert them with measured clock speed.
-local function moonForecast(phaseText, clockTime)
+local function moonForecast(phaseText, clockTime, phaseNumber)
     if phaseText == "Full Moon" then
         if clockTime <= 5 then
             return "Full Moon ends in", 5 - clockTime
@@ -5196,6 +5280,17 @@ local function moonForecast(phaseText, clockTime)
     elseif phaseText == "Next Night" then
         local targetClock = clockTime <= 12 and 18 or 30
         return "Next Full Moon in", targetClock - clockTime
+    end
+    if phaseNumber ~= nil and phaseNumber ~= 5 then
+        local nightsUntilFullMoon = (5 - phaseNumber) % 8
+        if nightsUntilFullMoon > 0 then
+            -- Use the same next-night boundary as BNN/Vxeze, then add one
+            -- in-game day for each remaining moon phase.
+            local targetClock = clockTime <= 12 and 18 or 30
+            local hoursRemaining = targetClock - clockTime
+                + math.max(0, nightsUntilFullMoon - 1) * 24
+            return "Next Full Moon in", hoursRemaining
+        end
     end
     return nil, nil
 end
@@ -5229,12 +5324,23 @@ local function readMoonStatus(statusFeature)
     end)
     local phaseNumber = tonumber(phase)
     local phaseText
-    if phaseNumber == 5 then
+    local blueMoon = false
+    pcall(function()
+        blueMoon = lighting:GetAttribute("IsBlueMoon") == true
+    end)
+    if blueMoon then
+        phaseText = "Blue Moon"
+    elseif phaseNumber == 5 then
         phaseText = "Full Moon"
     elseif phaseNumber == 4 then
-        phaseText = "Next Night"
-    elseif phaseNumber ~= nil then
-        phaseText = "Other phase"
+        phaseText = "Phase 4 (next night is Full Moon)"
+    elseif phaseNumber ~= nil and phaseNumber >= 0 then
+        local nightsUntilFullMoon = (5 - phaseNumber) % 8
+        phaseText = string.format(
+            "Phase %d (%d nights until Full Moon)",
+            phaseNumber,
+            nightsUntilFullMoon
+        )
     else
         local sky
         pcall(function()
@@ -5247,7 +5353,7 @@ local function readMoonStatus(statusFeature)
         if textureNumber == "9709149431" then
             phaseText = "Full Moon"
         elseif textureNumber == "9709149052" then
-            phaseText = "Next Night"
+            phaseText = "Phase 4 (next night is Full Moon)"
         else
             phaseText = "Unknown phase"
         end
@@ -5258,12 +5364,22 @@ local function readMoonStatus(statusFeature)
         return phaseText .. " | timing unavailable"
     end
 
-    local label, hoursRemaining = moonForecast(phaseText, clockTime)
+    if phaseText == "Blue Moon" then
+        return "Blue Moon (active)"
+    end
+
+    local forecastPhase = phaseNumber
+    if phaseText == "Phase 4 (next night is Full Moon)" then
+        forecastPhase = 4
+    elseif phaseText == "Full Moon" then
+        forecastPhase = 5
+    end
+    local label, hoursRemaining = moonForecast(phaseText, clockTime, forecastPhase)
     if label == "Fake Moon" then
         return "Full Moon | Fake Moon (daytime)"
     end
     if not label or not hoursRemaining then
-        return phaseText .. " | no timing estimate"
+        return phaseText .. " | timing unavailable"
     end
 
     local rate = updateMoonClockRate(statusFeature, clockTime)
@@ -5277,13 +5393,13 @@ local function readTikiEyes(map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        return "Unavailable (island not loaded)"
+        return "Not spawned"
     end
     local cleared = 0
     for index = 1, 4 do
         local eye = findChild(islandModel, "Eye" .. tostring(index), true)
         if not eye then
-            return "Unavailable (eye markers incomplete)"
+            return "Not spawned"
         end
         local transparency = tonumber(readProperty(eye, "Transparency"))
         if transparency == nil then
@@ -5349,12 +5465,9 @@ local function readEliteHunterStatus(workspace, replicatedStorage, compatibility
     -- is not mistaken for a live Elite Hunter spawn.
     local storedElite = findAliveElite(replicatedStorage)
     if storedElite then
-        return "Template loaded: " .. storedElite.Name .. " (spawn not confirmed)"
+        return "Not spawned (template loaded: " .. storedElite.Name .. ")"
     end
-    if not enemies then
-        return "Unavailable (Enemies folder not loaded)"
-    end
-    return "No active target loaded"
+    return "Not spawned"
 end
 
 local function readWorldEventValues(context, statusFeature)
@@ -5370,21 +5483,18 @@ local function readWorldEventValues(context, statusFeature)
     local prehistoric = findChild(map, "PrehistoricIsland")
     local frozenDimension = findChild(locations, "Frozen Dimension")
 
-    local function presence(value, unavailable)
-        if unavailable then
-            return "Unavailable (map not loaded)"
-        end
-        return value and "Present" or "Not present"
+    local function presence(value)
+        return value and "Spawned" or "Not spawned"
     end
 
     return {
         serverAge = serverElapsed and formatServerAge(serverElapsed) or "Unavailable",
-        legendaryItemTimer = readLegendaryItemEstimate(workspace),
+        legendaryItemTimer = readLegendaryItemStatus(context, workspace, serverElapsed),
         moon = readMoonStatus(statusFeature),
         eliteHunter = readEliteHunterStatus(workspace, replicatedStorage, compatibility),
-        mirageIsland = thirdSea and presence(mirage, not map) or "Third Sea only",
-        prehistoricIsland = thirdSea and presence(prehistoric, not map) or "Third Sea only",
-        frozenDimension = thirdSea and presence(frozenDimension, not locations) or "Third Sea only",
+        mirageIsland = thirdSea and presence(mirage) or "Third Sea only",
+        prehistoricIsland = thirdSea and presence(prehistoric) or "Third Sea only",
+        frozenDimension = thirdSea and presence(frozenDimension) or "Third Sea only",
         tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
     }
 end
@@ -5415,11 +5525,11 @@ local function readLeviathanSpyStatus(context, remote)
     end
     local status = tonumber(result)
     if status == 5 then
-        return "Ready to hunt"
+        return "Leviathan is out"
     elseif status == -1 or status == nil then
-        return "Unknown"
+        return "I DONT KNOW"
     end
-    return "Buy the hint from the Spy"
+    return "Bribe the Spy"
 end
 
 local function readCakePrinceMobs(context, remote)
@@ -5618,7 +5728,7 @@ function StatusFeature:_BuildReport(values)
         "Quest reader: " .. values.questReader,
         "Quest dialogue: " .. values.questDialogue,
         "Server age: " .. values.serverAge,
-        "Next legendary item: " .. values.legendaryItemTimer,
+        "Chalice / Fist status: " .. values.legendaryItemTimer,
         "Moon: " .. values.moon,
         "Leviathan Spy: " .. values.leviathanSpy,
         "Cake Prince mobs: " .. values.cakePrinceMobs,
