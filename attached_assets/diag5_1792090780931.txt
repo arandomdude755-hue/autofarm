@@ -1,0 +1,87 @@
+===== [FarmMasteryDiagnostic] REPORT BEGIN =====
+Enabled: true
+Method: Blox Fruit
+Health threshold: 100
+Status: Approaching quest giver: Submerged Quest Giver 3
+Status age: 0.33
+Skill active: false
+Next skill scan in: 0.00
+Target: none
+Skill gate: in_attack_position=false; player_distance=n/a; tolerance=6; movement_active=true; movement_holding=false; movement_goal_distance=n/a
+Preparation: none
+Mastery tool: Kitsune-Kitsune; parent=Character; enabled=true
+Category: Blox Fruit
+Selected keys: Z, X, C, V, F
+Tool: Kitsune-Kitsune; parent=Character; character matches=Kitsune-Kitsune; backpack matches=none
+GUI: PlayerGui=present; Main=ScreenGui; Main.Enabled=true; Skills=Frame; Skills.Visible=false
+Skills entries: Container, Level, Rage, StarContainer, Title, Kitsune-Kitsune
+Selected tool entry: present
+Z: frame=Frame; visible=true; controls=true; title=Accursed Enchantment; titleReady=true; cooldownEmpty=true; cooldownFull=false; ready=true
+X: frame=Frame; visible=true; controls=true; title=Tails of Burning Agony; titleReady=true; cooldownEmpty=true; cooldownFull=false; ready=true
+C: frame=Frame; visible=true; controls=true; title=Fox Fire Disruption; titleReady=true; cooldownEmpty=true; cooldownFull=false; ready=true
+V: frame=Frame; visible=true; controls=true; title=Transformation; titleReady=true; cooldownEmpty=true; cooldownFull=false; ready=true
+F: frame=Frame; visible=true; controls=true; title=Wild Assault; titleReady=true; cooldownEmpty=true; cooldownFull=false; ready=true
+===== [FarmMasteryDiagnostic] REPORT END =====
+
+===== [GatewayDiagnostic] REPORT BEGIN =====
+Age: 20.03 seconds
+Sea: Third Sea
+Destination: farm target at (9637.3, -1989.1, 9618.3)
+Phase: direct travel: no qualifying gateway route
+Start position: (5650.9, 1015.3, -350.4)
+Route distances: direct=11148.6; planned=11148.6; saved=0.0; minimum=1500
+Planner reason: No available route produced a shorter path
+Candidate Castle to Mansion: eligible=true; activation=requestEntrance; requirement=Valkyrie Helm; owned=true; item_owned=true; access_by=Valkyrie Helm; reason=available; start_to_pad=11104.1
+Candidate Mansion to Castle: eligible=true; activation=requestEntrance; requirement=Valkyrie Helm; owned=true; item_owned=true; access_by=Valkyrie Helm; reason=available; start_to_pad=19509.2
+Candidate Castle to Hydra: eligible=true; activation=requestEntrance; requirement=Valkyrie Helm; owned=true; item_owned=true; access_by=Valkyrie Helm; reason=available; start_to_pad=11075.3
+Candidate Hydra to Castle: eligible=true; activation=requestEntrance; requirement=Valkyrie Helm; owned=true; item_owned=true; access_by=Valkyrie Helm; reason=available; start_to_pad=2.0
+Candidate Castle to Tiki: eligible=false; activation=touch; requirement=Feathered Visage; owned=false; item_owned=false; fallback_title=Liberator of the Sky; title_owned=unknown; reason=required item not found; title lookup skipped because this gateway is not shorter; title_route_saved=-17046.9
+Candidate Tiki to Castle: eligible=false; activation=touch; requirement=Feathered Visage; owned=false; item_owned=false; fallback_title=Liberator of the Sky; title_owned=unknown; reason=required item not found; title lookup skipped because this gateway is not shorter; title_route_saved=-28561.8
+Candidate Enter Beautiful Pirate Domain: eligible=false; activation=requestEntrance; requirement=none; owned=true; reason=gateway stand position is not loaded
+Candidate Leave Beautiful Pirate Domain: eligible=false; activation=requestEntrance; requirement=none; owned=true; reason=gateway stand position is not loaded
+===== [GatewayDiagnostic] REPORT END =====
+
+===== [TitleAccessDiagnostic] REPORT BEGIN =====
+Target title: Liberator of the Sky
+Purpose: locate title ownership data; no remotes are invoked
+Player.Data scan: 48 descendants; 0 title-related matches
+PlayerGui exact-title scan: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Liberator of the SkyPadding (Frame); Visible=true
+PlayerGui exact-title scan: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Liberator of the Sky (TextButton); value=; Visible=true
+PlayerGui exact-title scan: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Liberator of the Sky.titleName (TextLabel); value=#182 - Liberator of the Sky; Visible=true
+PlayerGui exact-title scan scan: 9996 descendants; 3 title-related matches
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.categoryNavigator.titleTab (ImageButton); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.categoryNavigator.titleTab.textLabel (TextLabel); value=TITLES; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.categoryNavigator.colorTab.textLabel (TextLabel); value=Color; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.title (Frame); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.title.close (TextButton); value=; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.title.textLabel (TextLabel); value=TITLES; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.title.textLabel.textLabel (TextLabel); value=TITLES; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.The Ice King (TextButton); value=; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.The Ice King.lockedImage (ImageLabel); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.The Ice King.titleName (TextLabel); value=#034 - (LOCKED); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.The Ice King.hint (TextLabel); value=???; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.El Combo God (TextButton); value=; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.El Combo God.lockedImage (ImageLabel); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.El Combo God.titleName (TextLabel); value=#060 - (LOCKED); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.El Combo God.hint (TextLabel); value=???; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Equal to the Heavens (TextButton); value=; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Equal to the Heavens.lockedImage (ImageLabel); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Equal to the Heavens.titleName (TextLabel); value=#107 - (LOCKED); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Equal to the Heavens.hint (TextLabel); value=???; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.STAR_3655596791 (TextButton); value=; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.STAR_3655596791.lockedImage (ImageLabel); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.STAR_3655596791.titleName (TextLabel); value=#202 - (LOCKED); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.STAR_3655596791.hint (TextLabel); value=???; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Bread Chaser (TextButton); value=; Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Bread Chaser.lockedImage (ImageLabel); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Bread Chaser.titleName (TextLabel); value=#045 - (LOCKED); Visible=true
+TitlesMenu: Players.Zixuangamer755.PlayerGui.TitlesMenu.ROOT.Frame.content.scrollingFrame.Bread Chaser.hint (TextLabel); value=???; Visible=true
+TitlesMenu scan: 2853 descendants; 1168 title-related matches
+TitlesMenu root: ScreenGui; present; Enabled=true
+Main.Titles root: missing
+Title-related remotes: none found
+Title-related modules: ReplicatedStorage.DialogueController.ReactComponents.DialogueTitle, ReplicatedStorage.DisplayTitle, ReplicatedStorage.DungeonClient.Interface.DungeonResultsUI.TitleBar
+Generic CommF_ remote: RemoteFunction; present; not invoked
+Title-related Workspace.NPCs: none found
+Note: name/value matches are evidence only; they do not prove unlocked status.
+===== [TitleAccessDiagnostic] REPORT END =====
