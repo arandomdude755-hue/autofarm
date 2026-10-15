@@ -3,6 +3,7 @@ MapGatewayService.__index = MapGatewayService
 
 local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
+local ROUTE_LOCATION_REPEAT_DISTANCE = 500
 local FAILED_ROUTE_COOLDOWN = 30
 local FAILED_APPROACH_COOLDOWN = 8
 local GATEWAY_ACTIVATION_TIMEOUT = 5
@@ -98,6 +99,17 @@ local ROUTES_BY_SEA = {
 
 local function distance(first, second)
     return (first - second).Magnitude
+end
+
+local function repeatsGatewayArea(position, visitedPositions)
+    for _, visitedPosition in ipairs(visitedPositions) do
+        if typeof(visitedPosition) == "Vector3"
+            and distance(position, visitedPosition) <= ROUTE_LOCATION_REPEAT_DISTANCE
+        then
+            return true
+        end
+    end
+    return false
 end
 
 local function formatPosition(position)
@@ -232,23 +244,28 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
             end
         end
 
-        local function findBestTitlePath(position, remainingHops, used, titleRouteUsed)
+        local function findBestTitlePath(position, remainingHops, used, titleRouteUsed, visited)
             local bestCost = titleRouteUsed and distance(position, destination) or math.huge
             if remainingHops <= 0 then
                 return bestCost
             end
 
             for _, route in ipairs(estimateRoutes) do
-                if not used[route.Name] then
+                if not used[route.Name]
+                    and not repeatsGatewayArea(route.Destination, visited)
+                then
                     used[route.Name] = true
+                    table.insert(visited, route.Destination)
                     local includesTitleRoute =
                         titleRouteUsed or route.Name == source.Name
                     local remainingCost = findBestTitlePath(
                         route.Destination,
                         remainingHops - 1,
                         used,
-                        includesTitleRoute
+                        includesTitleRoute,
+                        visited
                     )
+                    table.remove(visited)
                     used[route.Name] = nil
                     local routeCost = distance(position, route.Stand) + remainingCost
                     if routeCost < bestCost then
@@ -259,7 +276,13 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
             return bestCost
         end
 
-        return findBestTitlePath(currentPosition, MAX_ROUTE_HOPS, {}, false)
+        return findBestTitlePath(
+            currentPosition,
+            MAX_ROUTE_HOPS,
+            {},
+            false,
+            { currentPosition }
+        )
     end
 
     for _, source in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
@@ -394,9 +417,11 @@ function MapGatewayService:FindPlan(
     destination,
     currentPosition,
     destinationLabel,
-    excludedRoutes
+    excludedRoutes,
+    visitedPositions
 )
     excludedRoutes = type(excludedRoutes) == "table" and excludedRoutes or {}
+    visitedPositions = type(visitedPositions) == "table" and visitedPositions or {}
     self.LastDiagnostic = {
         At = os.clock(),
         DestinationLabel = destinationLabel,
@@ -419,7 +444,7 @@ function MapGatewayService:FindPlan(
     diagnostic.Sea = SEA_LABELS[seaIndex]
 
     local routes = self:_GetAvailableRoutes(seaIndex, currentPosition, destination)
-    local function findBest(position, remainingHops, used)
+    local function findBest(position, remainingHops, used, visited)
         local bestCost = distance(position, destination)
         local bestPath = {}
         if remainingHops <= 0 then
@@ -427,10 +452,14 @@ function MapGatewayService:FindPlan(
         end
 
         for _, route in ipairs(routes) do
-            if not used[route.Name] then
+            if not used[route.Name]
+                and not repeatsGatewayArea(route.Destination, visited)
+            then
                 used[route.Name] = true
+                table.insert(visited, route.Destination)
                 local remainingCost, remainingPath =
-                    findBest(route.Destination, remainingHops - 1, used)
+                    findBest(route.Destination, remainingHops - 1, used, visited)
+                table.remove(visited)
                 used[route.Name] = nil
                 local routeCost = distance(position, route.Stand) + remainingCost
                 if routeCost < bestCost then
@@ -452,7 +481,14 @@ function MapGatewayService:FindPlan(
             excluded[routeName] = true
         end
     end
-    local plannedCost, plan = findBest(currentPosition, MAX_ROUTE_HOPS, excluded)
+    local visited = { currentPosition }
+    for _, position in ipairs(visitedPositions) do
+        if typeof(position) == "Vector3" then
+            table.insert(visited, position)
+        end
+    end
+    local plannedCost, plan =
+        findBest(currentPosition, MAX_ROUTE_HOPS, excluded, visited)
     diagnostic.DirectDistance = directDistance
     diagnostic.PlannedDistance = plannedCost
     diagnostic.DistanceSaved = directDistance - plannedCost

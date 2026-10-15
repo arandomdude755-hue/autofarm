@@ -386,6 +386,7 @@ end
 function TeleportFeature:_RunTravel(request, character)
     local compatibility = self.Context.Compatibility
     local attemptedRoutes = {}
+    local visitedGatewayPositions = {}
     local gatewayAttempts = 0
     local gatewayFailed = false
 
@@ -417,7 +418,8 @@ function TeleportFeature:_RunTravel(request, character)
             request.Destination.Position,
             currentRoot.Position,
             request.Label,
-            attemptedRoutes
+            attemptedRoutes,
+            visitedGatewayPositions
         )
         if not planOk or type(resolvedPlan) ~= "table" then
             self.GatewayService:RecordTravelPhase(
@@ -447,7 +449,8 @@ function TeleportFeature:_RunTravel(request, character)
                     request.Destination.Position,
                     retryRoot.Position,
                     request.Label,
-                    attemptedRoutes
+                    attemptedRoutes,
+                    visitedGatewayPositions
                 )
                 if not planOk or type(resolvedPlan) ~= "table"
                     or #resolvedPlan > 0
@@ -558,6 +561,7 @@ function TeleportFeature:_RunTravel(request, character)
             route.Name .. " arrival confirmed; checking the next leg.",
             "info"
         )
+        table.insert(visitedGatewayPositions, route.Destination)
     end
 
     if self:_IsTravelCurrent(request, character) then

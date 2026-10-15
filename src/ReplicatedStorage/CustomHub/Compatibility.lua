@@ -10,7 +10,9 @@ Compatibility.__index = Compatibility
 
 local TITLE_MENU_PROBE_TIMEOUT = 0.35
 local TITLE_MENU_PROBE_INTERVAL = 0.05
-local TITLE_STATE_CACHE_TTL = 30
+local TITLE_MENU_CLOSE_GUARD_DURATION = 0.8
+local TITLE_LOCKED_CONFIRMATION_DELAY = 0.25
+local TITLE_STATE_CACHE_TTL = 5
 local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
 
 function Compatibility.new()
@@ -419,6 +421,10 @@ function Compatibility:HasUnlockedTitle(titleName)
     local now = os.clock()
     self.TitleOwnershipCache = self.TitleOwnershipCache or {}
     local targetLower = string.lower(titleName)
+    local cache = self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return cache.Value, cache.Reason
+    end
 
     local function getMenuParts()
         local playerGui = self.Player and self.Player:FindFirstChildOfClass("PlayerGui")
@@ -485,7 +491,11 @@ function Compatibility:HasUnlockedTitle(titleName)
     end
 
     local state, reason, titlesMenu, frame = safeReadTitleState()
-    if state ~= nil then
+    local menuIsVisible = false
+    pcall(function()
+        menuIsVisible = titlesMenu.Enabled == true and frame and frame.Visible == true
+    end)
+    if state == true or (state == false and menuIsVisible) then
         self.TitleOwnershipCache[titleName] = {
             Value = state,
             Reason = reason,
@@ -499,39 +509,28 @@ function Compatibility:HasUnlockedTitle(titleName)
         return state, reason
     end
 
-    local cache = self.TitleOwnershipCache[titleName]
-    if cache and now < cache.ExpiresAt then
-        return cache.Value, cache.Reason
-    end
-
-    local menuIsVisible = false
-    pcall(function()
-        menuIsVisible = titlesMenu.Enabled == true and frame and frame.Visible == true
-    end)
     local openedForProbe = false
-    local originalFrame = frame
-    local originalFrameVisible = frame and frame.Visible
     local originalEnabled
     if titlesMenu and titlesMenu:IsA("LayerCollector") then
         originalEnabled = titlesMenu.Enabled
     end
 
-    local visibilityConnections = {}
+    local frameConnections = {}
+    local probeConnections = {}
+    local watchedFrames = {}
     local function suppressProbeMenu()
         pcall(function()
             local _, activeFrame = getMenuParts()
             if activeFrame and activeFrame:IsA("GuiObject") then
                 activeFrame.Visible = false
             end
-            if titlesMenu and titlesMenu:IsA("LayerCollector") then
-                titlesMenu.Enabled = false
-            end
         end)
     end
     local function watchFrame(activeFrame)
-        if not activeFrame or not activeFrame:IsA("GuiObject") then
+        if not activeFrame or not activeFrame:IsA("GuiObject") or watchedFrames[activeFrame] then
             return
         end
+        watchedFrames[activeFrame] = true
         local connectOk, connection = pcall(function()
             return activeFrame:GetPropertyChangedSignal("Visible"):Connect(function()
                 pcall(function()
@@ -542,7 +541,7 @@ function Compatibility:HasUnlockedTitle(titleName)
             end)
         end)
         if connectOk and connection then
-            table.insert(visibilityConnections, connection)
+            table.insert(frameConnections, connection)
         end
         if openedForProbe and activeFrame.Visible then
             activeFrame.Visible = false
@@ -553,21 +552,10 @@ function Compatibility:HasUnlockedTitle(titleName)
         local openEvent = titlesMenu and titlesMenu:FindFirstChild("Open")
         if not openEvent or not openEvent:IsA("BindableEvent") then
             reason = "TitlesMenu.Open is unavailable"
+            state = nil
         else
             if frame then
                 watchFrame(frame)
-            end
-            if titlesMenu and titlesMenu:IsA("LayerCollector") then
-                local enabledConnection = titlesMenu:GetPropertyChangedSignal("Enabled"):Connect(
-                    function()
-                        pcall(function()
-                            if openedForProbe and titlesMenu.Enabled then
-                                titlesMenu.Enabled = false
-                            end
-                        end)
-                    end
-                )
-                table.insert(visibilityConnections, enabledConnection)
             end
             local descendantConnection
             if titlesMenu then
@@ -576,9 +564,12 @@ function Compatibility:HasUnlockedTitle(titleName)
                         and instance.Parent
                         and instance.Parent.Name == "ROOT"
                     then
-                            pcall(watchFrame, instance)
+                        pcall(watchFrame, instance)
                     end
                 end)
+            end
+            if descendantConnection then
+                table.insert(probeConnections, descendantConnection)
             end
             openedForProbe = true
             local fired, fireError = pcall(function()
@@ -588,19 +579,29 @@ function Compatibility:HasUnlockedTitle(titleName)
                 suppressProbeMenu()
             else
                 openedForProbe = false
+                state = nil
                 reason = "TitlesMenu.Open failed: " .. tostring(fireError)
-            end
-            if descendantConnection then
-                table.insert(visibilityConnections, descendantConnection)
             end
         end
     end
 
     local function waitForTitleState()
         local deadline = os.clock() + TITLE_MENU_PROBE_TIMEOUT
+        local lockedSeenAt
         repeat
             state, reason = safeReadTitleState()
-            if state ~= nil or (not openedForProbe and not menuIsVisible) then
+            if state == true or (state == false and menuIsVisible) then
+                break
+            end
+            if state == false then
+                lockedSeenAt = lockedSeenAt or os.clock()
+                if os.clock() - lockedSeenAt >= TITLE_LOCKED_CONFIRMATION_DELAY then
+                    break
+                end
+            else
+                lockedSeenAt = nil
+            end
+            if not openedForProbe and not menuIsVisible then
                 break
             end
             if openedForProbe then
@@ -624,7 +625,7 @@ function Compatibility:HasUnlockedTitle(titleName)
         reason = "title menu probe failed: " .. tostring(probeState)
     end
 
-    for _, connection in ipairs(visibilityConnections) do
+    for _, connection in ipairs(probeConnections) do
         pcall(function()
             if connection and connection.Connected then
                 connection:Disconnect()
@@ -632,16 +633,42 @@ function Compatibility:HasUnlockedTitle(titleName)
         end)
     end
     if openedForProbe then
-        openedForProbe = false
+        suppressProbeMenu()
         pcall(function()
-            local _, activeFrame = getMenuParts()
-            if activeFrame and activeFrame:IsA("GuiObject") then
-                activeFrame.Visible = originalFrame and originalFrameVisible == true or false
-            end
             if titlesMenu and originalEnabled ~= nil then
                 titlesMenu.Enabled = originalEnabled
             end
         end)
+        task.spawn(function()
+            local deadline = os.clock() + TITLE_MENU_CLOSE_GUARD_DURATION
+            repeat
+                suppressProbeMenu()
+                if titlesMenu and originalEnabled ~= nil then
+                    pcall(function()
+                        if titlesMenu.Enabled ~= originalEnabled then
+                            titlesMenu.Enabled = originalEnabled
+                        end
+                    end)
+                end
+                task.wait(0.05)
+            until os.clock() >= deadline
+            openedForProbe = false
+            for _, connection in ipairs(frameConnections) do
+                pcall(function()
+                    if connection and connection.Connected then
+                        connection:Disconnect()
+                    end
+                end)
+            end
+        end)
+    else
+        for _, connection in ipairs(frameConnections) do
+            pcall(function()
+                if connection and connection.Connected then
+                    connection:Disconnect()
+                end
+            end)
+        end
     end
 
     now = os.clock()

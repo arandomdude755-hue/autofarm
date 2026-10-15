@@ -205,12 +205,14 @@ require(
     and "openEvent:Fire()" in title_access
     and "TITLE_MENU_PROBE_TIMEOUT = 0.35" in COMPATIBILITY
     and "activeFrame.Visible = false" in title_access
-    and "titlesMenu.Enabled = false" in title_access
-    and 'GetPropertyChangedSignal("Enabled")' in title_access
-    and title_access.index("for _, connection in ipairs(visibilityConnections)")
-        < title_access.index("titlesMenu.Enabled = originalEnabled")
-    and "TITLE_STATE_CACHE_TTL = 30" in COMPATIBILITY
+    and "TITLE_MENU_CLOSE_GUARD_DURATION = 0.8" in COMPATIBILITY
+    and "TITLE_LOCKED_CONFIRMATION_DELAY = 0.25" in COMPATIBILITY
+    and "suppressProbeMenu()" in title_access
+    and "titleTextLower" in title_access
+    and "lockedSeenAt" in title_access
+    and "TITLE_STATE_CACHE_TTL = 5" in COMPATIBILITY
     and "TITLE_STATE_UNKNOWN_CACHE_TTL = 1" in COMPATIBILITY
+    and "task.wait(0.05)" in title_access
     and "InvokeServer" not in title_access
     and "FireServer" not in title_access,
     "title access lookup must read the loaded TitlesMenu, hide/restore a bounded UI probe, cache results, and avoid unknown remotes",
@@ -308,12 +310,22 @@ require(
 require(
     "local MAX_GATEWAY_ATTEMPTS = 4" in FEATURE
     and "local attemptedRoutes = {}" in FEATURE
+    and "local visitedGatewayPositions = {}" in FEATURE
     and "self.GatewayService.FindPlan" in FEATURE
     and "currentRoot.Position,\n            request.Label,\n            attemptedRoutes" in FEATURE
+    and "visitedGatewayPositions" in FEATURE
     and "request.RoutePlan = nil" in FEATURE
     and "checking another route" in FEATURE
     and "self:_RunDirectTravel(request, character, false)" in FEATURE,
     "multi-hop travel must replan from each confirmed gateway arrival or failure and avoid repeating legs",
+)
+require(
+    "ROUTE_LOCATION_REPEAT_DISTANCE = 500" in GATEWAYS
+    and "local function repeatsGatewayArea(position, visitedPositions)" in GATEWAYS
+    and "not repeatsGatewayArea(route.Destination, visited)" in GATEWAYS
+    and "table.insert(visited, route.Destination)" in GATEWAYS
+    and "findBest(currentPosition, MAX_ROUTE_HOPS, excluded, visited)" in GATEWAYS,
+    "gateway planning and title-route estimates must reject paths that revisit gateway areas",
 )
 farm_navigation = FEATURE[
     FEATURE.index("function TeleportFeature:MoveFarmTo("):

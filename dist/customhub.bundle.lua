@@ -1088,7 +1088,9 @@ Compatibility.__index = Compatibility
 
 local TITLE_MENU_PROBE_TIMEOUT = 0.35
 local TITLE_MENU_PROBE_INTERVAL = 0.05
-local TITLE_STATE_CACHE_TTL = 30
+local TITLE_MENU_CLOSE_GUARD_DURATION = 0.8
+local TITLE_LOCKED_CONFIRMATION_DELAY = 0.25
+local TITLE_STATE_CACHE_TTL = 5
 local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
 
 function Compatibility.new()
@@ -1497,6 +1499,10 @@ function Compatibility:HasUnlockedTitle(titleName)
     local now = os.clock()
     self.TitleOwnershipCache = self.TitleOwnershipCache or {}
     local targetLower = string.lower(titleName)
+    local cache = self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return cache.Value, cache.Reason
+    end
 
     local function getMenuParts()
         local playerGui = self.Player and self.Player:FindFirstChildOfClass("PlayerGui")
@@ -1563,7 +1569,11 @@ function Compatibility:HasUnlockedTitle(titleName)
     end
 
     local state, reason, titlesMenu, frame = safeReadTitleState()
-    if state ~= nil then
+    local menuIsVisible = false
+    pcall(function()
+        menuIsVisible = titlesMenu.Enabled == true and frame and frame.Visible == true
+    end)
+    if state == true or (state == false and menuIsVisible) then
         self.TitleOwnershipCache[titleName] = {
             Value = state,
             Reason = reason,
@@ -1577,39 +1587,28 @@ function Compatibility:HasUnlockedTitle(titleName)
         return state, reason
     end
 
-    local cache = self.TitleOwnershipCache[titleName]
-    if cache and now < cache.ExpiresAt then
-        return cache.Value, cache.Reason
-    end
-
-    local menuIsVisible = false
-    pcall(function()
-        menuIsVisible = titlesMenu.Enabled == true and frame and frame.Visible == true
-    end)
     local openedForProbe = false
-    local originalFrame = frame
-    local originalFrameVisible = frame and frame.Visible
     local originalEnabled
     if titlesMenu and titlesMenu:IsA("LayerCollector") then
         originalEnabled = titlesMenu.Enabled
     end
 
-    local visibilityConnections = {}
+    local frameConnections = {}
+    local probeConnections = {}
+    local watchedFrames = {}
     local function suppressProbeMenu()
         pcall(function()
             local _, activeFrame = getMenuParts()
             if activeFrame and activeFrame:IsA("GuiObject") then
                 activeFrame.Visible = false
             end
-            if titlesMenu and titlesMenu:IsA("LayerCollector") then
-                titlesMenu.Enabled = false
-            end
         end)
     end
     local function watchFrame(activeFrame)
-        if not activeFrame or not activeFrame:IsA("GuiObject") then
+        if not activeFrame or not activeFrame:IsA("GuiObject") or watchedFrames[activeFrame] then
             return
         end
+        watchedFrames[activeFrame] = true
         local connectOk, connection = pcall(function()
             return activeFrame:GetPropertyChangedSignal("Visible"):Connect(function()
                 pcall(function()
@@ -1620,7 +1619,7 @@ function Compatibility:HasUnlockedTitle(titleName)
             end)
         end)
         if connectOk and connection then
-            table.insert(visibilityConnections, connection)
+            table.insert(frameConnections, connection)
         end
         if openedForProbe and activeFrame.Visible then
             activeFrame.Visible = false
@@ -1631,21 +1630,10 @@ function Compatibility:HasUnlockedTitle(titleName)
         local openEvent = titlesMenu and titlesMenu:FindFirstChild("Open")
         if not openEvent or not openEvent:IsA("BindableEvent") then
             reason = "TitlesMenu.Open is unavailable"
+            state = nil
         else
             if frame then
                 watchFrame(frame)
-            end
-            if titlesMenu and titlesMenu:IsA("LayerCollector") then
-                local enabledConnection = titlesMenu:GetPropertyChangedSignal("Enabled"):Connect(
-                    function()
-                        pcall(function()
-                            if openedForProbe and titlesMenu.Enabled then
-                                titlesMenu.Enabled = false
-                            end
-                        end)
-                    end
-                )
-                table.insert(visibilityConnections, enabledConnection)
             end
             local descendantConnection
             if titlesMenu then
@@ -1654,9 +1642,12 @@ function Compatibility:HasUnlockedTitle(titleName)
                         and instance.Parent
                         and instance.Parent.Name == "ROOT"
                     then
-                            pcall(watchFrame, instance)
+                        pcall(watchFrame, instance)
                     end
                 end)
+            end
+            if descendantConnection then
+                table.insert(probeConnections, descendantConnection)
             end
             openedForProbe = true
             local fired, fireError = pcall(function()
@@ -1666,19 +1657,29 @@ function Compatibility:HasUnlockedTitle(titleName)
                 suppressProbeMenu()
             else
                 openedForProbe = false
+                state = nil
                 reason = "TitlesMenu.Open failed: " .. tostring(fireError)
-            end
-            if descendantConnection then
-                table.insert(visibilityConnections, descendantConnection)
             end
         end
     end
 
     local function waitForTitleState()
         local deadline = os.clock() + TITLE_MENU_PROBE_TIMEOUT
+        local lockedSeenAt
         repeat
             state, reason = safeReadTitleState()
-            if state ~= nil or (not openedForProbe and not menuIsVisible) then
+            if state == true or (state == false and menuIsVisible) then
+                break
+            end
+            if state == false then
+                lockedSeenAt = lockedSeenAt or os.clock()
+                if os.clock() - lockedSeenAt >= TITLE_LOCKED_CONFIRMATION_DELAY then
+                    break
+                end
+            else
+                lockedSeenAt = nil
+            end
+            if not openedForProbe and not menuIsVisible then
                 break
             end
             if openedForProbe then
@@ -1702,7 +1703,7 @@ function Compatibility:HasUnlockedTitle(titleName)
         reason = "title menu probe failed: " .. tostring(probeState)
     end
 
-    for _, connection in ipairs(visibilityConnections) do
+    for _, connection in ipairs(probeConnections) do
         pcall(function()
             if connection and connection.Connected then
                 connection:Disconnect()
@@ -1710,16 +1711,42 @@ function Compatibility:HasUnlockedTitle(titleName)
         end)
     end
     if openedForProbe then
-        openedForProbe = false
+        suppressProbeMenu()
         pcall(function()
-            local _, activeFrame = getMenuParts()
-            if activeFrame and activeFrame:IsA("GuiObject") then
-                activeFrame.Visible = originalFrame and originalFrameVisible == true or false
-            end
             if titlesMenu and originalEnabled ~= nil then
                 titlesMenu.Enabled = originalEnabled
             end
         end)
+        task.spawn(function()
+            local deadline = os.clock() + TITLE_MENU_CLOSE_GUARD_DURATION
+            repeat
+                suppressProbeMenu()
+                if titlesMenu and originalEnabled ~= nil then
+                    pcall(function()
+                        if titlesMenu.Enabled ~= originalEnabled then
+                            titlesMenu.Enabled = originalEnabled
+                        end
+                    end)
+                end
+                task.wait(0.05)
+            until os.clock() >= deadline
+            openedForProbe = false
+            for _, connection in ipairs(frameConnections) do
+                pcall(function()
+                    if connection and connection.Connected then
+                        connection:Disconnect()
+                    end
+                end)
+            end
+        end)
+    else
+        for _, connection in ipairs(frameConnections) do
+            pcall(function()
+                if connection and connection.Connected then
+                    connection:Disconnect()
+                end
+            end)
+        end
     end
 
     now = os.clock()
@@ -6669,6 +6696,7 @@ MapGatewayService.__index = MapGatewayService
 
 local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
+local ROUTE_LOCATION_REPEAT_DISTANCE = 500
 local FAILED_ROUTE_COOLDOWN = 30
 local FAILED_APPROACH_COOLDOWN = 8
 local GATEWAY_ACTIVATION_TIMEOUT = 5
@@ -6764,6 +6792,17 @@ local ROUTES_BY_SEA = {
 
 local function distance(first, second)
     return (first - second).Magnitude
+end
+
+local function repeatsGatewayArea(position, visitedPositions)
+    for _, visitedPosition in ipairs(visitedPositions) do
+        if typeof(visitedPosition) == "Vector3"
+            and distance(position, visitedPosition) <= ROUTE_LOCATION_REPEAT_DISTANCE
+        then
+            return true
+        end
+    end
+    return false
 end
 
 local function formatPosition(position)
@@ -6898,23 +6937,28 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
             end
         end
 
-        local function findBestTitlePath(position, remainingHops, used, titleRouteUsed)
+        local function findBestTitlePath(position, remainingHops, used, titleRouteUsed, visited)
             local bestCost = titleRouteUsed and distance(position, destination) or math.huge
             if remainingHops <= 0 then
                 return bestCost
             end
 
             for _, route in ipairs(estimateRoutes) do
-                if not used[route.Name] then
+                if not used[route.Name]
+                    and not repeatsGatewayArea(route.Destination, visited)
+                then
                     used[route.Name] = true
+                    table.insert(visited, route.Destination)
                     local includesTitleRoute =
                         titleRouteUsed or route.Name == source.Name
                     local remainingCost = findBestTitlePath(
                         route.Destination,
                         remainingHops - 1,
                         used,
-                        includesTitleRoute
+                        includesTitleRoute,
+                        visited
                     )
+                    table.remove(visited)
                     used[route.Name] = nil
                     local routeCost = distance(position, route.Stand) + remainingCost
                     if routeCost < bestCost then
@@ -6925,7 +6969,13 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
             return bestCost
         end
 
-        return findBestTitlePath(currentPosition, MAX_ROUTE_HOPS, {}, false)
+        return findBestTitlePath(
+            currentPosition,
+            MAX_ROUTE_HOPS,
+            {},
+            false,
+            { currentPosition }
+        )
     end
 
     for _, source in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
@@ -7060,9 +7110,11 @@ function MapGatewayService:FindPlan(
     destination,
     currentPosition,
     destinationLabel,
-    excludedRoutes
+    excludedRoutes,
+    visitedPositions
 )
     excludedRoutes = type(excludedRoutes) == "table" and excludedRoutes or {}
+    visitedPositions = type(visitedPositions) == "table" and visitedPositions or {}
     self.LastDiagnostic = {
         At = os.clock(),
         DestinationLabel = destinationLabel,
@@ -7085,7 +7137,7 @@ function MapGatewayService:FindPlan(
     diagnostic.Sea = SEA_LABELS[seaIndex]
 
     local routes = self:_GetAvailableRoutes(seaIndex, currentPosition, destination)
-    local function findBest(position, remainingHops, used)
+    local function findBest(position, remainingHops, used, visited)
         local bestCost = distance(position, destination)
         local bestPath = {}
         if remainingHops <= 0 then
@@ -7093,10 +7145,14 @@ function MapGatewayService:FindPlan(
         end
 
         for _, route in ipairs(routes) do
-            if not used[route.Name] then
+            if not used[route.Name]
+                and not repeatsGatewayArea(route.Destination, visited)
+            then
                 used[route.Name] = true
+                table.insert(visited, route.Destination)
                 local remainingCost, remainingPath =
-                    findBest(route.Destination, remainingHops - 1, used)
+                    findBest(route.Destination, remainingHops - 1, used, visited)
+                table.remove(visited)
                 used[route.Name] = nil
                 local routeCost = distance(position, route.Stand) + remainingCost
                 if routeCost < bestCost then
@@ -7118,7 +7174,14 @@ function MapGatewayService:FindPlan(
             excluded[routeName] = true
         end
     end
-    local plannedCost, plan = findBest(currentPosition, MAX_ROUTE_HOPS, excluded)
+    local visited = { currentPosition }
+    for _, position in ipairs(visitedPositions) do
+        if typeof(position) == "Vector3" then
+            table.insert(visited, position)
+        end
+    end
+    local plannedCost, plan =
+        findBest(currentPosition, MAX_ROUTE_HOPS, excluded, visited)
     diagnostic.DirectDistance = directDistance
     diagnostic.PlannedDistance = plannedCost
     diagnostic.DistanceSaved = directDistance - plannedCost
@@ -7990,6 +8053,7 @@ end
 function TeleportFeature:_RunTravel(request, character)
     local compatibility = self.Context.Compatibility
     local attemptedRoutes = {}
+    local visitedGatewayPositions = {}
     local gatewayAttempts = 0
     local gatewayFailed = false
 
@@ -8021,7 +8085,8 @@ function TeleportFeature:_RunTravel(request, character)
             request.Destination.Position,
             currentRoot.Position,
             request.Label,
-            attemptedRoutes
+            attemptedRoutes,
+            visitedGatewayPositions
         )
         if not planOk or type(resolvedPlan) ~= "table" then
             self.GatewayService:RecordTravelPhase(
@@ -8051,7 +8116,8 @@ function TeleportFeature:_RunTravel(request, character)
                     request.Destination.Position,
                     retryRoot.Position,
                     request.Label,
-                    attemptedRoutes
+                    attemptedRoutes,
+                    visitedGatewayPositions
                 )
                 if not planOk or type(resolvedPlan) ~= "table"
                     or #resolvedPlan > 0
@@ -8162,6 +8228,7 @@ function TeleportFeature:_RunTravel(request, character)
             route.Name .. " arrival confirmed; checking the next leg.",
             "info"
         )
+        table.insert(visitedGatewayPositions, route.Destination)
     end
 
     if self:_IsTravelCurrent(request, character) then
