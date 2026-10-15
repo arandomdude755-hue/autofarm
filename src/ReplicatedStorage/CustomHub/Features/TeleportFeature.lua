@@ -235,7 +235,7 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
 
     local deadline = os.clock()
         + math.max(20, math.min(MAX_TRAVEL_TIMEOUT, startDistance / 120 + 15))
-    while self.ActiveTravel == request do
+    while self:_IsTravelCurrent(request, character) do
         if not self:_IsTravelCurrent(request, character) then
             return false, "Travel was interrupted"
         end

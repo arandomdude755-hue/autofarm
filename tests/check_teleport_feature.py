@@ -129,6 +129,15 @@ require(
     and "copy the status report for movement details" in FEATURE,
     "travel must stop on character reset and surface movement stalls",
 )
+move_wait = FEATURE[
+    FEATURE.index("function TeleportFeature:_MoveAndWait("):
+    FEATURE.index("\nfunction TeleportFeature:_RunDirectTravel(")
+]
+require(
+    "while self:_IsTravelCurrent(request, character) do" in move_wait
+    and "while self.ActiveTravel == request do" not in move_wait,
+    "the shared movement waiter must keep both manual and farm travel requests alive",
+)
 require(
     "local MAX_STALL_RETRIES = 2" in FEATURE
     and "request.StallRetries = retries" in FEATURE
