@@ -743,7 +743,7 @@ local Config = {
                     Label = "World events",
                 },
                 { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Chalice / Fist status" },
-                { Kind = "statusValue", Key = "moon", Label = "Moon phase / timing" },
+                { Kind = "statusValue", Key = "moon", Label = "Moon phase" },
                 { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
                 { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
                 { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },

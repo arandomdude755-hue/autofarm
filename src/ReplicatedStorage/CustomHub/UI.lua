@@ -1659,10 +1659,12 @@ function UI:_AddControl(control)
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Transparency = 0.15,
         }, row)
+        local titleWidth = control.Key == "moon" and 0.36 or 0.45
+        local valueWidth = 1 - titleWidth
         create("TextLabel", {
             Name = "Title",
             Position = UDim2.fromOffset(layout.RowInset, 0),
-            Size = UDim2.new(0.45, -layout.RowInset, 1, 0),
+            Size = UDim2.new(titleWidth, -layout.RowInset, 1, 0),
             BackgroundTransparency = 1,
             Font = theme.Font,
             Text = control.Label,
@@ -1675,7 +1677,7 @@ function UI:_AddControl(control)
             Name = "Value",
             AnchorPoint = Vector2.new(1, 0),
             Position = UDim2.new(1, -layout.RowInset, 0, 0),
-            Size = UDim2.new(0.55, -layout.RowInset * 2, 1, 0),
+            Size = UDim2.new(valueWidth, -layout.RowInset * 2, 1, 0),
             BackgroundTransparency = 1,
             Font = theme.MonoFont,
             Text = "—",

@@ -90,6 +90,7 @@ require(
     and '"Health"' not in CONFIG
     and '"Character"' not in CONFIG
     and 'Label = "Chalice / Fist status"' in CONFIG
+    and 'Key = "moon", Label = "Moon phase"' in CONFIG
     and "function readWorldEventValues(context, statusFeature)" in FEATURE
     and 'location:GetAttribute("TimeIn")' in FEATURE
     and "workspace:GetServerTimeNow()" in FEATURE
@@ -120,12 +121,19 @@ require(
     and '"HasMirageIsland"' in FEATURE
     and 'local function readEventPresence(marker)' in FEATURE
     and 'return marker and "Spawned" or "Not spawned"' in FEATURE
+    and 'findChild(locations, "Prehistoric Island")' not in FEATURE
     and 'and readEventPresence(mirage)' in FEATURE
     and 'and readEventPresence(prehistoric)' in FEATURE
     and 'and readEventPresence(frozenDimension)' in FEATURE
     and 'readEventPresence(mirage,' not in FEATURE
     and "local storedElite = findAliveElite(replicatedStorage)" in FEATURE
     and 'return "Spawned: " .. storedElite.Name' in FEATURE
+    and FEATURE.split("local function readEliteHunterStatus", 1)[1].split(
+        "local function readEventPresence", 1
+    )[0].find("findAliveElite(replicatedStorage)")
+    < FEATURE.split("local function readEliteHunterStatus", 1)[1].split(
+        "local function readEventPresence", 1
+    )[0].find('findChild(workspace, "Enemies")')
     and '"Not spawned (template loaded: "' not in FEATURE
     and 'formatCompactDuration(untilNextCycle)' in FEATURE
     and '"; summon active"' in FEATURE
@@ -140,9 +148,13 @@ require(
     and 'return "Full Moon ends in", 5 - clockTime' in FEATURE
     and 'return "Next Full Moon in", targetClock - clockTime' in FEATURE
     and 'local function formatMoonEstimate(realSeconds)' in FEATURE
+    and 'return string.format("~%dh %02dm", hours, remainingMinutes)' in FEATURE
+    and 'return string.format("~%dd %02dh", math.floor(hours / 24), hours % 24)' in FEATURE
+    and 'return string.format("~%dm", minutes)' in FEATURE
+    and 'local displayPhase = phaseText:match("^(Phase %d+)") or phaseText' in FEATURE
+    and '" real time (estimate)"' not in FEATURE
     and '"game clock "' not in FEATURE
     and '" | no timing estimate"' not in FEATURE
-    and "real time (estimate)" in FEATURE
     and "ELITE_TARGET_NAMES" in FEATURE
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' not in FEATURE
@@ -152,7 +164,7 @@ require(
     and 'Eye" .. tostring(index)' in FEATURE
     and "Third Sea only" in FEATURE
     and 'gsub("<[^>]+>", "")' in FEATURE,
-    "Event Status distinguishes found items, reports moon phases and estimates, and labels absent events consistently",
+    "Event Status follows BNN's event sources and shows compact moon and island states",
 )
 require(
     "function StatusFeature:_ReadValues()" in FEATURE
@@ -185,6 +197,8 @@ require(
 require(
     "StatusValueEntries" in UI
     and 'control.Kind == "statusValue"' in UI
+    and 'local titleWidth = control.Key == "moon" and 0.36 or 0.45' in UI
+    and "local valueWidth = 1 - titleWidth" in UI
     and "Name = self:_ControlNodeName(control)" in UI,
     "status rows use the existing hub card style and refresh lifecycle",
 )

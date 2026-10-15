@@ -772,7 +772,7 @@ local Config = {
                     Label = "World events",
                 },
                 { Kind = "statusValue", Key = "legendaryItemTimer", Label = "Chalice / Fist status" },
-                { Kind = "statusValue", Key = "moon", Label = "Moon phase / timing" },
+                { Kind = "statusValue", Key = "moon", Label = "Moon phase" },
                 { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
                 { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
                 { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },
@@ -3650,10 +3650,12 @@ function UI:_AddControl(control)
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Transparency = 0.15,
         }, row)
+        local titleWidth = control.Key == "moon" and 0.36 or 0.45
+        local valueWidth = 1 - titleWidth
         create("TextLabel", {
             Name = "Title",
             Position = UDim2.fromOffset(layout.RowInset, 0),
-            Size = UDim2.new(0.45, -layout.RowInset, 1, 0),
+            Size = UDim2.new(titleWidth, -layout.RowInset, 1, 0),
             BackgroundTransparency = 1,
             Font = theme.Font,
             Text = control.Label,
@@ -3666,7 +3668,7 @@ function UI:_AddControl(control)
             Name = "Value",
             AnchorPoint = Vector2.new(1, 0),
             Position = UDim2.new(1, -layout.RowInset, 0, 0),
-            Size = UDim2.new(0.55, -layout.RowInset * 2, 1, 0),
+            Size = UDim2.new(valueWidth, -layout.RowInset * 2, 1, 0),
             BackgroundTransparency = 1,
             Font = theme.MonoFont,
             Text = "—",
@@ -5341,15 +5343,18 @@ end
 local function formatMoonEstimate(realSeconds)
     local seconds = math.max(0, math.floor((tonumber(realSeconds) or 0) + 0.5))
     if seconds < 60 then
-        return "<1 min real time (estimate)"
+        return "<1m"
     end
     local minutes = math.floor(seconds / 60)
     local hours = math.floor(minutes / 60)
     local remainingMinutes = minutes % 60
-    if hours > 0 then
-        return string.format("~%dh %dm real time (estimate)", hours, remainingMinutes)
+    if hours >= 24 then
+        return string.format("~%dd %02dh", math.floor(hours / 24), hours % 24)
     end
-    return string.format("~%dm real time (estimate)", minutes)
+    if hours > 0 then
+        return string.format("~%dh %02dm", hours, remainingMinutes)
+    end
+    return string.format("~%dm", minutes)
 end
 
 local function readMoonStatus(statusFeature)
@@ -5403,13 +5408,13 @@ local function readMoonStatus(statusFeature)
     end
 
     local clockTime = tonumber(readProperty(lighting, "ClockTime"))
-    local displayPhase = phaseText:gsub(" %(next night is Full Moon%)", "")
+    local displayPhase = phaseText:match("^(Phase %d+)") or phaseText
     if not clockTime then
         return displayPhase .. " · Calculating"
     end
 
     if phaseText == "Blue Moon" then
-        return "Blue Moon (active)"
+        return "Blue Moon"
     end
 
     local forecastPhase = phaseNumber
@@ -5420,7 +5425,7 @@ local function readMoonStatus(statusFeature)
     end
     local label, hoursRemaining = moonForecast(phaseText, clockTime, forecastPhase)
     if label == "Fake Moon" then
-        return "Full Moon | Fake Moon (daytime)"
+        return "Full Moon · Fake Moon"
     end
     if not label or not hoursRemaining then
         return displayPhase .. " · Calculating"
