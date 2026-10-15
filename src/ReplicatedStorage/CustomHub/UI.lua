@@ -2251,14 +2251,19 @@ function UI:_CreateControlGroup(group, layoutOrder)
             BackgroundColor3 = theme.Header,
             BackgroundTransparency = 0.42,
             BorderSizePixel = 0,
+            ZIndex = 2,
         }, group.Card)
         addCorner(group.HeaderBand, 4)
         group.Icon = create("Frame", {
             Name = "SectionIcon",
-            Position = UDim2.new(0, padding, 0.5, -9),
+            Position = UDim2.fromOffset(
+                padding,
+                math.max(0, (headerHeight - 18) / 2)
+            ),
             Size = UDim2.fromOffset(18, 18),
             BackgroundColor3 = theme.AccentSoft or theme.Selected,
             BorderSizePixel = 0,
+            ZIndex = 3,
         }, group.Card)
         addCorner(group.Icon, 5)
         group.IconStroke = create("UIStroke", {
@@ -2274,12 +2279,18 @@ function UI:_CreateControlGroup(group, layoutOrder)
             Size = UDim2.fromOffset(6, 6),
             BackgroundColor3 = theme.Accent,
             BorderSizePixel = 0,
+            ZIndex = 4,
         }, group.Icon)
         addCorner(group.IconDot, 4)
         group.Title = create("TextLabel", {
             Name = "SectionTitle",
             Position = UDim2.new(0, padding + 27, 0, 0),
-            Size = UDim2.new(1, -(padding * 2 + 27), 1, -1),
+            Size = UDim2.new(
+                1,
+                -(padding * 2 + 27),
+                0,
+                math.max(0, headerHeight - 1)
+            ),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = group.HeaderControl.Label,
@@ -2288,6 +2299,7 @@ function UI:_CreateControlGroup(group, layoutOrder)
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
             TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 3,
         }, group.Card)
         group.Rule = create("Frame", {
             Name = "SectionDivider",
@@ -2296,6 +2308,7 @@ function UI:_CreateControlGroup(group, layoutOrder)
             BackgroundColor3 = theme.Border,
             BackgroundTransparency = 0.28,
             BorderSizePixel = 0,
+            ZIndex = 3,
         }, group.Card)
         self.ControlRows[group.HeaderControl] = group.Title
         self.SectionHeaderRecords[group.HeaderControl] = {

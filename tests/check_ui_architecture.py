@@ -100,6 +100,9 @@ require(
     and 'Name = "SectionHeaderBand"' in group_builder
     and 'Name = "SectionIconDot"' in group_builder
     and 'Name = "SectionDivider"' in group_builder
+    and "math.max(0, (headerHeight - 18) / 2)" in group_builder
+    and "math.max(0, headerHeight - 1)" in group_builder
+    and "ZIndex = 3" in group_builder
     and "group.Stroke = create(\"UIStroke\"" in group_builder
     and 'Name = "ActionIndicator"' in control_builder
     and 'create("UIListLayout"' in render_tab
