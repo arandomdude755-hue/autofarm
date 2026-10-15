@@ -186,6 +186,11 @@ require(
     and "LastCommandError" in stall_diagnostic,
     "movement stalls must capture a bounded collision, obstacle, and correction snapshot without a hierarchy scan",
 )
+require(
+    "A clear ray only describes the corridor; it does not confirm the root accepted position commands."
+    in MOVEMENT,
+    "stall diagnostics must distinguish a clear obstacle ray from confirmed movement progress",
+)
 
 find_spawn = function_body(ENEMY, "function EnemyService:FindSpawn", "\nfunction EnemyService:IsSpawnAvailable")
 refresh_hidden_spawns = function_body(

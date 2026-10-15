@@ -7,3 +7,4 @@
 - [Travel tab boundaries](travel-tab-boundaries.md) — island/NPC travel toggles turn off on arrival, stay current-sea-only, and cannot overlap Auto Farm.
 - [Player-facing errors](player-facing-errors.md) — block conflicting actions with clear, non-technical bottom-right notifications that say what to turn off.
 - [Status tab data](status-tab-data.md) — reuse validated quest state, prefer local event signals, and label uncertain timer calculations as estimates.
+- [Movement stall evidence](movement-stall-evidence.md) — a clear ray rules out nearby geometry only; compare commanded-position error before concluding why movement stopped.

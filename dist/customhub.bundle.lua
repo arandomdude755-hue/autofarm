@@ -8004,15 +8004,18 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
     local lastStallAt = self.MovementService.LastStallAt
     local routeRequestsBefore = table.clone(self.MovementService.LastRouteRequest or {})
     local startDistance = (destination.Position - startRoot.Position).Magnitude
-    local moveCallOk, moved, moveResult = pcall(function()
-        return self.MovementService:MoveTo(destination, {
-            Speed = 190,
-            Threshold = 8,
-            IsCurrent = function()
-                return self:_IsTravelCurrent(request, character)
-            end,
-        })
-    end)
+    local function startMovement()
+        return pcall(function()
+            return self.MovementService:MoveTo(destination, {
+                Speed = 190,
+                Threshold = 8,
+                IsCurrent = function()
+                    return self:_IsTravelCurrent(request, character)
+                end,
+            })
+        end)
+    end
+    local moveCallOk, moved, moveResult = startMovement()
     if not moveCallOk then
         self:_StopMovementSession()
         return false, tostring(moved)
@@ -8026,6 +8029,7 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
 
     local deadline = os.clock()
         + math.max(20, math.min(MAX_TRAVEL_TIMEOUT, startDistance / 120 + 15))
+    local stallRetries = 0
     while self:_IsTravelCurrent(request, character) do
         if not self:_IsTravelCurrent(request, character) then
             return false, "Travel was interrupted"
@@ -8039,6 +8043,43 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
             if remaining <= 14 then
                 return true
             end
+            if self.MovementService.LastStallAt ~= lastStallAt then
+                stallRetries += 1
+                if stallRetries > MAX_STALL_RETRIES then
+                    return false,
+                        "Movement stalled after "
+                            .. tostring(MAX_STALL_RETRIES)
+                            .. " waypoint recovery attempts"
+                end
+
+                lastStallAt = self.MovementService.LastStallAt
+                self:_SetStatus(
+                    "Movement stalled; retrying the same waypoint ("
+                        .. tostring(stallRetries)
+                        .. "/"
+                        .. tostring(MAX_STALL_RETRIES)
+                        .. ").",
+                    "warning"
+                )
+                task.wait(STALL_RETRY_DELAY)
+                if not self:_IsTravelCurrent(request, character) then
+                    return false, "Travel was interrupted"
+                end
+
+                local retryCallOk, retryMoved, retryResult = startMovement()
+                if not retryCallOk then
+                    self:_StopMovementSession()
+                    return false, tostring(retryMoved)
+                end
+                if not retryMoved then
+                    return false, tostring(retryResult)
+                end
+                if retryResult == "arrived" then
+                    return true
+                end
+                continue
+            end
+
             local routeTransitionStarted = false
             for routeName, requestedAt in pairs(self.MovementService.LastRouteRequest or {}) do
                 if requestedAt > (routeRequestsBefore[routeName] or 0) then
@@ -8068,10 +8109,6 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
                     return false, "Travel was interrupted"
                 end
                 return false, "Map transition did not reach the destination"
-            end
-            if self.MovementService.LastStallAt ~= lastStallAt then
-                self:_StopMovementSession()
-                return false, "Movement stalled before reaching the waypoint"
             end
             self:_StopMovementSession()
             return false, "Movement stopped before reaching the waypoint"
@@ -11109,6 +11146,7 @@ function MovementService:_CaptureStallDiagnostic(active, root, goal, distance)
             .. collidableSummary,
         "Distance from last commanded position: " .. correctionDistance,
         "Forward obstacle check: " .. obstacle,
+        "A clear ray only describes the corridor; it does not confirm the root accepted position commands.",
         "===== [MovementStallDiagnostic] REPORT END =====",
     }
     local text = table.concat(lines, "\n")

@@ -195,6 +195,7 @@ function MovementService:_CaptureStallDiagnostic(active, root, goal, distance)
             .. collidableSummary,
         "Distance from last commanded position: " .. correctionDistance,
         "Forward obstacle check: " .. obstacle,
+        "A clear ray only describes the corridor; it does not confirm the root accepted position commands.",
         "===== [MovementStallDiagnostic] REPORT END =====",
     }
     local text = table.concat(lines, "\n")

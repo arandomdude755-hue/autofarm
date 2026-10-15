@@ -319,6 +319,20 @@ require(
     and "DistanceBeforeAlignment" in GATEWAYS,
     "gateway coordination must stabilize at the pad and stop movement without cancelling farm travel",
 )
+move_and_wait = FEATURE[
+    FEATURE.index("function TeleportFeature:_MoveAndWait("):
+    FEATURE.index("\nfunction TeleportFeature:_RunDirectTravel(")
+]
+require(
+    "local MAX_STALL_RETRIES = 2" in FEATURE
+    and "stallRetries += 1" in move_and_wait
+    and "task.wait(STALL_RETRY_DELAY)" in move_and_wait
+    and "local retryCallOk, retryMoved, retryResult = startMovement()" in move_and_wait
+    and "if not self:_IsTravelCurrent(request, character) then" in move_and_wait
+    and "self:CancelFarmTravel" not in move_and_wait
+    and "self.MovementService:Cancel()" not in move_and_wait,
+    "a stalled waypoint must retry under the same current travel request without cancelling farm travel",
+)
 require(
     "local MAX_GATEWAY_ATTEMPTS = 4" in FEATURE
     and "local attemptedRoutes = {}" in FEATURE
