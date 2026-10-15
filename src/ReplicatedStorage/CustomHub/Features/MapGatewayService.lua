@@ -201,37 +201,63 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
     end
 
     local function estimateTitleRouteCost(source)
-        if typeof(source.Stand) ~= "Vector3"
-            or typeof(source.Destination) ~= "Vector3"
-        then
-            return math.huge
-        end
-        local bestApproach = distance(currentPosition, source.Stand)
-        for _, feeder in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
-            if feeder.Name ~= source.Name
-                and not feeder.RequiresTitle
-                and typeof(feeder.Stand) == "Vector3"
-                and typeof(feeder.Destination) == "Vector3"
-            then
-                local feederAvailable = true
-                if feeder.Requires then
+        local estimateRoutes = {}
+        for _, route in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
+            local includeRoute = route.Name == source.Name
+            if not includeRoute and not route.RequiresTitle then
+                includeRoute = true
+                if route.Requires then
                     local checkOk, owned = pcall(
                         compatibility.HasOwnedInventoryItem,
                         compatibility,
-                        feeder.Requires
+                        route.Requires
                     )
-                    feederAvailable = checkOk and owned == true
+                    includeRoute = checkOk and owned == true
                 end
-                if feederAvailable then
-                    bestApproach = math.min(
-                        bestApproach,
-                        distance(currentPosition, feeder.Stand)
-                            + distance(feeder.Destination, source.Stand)
-                    )
+            end
+
+            if includeRoute and typeof(route.Destination) == "Vector3" then
+                local stand = route.Name == source.Name
+                        and source.Stand
+                    or self:_ResolveStand(route)
+                if typeof(stand) == "Vector3" then
+                    table.insert(estimateRoutes, {
+                        Name = route.Name,
+                        Stand = stand,
+                        Destination = route.Destination,
+                    })
                 end
             end
         end
-        return bestApproach + distance(source.Destination, destination)
+
+        local function findBestTitlePath(position, remainingHops, used, titleRouteUsed)
+            local bestCost = titleRouteUsed and distance(position, destination) or math.huge
+            if remainingHops <= 0 then
+                return bestCost
+            end
+
+            for _, route in ipairs(estimateRoutes) do
+                if not used[route.Name] then
+                    used[route.Name] = true
+                    local includesTitleRoute =
+                        titleRouteUsed or route.Name == source.Name
+                    local remainingCost = findBestTitlePath(
+                        route.Destination,
+                        remainingHops - 1,
+                        used,
+                        includesTitleRoute
+                    )
+                    used[route.Name] = nil
+                    local routeCost = distance(position, route.Stand) + remainingCost
+                    if routeCost < bestCost then
+                        bestCost = routeCost
+                    end
+                end
+            end
+            return bestCost
+        end
+
+        return findBestTitlePath(currentPosition, MAX_ROUTE_HOPS, {}, false)
     end
 
     for _, source in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
@@ -261,7 +287,10 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                 elseif source.RequiresTitle then
                     local titleRouteCost = estimateTitleRouteCost(source)
                     local directCost = distance(currentPosition, destination)
-                    if directCost - titleRouteCost >= MINIMUM_DISTANCE_SAVED then
+                    local titleRouteSavings = directCost - titleRouteCost
+                    candidate.TitleRouteCost = titleRouteCost
+                    candidate.TitleRouteSavings = titleRouteSavings
+                    if titleRouteSavings >= MINIMUM_DISTANCE_SAVED then
                         local titleCheckOk, titleOwned, titleError = pcall(
                             compatibility.HasUnlockedTitle,
                             compatibility,
@@ -739,6 +768,10 @@ function MapGatewayService:BuildDiagnosticReport()
                 .. formatScalar(candidate.Reason or "available")
                 .. (type(candidate.StandDistance) == "number"
                     and ("; start_to_pad=" .. string.format("%.1f", candidate.StandDistance))
+                    or "")
+                .. (type(candidate.TitleRouteSavings) == "number"
+                    and ("; title_route_saved="
+                        .. string.format("%.1f", candidate.TitleRouteSavings))
                     or "")
                 .. (type(candidate.CooldownRemaining) == "number"
                     and ("; cooldown=" .. string.format("%.1f", candidate.CooldownRemaining))

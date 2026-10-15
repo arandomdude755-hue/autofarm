@@ -166,10 +166,15 @@ require(
     and "source.RequiresTitle" in route_access
     and "candidate.TitleRequirementOwned" in route_access
     and "candidate.AccessBy" in route_access
-    and "directCost - titleRouteCost >= MINIMUM_DISTANCE_SAVED" in route_access
+    and "titleRouteSavings >= MINIMUM_DISTANCE_SAVED" in route_access
     and "candidate.TitleCheckPending" in route_access
     and "local function estimateTitleRouteCost(source)" in route_access
-    and "feeder.Name ~= source.Name" in route_access
+    and "local function findBestTitlePath" in route_access
+    and "titleRouteUsed or route.Name == source.Name" in route_access
+    and "local remainingCost = findBestTitlePath(" in route_access
+    and "route.Destination," in route_access
+    and "candidate.TitleRouteSavings" in route_access
+    and "; title_route_saved=" in GATEWAYS
     and "function MapGatewayService:HasPendingTitleChecks()" in GATEWAYS
     and "TITLE_ACCESS_RECHECK_WINDOW = 1" in FEATURE
     and "self.GatewayService:HasPendingTitleChecks()" in FEATURE
