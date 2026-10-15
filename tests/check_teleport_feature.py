@@ -85,7 +85,7 @@ require(
     and 'Label = "Copy NPC availability report"' in CONFIG
     and all(name in FEATURE for name in (
         "Titles Specialist",
-        "Awakening Expert",
+        "Awakenings Expert",
         "Blox Fruits Gacha",
     ))
     and 'FindFirstChild("NPCs")' in npc_report

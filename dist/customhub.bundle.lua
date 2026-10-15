@@ -7460,7 +7460,7 @@ local MAX_TRAVEL_TIMEOUT = 150
 local TITLE_ACCESS_RECHECK_WINDOW = 1
 local NPC_DIAGNOSTIC_TARGETS = {
     { Label = "Titles Specialist", Names = { "Titles Specialist" } },
-    { Label = "Awakening Expert", Names = { "Awakening Expert" } },
+    { Label = "Awakenings Expert", Names = { "Awakenings Expert", "Awakening Expert" } },
     { Label = "Blox Fruits Gacha", Names = { "Blox Fruit Gacha", "Blox Fruits Gacha" } },
 }
 
