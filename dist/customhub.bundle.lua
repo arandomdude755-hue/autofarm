@@ -6784,6 +6784,8 @@ local GATEWAY_STAND_ACCEPTANCE = 25
 local GATEWAY_STAND_ALIGNMENT = 3
 local GATEWAY_ARRIVAL_RADIUS = 500
 local REMOTE_RETRY_INTERVAL = 0.3
+-- Recheck periodically in case the player earns the title during this session.
+local CONFIRMED_NO_TIKI_ACCESS_CACHE_TTL = 600
 
 local SEA_LABELS = {
     [1] = "First Sea",
@@ -6903,11 +6905,27 @@ local function formatScalar(value, limit)
     return text
 end
 
+local function getNoAccessCacheKey(compatibility, source)
+    local playerId = compatibility
+            and compatibility.Player
+            and compatibility.Player.UserId
+        or nil
+    if playerId == nil or not source.Requires or not source.RequiresTitle then
+        return nil
+    end
+    return table.concat({
+        tostring(playerId),
+        source.Requires,
+        source.RequiresTitle,
+    }, "|")
+end
+
 function MapGatewayService.new(compatibility)
     return setmetatable({
         Compatibility = compatibility,
         FailedUntil = {},
         LastFailures = {},
+        TikiNoAccessCache = {},
         LastDiagnostic = nil,
     }, MapGatewayService)
 end
@@ -6984,6 +7002,7 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
     local now = os.clock()
     local routes = {}
     local candidates = {}
+    self.TikiNoAccessCache = self.TikiNoAccessCache or {}
     local diagnostic = self.LastDiagnostic
     if diagnostic then
         diagnostic.Candidates = candidates
@@ -7095,8 +7114,12 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                 )
                 available = checkOk and owned == true
                 candidate.ItemRequirementOwned = available
+                local accessCacheKey = getNoAccessCacheKey(compatibility, source)
                 if available then
                     candidate.AccessBy = source.Requires
+                    if accessCacheKey then
+                        self.TikiNoAccessCache[accessCacheKey] = nil
+                    end
                 elseif source.RequiresTitle then
                     local titleRouteCost = estimateTitleRouteCost(source)
                     local directCost = distance(currentPosition, destination)
@@ -7104,55 +7127,93 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                     candidate.TitleRouteCost = titleRouteCost
                     candidate.TitleRouteSavings = titleRouteSavings
                     if titleRouteSavings >= MINIMUM_DISTANCE_SAVED then
-                        local titleCheckOk
-                        local titleOwned
-                        local titleError
-                        local titlePending = false
-                        local titleCheckIsAsync = false
-                        if type(compatibility.BeginUnlockedTitleCheck) == "function" then
-                            titleCheckIsAsync = true
-                            local beginOk
-                            beginOk, titleOwned, titleError, titlePending = pcall(
-                                compatibility.BeginUnlockedTitleCheck,
-                                compatibility,
-                                source.RequiresTitle
-                            )
-                            titleCheckOk = beginOk
-                        else
-                            titleCheckOk, titleOwned, titleError = pcall(
-                                compatibility.HasUnlockedTitle,
-                                compatibility,
-                                source.RequiresTitle
-                            )
+                        local cachedNoAccess = accessCacheKey
+                                and self.TikiNoAccessCache[accessCacheKey]
+                            or nil
+                        if cachedNoAccess and now >= cachedNoAccess.ExpiresAt then
+                            self.TikiNoAccessCache[accessCacheKey] = nil
+                            cachedNoAccess = nil
                         end
-                        if titleCheckOk and type(titleOwned) == "boolean" then
-                            candidate.TitleRequirementOwned = titleOwned
-                        end
-                        candidate.TitleCheckPending = titleCheckOk
-                            and (
-                                titleCheckIsAsync
-                                    and titlePending == true
-                                or not titleCheckIsAsync
-                                    and titleOwned == nil
-                            )
-                        if titleCheckOk and titleOwned == true then
-                            available = true
-                            candidate.AccessBy = source.RequiresTitle
-                        elseif candidate.TitleCheckPending then
-                            available = true
-                            candidate.ProvisionalTitleAccess = true
-                            candidate.Reason = "title access is being checked"
+                        if cachedNoAccess and checkOk and owned == false
+                            and inventoryError == nil
+                        then
+                            candidate.TitleRequirementOwned = false
+                            candidate.ConfirmedNoAccessCached = true
+                            candidate.NoAccessCacheRemaining =
+                                math.max(0, cachedNoAccess.ExpiresAt - now)
+                            candidate.Reason =
+                                "no Feathered Visage or title access confirmed recently"
                         else
-                            local itemReason = checkOk
-                                    and (inventoryError or "required item not found in inventory")
-                                or ("inventory check failed: " .. formatScalar(owned))
-                            local titleReason = titleCheckOk
-                                    and (titleError
-                                        or (titleOwned == false
-                                            and "title is locked"
-                                            or "title state is unknown"))
-                                or ("title check failed: " .. formatScalar(titleOwned))
-                            candidate.Reason = itemReason .. "; " .. titleReason
+                            local titleCheckOk
+                            local titleOwned
+                            local titleError
+                            local titlePending = false
+                            local titleCheckIsAsync = false
+                            if type(compatibility.BeginUnlockedTitleCheck) == "function" then
+                                titleCheckIsAsync = true
+                                local beginOk
+                                beginOk, titleOwned, titleError, titlePending = pcall(
+                                    compatibility.BeginUnlockedTitleCheck,
+                                    compatibility,
+                                    source.RequiresTitle
+                                )
+                                titleCheckOk = beginOk
+                            else
+                                titleCheckOk, titleOwned, titleError = pcall(
+                                    compatibility.HasUnlockedTitle,
+                                    compatibility,
+                                    source.RequiresTitle
+                                )
+                            end
+                            if titleCheckOk and type(titleOwned) == "boolean" then
+                                candidate.TitleRequirementOwned = titleOwned
+                            end
+                            candidate.TitleCheckPending = titleCheckOk
+                                and (
+                                    titleCheckIsAsync
+                                        and titlePending == true
+                                    or not titleCheckIsAsync
+                                        and titleOwned == nil
+                                )
+                            if titleCheckOk and titleOwned == true then
+                                available = true
+                                candidate.AccessBy = source.RequiresTitle
+                                if accessCacheKey then
+                                    self.TikiNoAccessCache[accessCacheKey] = nil
+                                end
+                            elseif candidate.TitleCheckPending then
+                                available = true
+                                candidate.ProvisionalTitleAccess = true
+                                candidate.Reason = "title access is being checked"
+                            else
+                                if checkOk and owned == false and inventoryError == nil
+                                    and titleCheckOk and titleOwned == false
+                                    and accessCacheKey
+                                then
+                                    local expiresAt =
+                                        os.clock() + CONFIRMED_NO_TIKI_ACCESS_CACHE_TTL
+                                    self.TikiNoAccessCache[accessCacheKey] = {
+                                        ExpiresAt = expiresAt,
+                                    }
+                                    candidate.ConfirmedNoAccessCached = true
+                                    candidate.NoAccessCacheRemaining =
+                                        CONFIRMED_NO_TIKI_ACCESS_CACHE_TTL
+                                    candidate.Reason =
+                                        "no Feathered Visage or title access confirmed recently"
+                                else
+                                    local itemReason = checkOk
+                                            and (inventoryError
+                                                or "required item not found in inventory")
+                                        or ("inventory check failed: " .. formatScalar(owned))
+                                    local titleReason = titleCheckOk
+                                            and (titleError
+                                                or (titleOwned == false
+                                                    and "title is locked"
+                                                    or "title state is unknown"))
+                                        or ("title check failed: " .. formatScalar(titleOwned))
+                                    candidate.Reason = itemReason .. "; " .. titleReason
+                                end
+                            end
                         end
                     else
                         candidate.Reason =
@@ -7216,6 +7277,30 @@ function MapGatewayService:HasPendingTitleChecks()
     return false
 end
 
+function MapGatewayService:_RememberConfirmedNoAccess(route)
+    if not route or not route.Requires or not route.RequiresTitle then
+        return false
+    end
+    local compatibility = self.Compatibility
+    local key = getNoAccessCacheKey(compatibility, route)
+    if not key then
+        return false
+    end
+    local checkOk, owned, inventoryError = pcall(
+        compatibility.HasOwnedInventoryItem,
+        compatibility,
+        route.Requires
+    )
+    if not checkOk or owned ~= false or inventoryError ~= nil then
+        return false
+    end
+    self.TikiNoAccessCache = self.TikiNoAccessCache or {}
+    self.TikiNoAccessCache[key] = {
+        ExpiresAt = os.clock() + CONFIRMED_NO_TIKI_ACCESS_CACHE_TTL,
+    }
+    return true
+end
+
 function MapGatewayService:GetTitleAccessState(route)
     local titleRoute = route and (
         route.ProvisionalTitleAccess == true and route
@@ -7249,6 +7334,12 @@ function MapGatewayService:ShouldAbortForUnconfirmedTitle(route)
     if state == true or pending then
         return false
     end
+    if state == false then
+        self:_RememberConfirmedNoAccess(
+            route.ProvisionalTitleAccess == true and route
+                or route.PlanTitleAccessRoute
+        )
+    end
     return true, reason or "title access could not be confirmed"
 end
 
@@ -7267,7 +7358,14 @@ function MapGatewayService:WaitForTitleAccess(route, timeout, isCurrent)
         if state == true then
             return true
         end
-        if state == false or not pending then
+        if state == false then
+            self:_RememberConfirmedNoAccess(
+                route.ProvisionalTitleAccess == true and route
+                    or route.PlanTitleAccessRoute
+            )
+            return false, reason or "title access could not be confirmed"
+        end
+        if not pending then
             return false, reason or "title access could not be confirmed"
         end
         if os.clock() >= deadline then
@@ -7767,6 +7865,13 @@ function MapGatewayService:BuildDiagnosticReport()
                                 and "unknown"
                                 or tostring(candidate.TitleRequirementOwned))
                     )
+                    or "")
+                .. (candidate.ConfirmedNoAccessCached
+                    and "; no_access_cached=true"
+                    or "")
+                .. (type(candidate.NoAccessCacheRemaining) == "number"
+                    and ("; no_access_cache_remaining="
+                        .. string.format("%.1f", candidate.NoAccessCacheRemaining))
                     or "")
                 .. (candidate.AccessBy and ("; access_by=" .. tostring(candidate.AccessBy)) or "")
                 .. (candidate.TouchTriggerLoaded ~= nil

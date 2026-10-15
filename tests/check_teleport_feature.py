@@ -235,6 +235,17 @@ require(
     and "local remainingCost = findBestTitlePath(" in route_access
     and "route.Destination," in route_access
     and "candidate.TitleRouteSavings" in route_access
+    and "CONFIRMED_NO_TIKI_ACCESS_CACHE_TTL = 600" in GATEWAYS
+    and "TikiNoAccessCache = {}" in GATEWAYS
+    and "getNoAccessCacheKey(compatibility, source)" in route_access
+    and "cachedNoAccess and checkOk and owned == false" in route_access
+    and "inventoryError == nil" in route_access
+    and "candidate.ConfirmedNoAccessCached = true" in route_access
+    and "candidate.NoAccessCacheRemaining" in route_access
+    and "function MapGatewayService:_RememberConfirmedNoAccess(route)" in GATEWAYS
+    and "self:_RememberConfirmedNoAccess(" in GATEWAYS
+    and "self.TikiNoAccessCache[accessCacheKey] = nil" in route_access
+    and "no_access_cached=true" in GATEWAYS
     and "; title_route_saved=" in GATEWAYS
     and "function MapGatewayService:HasPendingTitleChecks()" in GATEWAYS
     and "TITLE_ACCESS_RECHECK_WINDOW = 6" in FEATURE
