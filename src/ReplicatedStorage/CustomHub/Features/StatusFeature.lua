@@ -423,16 +423,27 @@ local function readTikiEyes(map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        -- BNN keeps this status at zero when the island model is unloaded.
-        return "0 / 4 cleared"
+        return "Eye progress unavailable (island not loaded)"
     end
     local cleared = 0
+    local found = 0
     for index = 1, 4 do
         local eye = findChild(islandModel, "Eye" .. tostring(index), true)
-        local transparency = tonumber(readProperty(eye, "Transparency"))
-        if transparency == 1 then
-            cleared += 1
+        if eye then
+            found += 1
+            local transparency = tonumber(readProperty(eye, "Transparency"))
+            if transparency == 1 then
+                cleared += 1
+            end
         end
+    end
+    if found == 0 then
+        return "Eye progress unavailable (eyes not visible)"
+    elseif found < 4 then
+        return tostring(cleared)
+            .. " cleared; "
+            .. tostring(4 - found)
+            .. " not visible"
     end
     return tostring(cleared) .. " / 4 cleared"
 end
@@ -495,7 +506,29 @@ local function readEliteHunterStatus(workspace, replicatedStorage, compatibility
     return "Not spawned"
 end
 
-local function readWorldEventValues(context, statusFeature)
+local function readEventPresence(localModel, worldMarker, realmFlag)
+    if localModel then
+        return "Detected"
+    elseif worldMarker then
+        return "Detected"
+    elseif realmFlag == true then
+        return "Detected"
+    elseif realmFlag == false then
+        return "Not detected"
+    end
+    return "Unknown (no reliable signal)"
+end
+
+local function readSeaEventRealmSignal(realmFlag)
+    if realmFlag == true then
+        return "Active sea event; type unknown"
+    elseif realmFlag == false then
+        return "No active sea event reported"
+    end
+    return "Unknown"
+end
+
+local function readWorldEventValues(context, statusFeature, remoteEvents)
     local compatibility = context and context.Compatibility
     local workspace = compatibility and compatibility.Workspace
     local replicatedStorage = compatibility and compatibility.ReplicatedStorage
@@ -506,20 +539,27 @@ local function readWorldEventValues(context, statusFeature)
     local serverElapsed = readServerElapsed(workspace)
     local mirage = findChild(map, "MysticIsland")
     local prehistoric = findChild(map, "PrehistoricIsland")
+    local mirageLocation = findChild(locations, "Mystic Island")
+        or findChild(locations, "Mirage Island")
+    local prehistoricLocation = findChild(locations, "Prehistoric Island")
     local frozenDimension = findChild(locations, "Frozen Dimension")
-
-    local function presence(value)
-        return value and "Spawned" or "Not spawned"
-    end
+    remoteEvents = remoteEvents or {}
 
     return {
         serverAge = serverElapsed and formatServerAge(serverElapsed) or "Unavailable",
         legendaryItemTimer = readLegendaryItemStatus(context, workspace, serverElapsed),
         moon = readMoonStatus(statusFeature),
         eliteHunter = readEliteHunterStatus(workspace, replicatedStorage, compatibility),
-        mirageIsland = thirdSea and presence(mirage) or "Third Sea only",
-        prehistoricIsland = thirdSea and presence(prehistoric) or "Third Sea only",
-        frozenDimension = thirdSea and presence(frozenDimension) or "Third Sea only",
+        seaEventSignal = readSeaEventRealmSignal(remoteEvents and remoteEvents.seaEventsRealmTag),
+        mirageIsland = thirdSea
+                and readEventPresence(mirage, mirageLocation, remoteEvents.mirageRealmTag)
+            or "Third Sea only",
+        prehistoricIsland = thirdSea
+                and readEventPresence(prehistoric, prehistoricLocation)
+            or "Third Sea only",
+        frozenDimension = thirdSea
+                and readEventPresence(findChild(map, "Frozen Dimension"), frozenDimension)
+            or "Third Sea only",
         tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
     }
 end
@@ -777,7 +817,7 @@ local function appendNamedDescendantMatches(lines, root, label)
     )
 end
 
-local function appendIslandDiagnostics(lines, context)
+local function appendIslandDiagnostics(lines, context, remoteEvents)
     local compatibility = context and context.Compatibility
     local workspace = compatibility and compatibility.Workspace
     local map = findChild(workspace, "Map")
@@ -860,6 +900,25 @@ local function appendIslandDiagnostics(lines, context)
             end
         end
     end
+    remoteEvents = remoteEvents or {}
+    table.insert(
+        lines,
+        "Realm tag HasMirageIsland: "
+            .. (type(remoteEvents.mirageRealmTag) == "boolean"
+                and tostring(remoteEvents.mirageRealmTag)
+                or "unknown (" .. tostring(remoteEvents.mirageRealmTagReason or "not checked") .. ")")
+    )
+    table.insert(
+        lines,
+        "Realm tag HasSeaEvents: "
+            .. (type(remoteEvents.seaEventsRealmTag) == "boolean"
+                and tostring(remoteEvents.seaEventsRealmTag)
+                or "unknown (" .. tostring(remoteEvents.seaEventsRealmTagReason or "not checked") .. ")")
+    )
+    table.insert(
+        lines,
+        "Tiki Outpost location entry is a travel-location marker; it does not prove eye-event state."
+    )
 
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
@@ -1083,11 +1142,61 @@ local function readCakePrinceMobs(context, remote)
     return "Unknown"
 end
 
+local function readRealmEventTags(context)
+    local compatibility = context and context.Compatibility
+    local replicatedStorage = compatibility and compatibility.ReplicatedStorage
+    local util = findChild(replicatedStorage, "Util")
+    local realmScript = findChild(util, "Realm")
+    if not realmScript then
+        return {
+            mirageRealmTagReason = "ReplicatedStorage.Util.Realm is not loaded",
+            seaEventsRealmTagReason = "ReplicatedStorage.Util.Realm is not loaded",
+        }
+    end
+
+    local requireOk, realm = pcall(require, realmScript)
+    if not requireOk or type(realm) ~= "table" then
+        return {
+            mirageRealmTagReason = "Realm module could not be read",
+            seaEventsRealmTagReason = "Realm module could not be read",
+        }
+    end
+    local readTag = realm.getIfCurrentRealmHasTagAsync
+    if type(readTag) ~= "function" then
+        return {
+            mirageRealmTagReason = "Realm tag check is unavailable",
+            seaEventsRealmTagReason = "Realm tag check is unavailable",
+        }
+    end
+
+    local tags = {}
+    local definitions = {
+        { Key = "mirageRealmTag", ReasonKey = "mirageRealmTagReason", Tag = "HasMirageIsland" },
+        { Key = "seaEventsRealmTag", ReasonKey = "seaEventsRealmTagReason", Tag = "HasSeaEvents" },
+    }
+    for _, definition in ipairs(definitions) do
+        local callOk, value = pcall(readTag, definition.Tag)
+        if callOk and type(value) == "boolean" then
+            tags[definition.Key] = value
+        else
+            tags[definition.ReasonKey] = callOk
+                    and "Realm returned a non-boolean result"
+                or "Realm tag check failed"
+        end
+    end
+    return tags
+end
+
 local function readRemoteEventValues(context)
     local remote = readRemoteFunction(context)
+    local realmTags = readRealmEventTags(context)
     return {
         leviathanSpy = readLeviathanSpyStatus(context, remote),
         cakePrinceMobs = readCakePrinceMobs(context, remote),
+        mirageRealmTag = realmTags.mirageRealmTag,
+        mirageRealmTagReason = realmTags.mirageRealmTagReason,
+        seaEventsRealmTag = realmTags.seaEventsRealmTag,
+        seaEventsRealmTagReason = realmTags.seaEventsRealmTagReason,
     }
 end
 
@@ -1188,8 +1297,8 @@ function StatusFeature:_ReadValues()
         unknown = "Unknown",
         ["active-unknown"] = "Active (details unavailable)",
     }
-    local worldEvents = readWorldEventValues(context, self)
     local remoteEvents = self.RemoteEventStatus or {}
+    local worldEvents = readWorldEventValues(context, self, remoteEvents)
 
     return {
         sea = getSea(compatibility),
@@ -1213,10 +1322,13 @@ function StatusFeature:_ReadValues()
         leviathanSpy = remoteEvents.leviathanSpy or "Waiting for status check",
         cakePrinceMobs = remoteEvents.cakePrinceMobs or "Waiting for status check",
         eliteHunter = worldEvents.eliteHunter,
+        seaEventSignal = worldEvents.seaEventSignal,
         mirageIsland = worldEvents.mirageIsland,
         prehistoricIsland = worldEvents.prehistoricIsland,
         frozenDimension = worldEvents.frozenDimension,
         tikiEyes = worldEvents.tikiEyes,
+        mirageRealmTag = remoteEvents.mirageRealmTag,
+        seaEventsRealmTag = remoteEvents.seaEventsRealmTag,
         players = playerCount .. " / " .. maxPlayers,
         placeId = placeId,
         jobId = shortJobId,
@@ -1251,6 +1363,14 @@ function StatusFeature:_BuildReport(values)
         "Prehistoric Island: " .. values.prehistoricIsland,
         "Frozen Dimension: " .. values.frozenDimension,
         "Tiki eyes: " .. values.tikiEyes,
+        "Mirage Realm tag: "
+            .. (type(values.mirageRealmTag) == "boolean"
+                and tostring(values.mirageRealmTag)
+                or "Unknown"),
+        "Sea Events Realm tag: "
+            .. (type(values.seaEventsRealmTag) == "boolean"
+                and tostring(values.seaEventsRealmTag)
+                or "Unknown"),
         "Players: " .. values.players,
         "Place ID: " .. values.placeId,
         "Server Job ID: " .. values.fullJobId,
@@ -1259,7 +1379,7 @@ function StatusFeature:_BuildReport(values)
     local workspace = compatibility and compatibility.Workspace
     appendClockDiagnostics(lines, workspace)
     appendLegendaryItemDiagnostics(lines, self.Context, workspace)
-    appendIslandDiagnostics(lines, self.Context)
+    appendIslandDiagnostics(lines, self.Context, self.RemoteEventStatus)
     appendUnparentedIslandDiagnostics(lines, compatibility)
     table.insert(lines, "===== [StatusReport] REPORT END =====")
     return table.concat(lines, "\n")
@@ -1303,6 +1423,8 @@ function StatusFeature:Initialize(context)
     self.RemoteEventStatus = {
         leviathanSpy = "Waiting for status check",
         cakePrinceMobs = "Waiting for status check",
+        mirageRealmTagReason = "not checked",
+        seaEventsRealmTagReason = "not checked",
     }
     context.State:SetStatusValues(self:_ReadValues())
     task.spawn(function()

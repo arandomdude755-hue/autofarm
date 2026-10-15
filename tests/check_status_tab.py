@@ -78,6 +78,7 @@ require(
             "leviathanSpy",
             "cakePrinceMobs",
             "eliteHunter",
+            "seaEventSignal",
             "mirageIsland",
             "prehistoricIsland",
             "frozenDimension",
@@ -89,7 +90,7 @@ require(
     and '"Health"' not in CONFIG
     and '"Character"' not in CONFIG
     and 'Label = "Chalice / Fist status"' in CONFIG
-    and "function readWorldEventValues(context, statusFeature)" in FEATURE
+    and "function readWorldEventValues(context, statusFeature, remoteEvents)" in FEATURE
     and 'location:GetAttribute("TimeIn")' in FEATURE
     and "workspace:GetServerTimeNow()" in FEATURE
     and "tick() - 25200" in FEATURE
@@ -102,7 +103,7 @@ require(
     and "Server-clock next 4-hour boundary" in FEATURE
     and "BNN-clock next 4-hour boundary" in FEATURE
     and "appendLegendaryItemDiagnostics(lines, context, workspace)" in FEATURE
-    and "appendIslandDiagnostics(lines, context)" in FEATURE
+    and "appendIslandDiagnostics(lines, context, remoteEvents)" in FEATURE
     and "appendUnparentedIslandDiagnostics(lines, compatibility)" in FEATURE
     and "appendNamedDescendantMatches(lines, map, \"Workspace.Map\")" in FEATURE
     and "World-origin location names (up to " in FEATURE
@@ -112,6 +113,15 @@ require(
     and '"Frozen Dimension", MapName = "Frozen Dimension"' in FEATURE
     and '"Tiki Outpost", MapName = "TikiOutpost"' in FEATURE
     and "local scanLimit = math.min(#instances, 5000)" in FEATURE
+    and 'findChild(locations, "Prehistoric Island")' in FEATURE
+    and 'findChild(locations, "Frozen Dimension")' in FEATURE
+    and 'getIfCurrentRealmHasTagAsync' in FEATURE
+    and '"HasMirageIsland"' in FEATURE
+    and '"HasSeaEvents"' in FEATURE
+    and 'local function readEventPresence(localModel, worldMarker, realmFlag)' in FEATURE
+    and 'local function readSeaEventRealmSignal(realmFlag)' in FEATURE
+    and '"Unknown (no reliable signal)"' in FEATURE
+    and 'Tiki Outpost location entry is a travel-location marker; it does not prove eye-event state.' in FEATURE
     and "function updateMoonClockRate(statusFeature, clockTime)" in FEATURE
     and "elapsed >= 8" in FEATURE
     and "local function moonForecast(phaseText, clockTime, phaseNumber)" in FEATURE
@@ -126,9 +136,9 @@ require(
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' in FEATURE
     and "function readTikiEyes(map)" in FEATURE
-    and 'return "0 / 4 cleared"' in FEATURE
+    and 'return "Eye progress unavailable (island not loaded)"' in FEATURE
+    and '" not visible"' in FEATURE
     and 'Eye" .. tostring(index)' in FEATURE
-    and "return value and \"Spawned\" or \"Not spawned\"" in FEATURE
     and "Third Sea only" in FEATURE
     and 'gsub("<[^>]+>", "")' in FEATURE,
     "Event Status distinguishes found items, reports moon phases and estimates, and labels absent events consistently",
