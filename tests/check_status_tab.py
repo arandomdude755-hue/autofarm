@@ -90,7 +90,7 @@ require(
     and '"Health"' not in CONFIG
     and '"Character"' not in CONFIG
     and 'Label = "Chalice / Fist status"' in CONFIG
-    and "function readWorldEventValues(context, statusFeature, remoteEvents)" in FEATURE
+    and "function readWorldEventValues(context, statusFeature)" in FEATURE
     and 'location:GetAttribute("TimeIn")' in FEATURE
     and "workspace:GetServerTimeNow()" in FEATURE
     and "tick() - 25200" in FEATURE
@@ -115,13 +115,18 @@ require(
     and '"Frozen Dimension", MapName = "Frozen Dimension"' in FEATURE
     and '"Tiki Outpost", MapName = "TikiOutpost"' in FEATURE
     and "local scanLimit = math.min(#instances, 5000)" in FEATURE
-    and 'findChild(locations, "Prehistoric Island")' in FEATURE
     and 'findChild(locations, "Frozen Dimension")' in FEATURE
     and 'getIfCurrentRealmHasTagAsync' in FEATURE
     and '"HasMirageIsland"' in FEATURE
-    and 'local function readEventPresence(localModel, worldMarker, realmFlag)' in FEATURE
-    and 'return "Spawned"' in FEATURE
-    and 'return "Not spawned"' in FEATURE
+    and 'local function readEventPresence(marker)' in FEATURE
+    and 'return marker and "Spawned" or "Not spawned"' in FEATURE
+    and 'and readEventPresence(mirage)' in FEATURE
+    and 'and readEventPresence(prehistoric)' in FEATURE
+    and 'and readEventPresence(frozenDimension)' in FEATURE
+    and 'readEventPresence(mirage,' not in FEATURE
+    and "local storedElite = findAliveElite(replicatedStorage)" in FEATURE
+    and 'return "Spawned: " .. storedElite.Name' in FEATURE
+    and '"Not spawned (template loaded: "' not in FEATURE
     and 'formatCompactDuration(untilNextCycle)' in FEATURE
     and '"; summon active"' in FEATURE
     and '" .. shortName .. " held"' in FEATURE
@@ -140,7 +145,7 @@ require(
     and "real time (estimate)" in FEATURE
     and "ELITE_TARGET_NAMES" in FEATURE
     and '"Not spawned"' in FEATURE
-    and '"Not spawned (template loaded: "' in FEATURE
+    and '"Not spawned (template loaded: "' not in FEATURE
     and "function readTikiEyes(map)" in FEATURE
     and 'return "Not loaded"' in FEATURE
     and '" not visible"' in FEATURE

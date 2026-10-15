@@ -516,33 +516,24 @@ local function readEliteHunterStatus(workspace, replicatedStorage, compatibility
     if not isThirdSea(compatibility) then
         return "Third Sea only"
     end
+    local storedElite = findAliveElite(replicatedStorage)
+    if storedElite then
+        return "Spawned: " .. storedElite.Name
+    end
+
     local enemies = findChild(workspace, "Enemies")
     local liveElite = findAliveElite(enemies)
     if liveElite then
         return "Spawned: " .. liveElite.Name
     end
-
-    -- Vxeze also checks ReplicatedStorage; report this separately so a template
-    -- is not mistaken for a live Elite Hunter spawn.
-    local storedElite = findAliveElite(replicatedStorage)
-    if storedElite then
-        return "Not spawned (template loaded: " .. storedElite.Name .. ")"
-    end
     return "Not spawned"
 end
 
-local function readEventPresence(localModel, worldMarker, realmFlag)
-    if localModel then
-        return "Spawned"
-    elseif worldMarker then
-        return "Spawned"
-    elseif realmFlag == true then
-        return "Spawned"
-    end
-    return "Not spawned"
+local function readEventPresence(marker)
+    return marker and "Spawned" or "Not spawned"
 end
 
-local function readWorldEventValues(context, statusFeature, remoteEvents)
+local function readWorldEventValues(context, statusFeature)
     local compatibility = context and context.Compatibility
     local workspace = compatibility and compatibility.Workspace
     local replicatedStorage = compatibility and compatibility.ReplicatedStorage
@@ -553,25 +544,20 @@ local function readWorldEventValues(context, statusFeature, remoteEvents)
     local serverElapsed = readServerElapsed(workspace)
     local mirage = findChild(map, "MysticIsland")
     local prehistoric = findChild(map, "PrehistoricIsland")
-    local mirageLocation = findChild(locations, "Mystic Island")
-        or findChild(locations, "Mirage Island")
-    local prehistoricLocation = findChild(locations, "Prehistoric Island")
     local frozenDimension = findChild(locations, "Frozen Dimension")
-    remoteEvents = remoteEvents or {}
-
     return {
         serverAge = serverElapsed and formatServerAge(serverElapsed) or "Unavailable",
         legendaryItemTimer = readLegendaryItemStatus(context, workspace, serverElapsed),
         moon = readMoonStatus(statusFeature),
         eliteHunter = readEliteHunterStatus(workspace, replicatedStorage, compatibility),
         mirageIsland = thirdSea
-                and readEventPresence(mirage, mirageLocation, remoteEvents.mirageRealmTag)
+                and readEventPresence(mirage)
             or "Third Sea only",
         prehistoricIsland = thirdSea
-                and readEventPresence(prehistoric, prehistoricLocation)
+                and readEventPresence(prehistoric)
             or "Third Sea only",
         frozenDimension = thirdSea
-                and readEventPresence(findChild(map, "Frozen Dimension"), frozenDimension)
+                and readEventPresence(frozenDimension)
             or "Third Sea only",
         tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
     }
@@ -920,6 +906,10 @@ local function appendIslandDiagnostics(lines, context, remoteEvents)
             .. (type(remoteEvents.mirageRealmTag) == "boolean"
                 and tostring(remoteEvents.mirageRealmTag)
                 or "unknown (" .. tostring(remoteEvents.mirageRealmTagReason or "not checked") .. ")")
+    )
+    table.insert(
+        lines,
+        "Mirage spawn status follows Workspace.Map.MysticIsland; the Realm tag is diagnostic only."
     )
     table.insert(
         lines,
@@ -1298,7 +1288,7 @@ function StatusFeature:_ReadValues()
         ["active-unknown"] = "Active (details unavailable)",
     }
     local remoteEvents = self.RemoteEventStatus or {}
-    local worldEvents = readWorldEventValues(context, self, remoteEvents)
+    local worldEvents = readWorldEventValues(context, self)
 
     return {
         sea = getSea(compatibility),
