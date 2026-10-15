@@ -1200,6 +1200,55 @@ function UI:_LayoutNavigation(animate)
     )
 end
 
+function UI:_EnsureExpandedNavigationVisible(tabName)
+    local navScroll = self.NavScroll
+    local subsections = (self.Config.TabSubsections or {})[tabName] or {}
+    if not navScroll or #subsections == 0 then
+        return
+    end
+
+    task.delay(0.16, function()
+        if self.NavScroll ~= navScroll
+            or not navScroll.Parent
+            or self.ExpandedTabs[tabName] ~= true
+        then
+            return
+        end
+
+        local lastVisibleChild
+        for _, subsection in ipairs(subsections) do
+            local childButton = (self.TabSubsectionButtons[tabName] or {})[subsection.Label]
+            if childButton and childButton.Visible then
+                lastVisibleChild = childButton
+            end
+        end
+        if not lastVisibleChild then
+            return
+        end
+
+        local viewportBottom = navScroll.AbsolutePosition.Y + navScroll.AbsoluteSize.Y
+        local childBottom = lastVisibleChild.AbsolutePosition.Y + lastVisibleChild.AbsoluteSize.Y
+        local overflow = childBottom - viewportBottom
+        if overflow <= 0 then
+            return
+        end
+
+        local maximumY = math.max(
+            0,
+            navScroll.CanvasSize.Y.Offset - navScroll.AbsoluteSize.Y
+        )
+        local targetY = math.min(
+            maximumY,
+            navScroll.CanvasPosition.Y + overflow + 6
+        )
+        if targetY > navScroll.CanvasPosition.Y then
+            self:_PlayTween(navScroll, 0.16, {
+                CanvasPosition = Vector2.new(navScroll.CanvasPosition.X, targetY),
+            })
+        end
+    end)
+end
+
 function UI:_SelectSubsection(tabName, subsection)
     self:_SelectTab(subsection.Page or tabName)
     if subsection.GroupId then
@@ -1291,6 +1340,9 @@ function UI:_SelectTab(tabName)
     self.ActiveSubsectionLabel = subsection and subsection.Label or nil
     self.State:SetSelectedTab(tabName)
     self:_LayoutNavigation(true)
+    if parentTab then
+        self:_EnsureExpandedNavigationVisible(parentTab)
+    end
     return true
 end
 

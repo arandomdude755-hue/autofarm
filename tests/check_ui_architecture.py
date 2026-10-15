@@ -174,6 +174,13 @@ require('TabSubsections = {' in CONFIG
         and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI_MODULE
         and 'self.NavScroll.CanvasSize = UDim2.new(' in UI_MODULE,
         "Settings sidebar children must reflow the following tabs instead of overlaying them")
+require(
+    "function UI:_EnsureExpandedNavigationVisible(tabName)" in UI_MODULE
+    and "self:_EnsureExpandedNavigationVisible(parentTab)" in UI_MODULE
+    and "self.TabSubsectionButtons[tabName]" in UI_MODULE
+    and "local overflow = childBottom - viewportBottom" in UI_MODULE
+    and "CanvasPosition = Vector2.new(navScroll.CanvasPosition.X, targetY)" in UI_MODULE,
+    "opening any expandable tab must scroll its child rows into view when they extend below the sidebar viewport")
 require('UiSize = "Large"' in CONFIG
         and "Small = 0.88" in CONFIG
         and "Medium = 0.94" in CONFIG
