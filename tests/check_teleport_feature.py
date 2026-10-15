@@ -231,7 +231,14 @@ require(
     '"requestEntrance"' in GATEWAYS
     and "BoatCastleTeleporter" in GATEWAYS
     and "distance(currentRoot.Position, route.Destination) <= 200" in GATEWAYS
-    and "FAILED_ROUTE_COOLDOWN = 120" in GATEWAYS
+    and "FAILED_ROUTE_COOLDOWN = 30" in GATEWAYS
+    and "FAILED_APPROACH_COOLDOWN = 8" in GATEWAYS
+    and "function MapGatewayService:MarkApproachFailed(route, reason)" in GATEWAYS
+    and "candidate.PreviousFailure = lastFailure.Reason" in GATEWAYS
+    and "; last_activation_error=" in GATEWAYS
+    and "; last_attempt_failure=" in GATEWAYS
+    and "MarkApproachFailed(route, movementError)" in FEATURE
+    and "MarkFailed(route, gatewayError)" in FEATURE
     and "Portal-Portal" not in GATEWAYS
     and "Portal Fruit" not in GATEWAYS,
     "map gateways must verify arrival, cool down failed routes, and exclude Portal Fruit",

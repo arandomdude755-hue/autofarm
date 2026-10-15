@@ -6519,7 +6519,8 @@ MapGatewayService.__index = MapGatewayService
 
 local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
-local FAILED_ROUTE_COOLDOWN = 120
+local FAILED_ROUTE_COOLDOWN = 30
+local FAILED_APPROACH_COOLDOWN = 8
 local GATEWAY_ACTIVATION_TIMEOUT = 8
 local GATEWAY_TOUCH_LOAD_TIMEOUT = 2
 local REMOTE_RETRY_INTERVAL = 0.3
@@ -6635,6 +6636,7 @@ function MapGatewayService.new(compatibility)
     return setmetatable({
         Compatibility = compatibility,
         FailedUntil = {},
+        LastFailures = {},
         LastDiagnostic = nil,
     }, MapGatewayService)
 end
@@ -6784,6 +6786,19 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
             Activation = source.Touch and "touch" or "requestEntrance",
             Eligible = false,
         }
+        local lastFailure = self.LastFailures[source.Name]
+        if lastFailure then
+            candidate.PreviousFailure = lastFailure.Reason
+            candidate.PreviousFailureAge = math.max(0, now - lastFailure.At)
+            local attempt = lastFailure.Attempt
+            if attempt then
+                candidate.PreviousFailurePhase = attempt.Phase
+                candidate.PreviousFailureCallStatus = attempt.RemoteCallStatus
+                candidate.PreviousFailureDetail = attempt.Failure
+                candidate.PreviousFailureActivationFailure = attempt.ActivationFailure
+                candidate.PreviousFailureDisplacement = attempt.Displacement
+            end
+        end
         local failedUntil = self.FailedUntil[source.Name] or 0
         if now < failedUntil then
             candidate.Reason = "temporarily skipped after a previous failure"
@@ -6994,10 +7009,28 @@ function MapGatewayService:RecordTravelPhase(phase, route, details)
     end
 end
 
-function MapGatewayService:MarkFailed(route)
+function MapGatewayService:MarkFailed(route, reason, cooldown)
     if route and route.Name then
-        self.FailedUntil[route.Name] = os.clock() + FAILED_ROUTE_COOLDOWN
+        local now = os.clock()
+        local diagnostic = self.LastDiagnostic
+        local attempt
+        if diagnostic and diagnostic.LastAttempt
+            and diagnostic.LastAttempt.Route == route.Name
+        then
+            attempt = table.clone(diagnostic.LastAttempt)
+        end
+        self.FailedUntil[route.Name] = now
+            + (tonumber(cooldown) or FAILED_ROUTE_COOLDOWN)
+        self.LastFailures[route.Name] = {
+            At = now,
+            Reason = formatScalar(reason or "Gateway attempt failed"),
+            Attempt = attempt,
+        }
     end
+end
+
+function MapGatewayService:MarkApproachFailed(route, reason)
+    self:MarkFailed(route, reason, FAILED_APPROACH_COOLDOWN)
 end
 
 function MapGatewayService:Use(route, isCurrent)
@@ -7166,6 +7199,7 @@ function MapGatewayService:Use(route, isCurrent)
         end
         if distance(currentRoot.Position, route.Destination) <= 200 then
             self.FailedUntil[route.Name] = nil
+            self.LastFailures[route.Name] = nil
             self:RecordTravelPhase("gateway arrival confirmed", route, {
                 PositionAfterActivation = currentRoot.Position,
                 DistanceAfterActivation = distance(currentRoot.Position, route.Destination),
@@ -7185,7 +7219,6 @@ function MapGatewayService:Use(route, isCurrent)
         })
         return false, "Travel was cancelled"
     end
-    self:MarkFailed(route)
     local _, _, finalRoot = compatibility:GetCharacterParts()
     self:RecordTravelPhase("arrival was not confirmed before timeout", route, {
         PositionAfterActivation = finalRoot and finalRoot.Position or nil,
@@ -7291,6 +7324,33 @@ function MapGatewayService:BuildDiagnosticReport()
                     or "")
                 .. (type(candidate.CooldownRemaining) == "number"
                     and ("; cooldown=" .. string.format("%.1f", candidate.CooldownRemaining))
+                    or "")
+                .. (candidate.PreviousFailure
+                    and ("; last_failure=" .. formatScalar(candidate.PreviousFailure))
+                    or "")
+                .. (candidate.PreviousFailurePhase
+                    and ("; last_failure_phase="
+                        .. formatScalar(candidate.PreviousFailurePhase))
+                    or "")
+                .. (candidate.PreviousFailureCallStatus
+                    and ("; last_call_status="
+                        .. formatScalar(candidate.PreviousFailureCallStatus))
+                    or "")
+                .. (candidate.PreviousFailureDetail
+                    and ("; last_attempt_failure="
+                        .. formatScalar(candidate.PreviousFailureDetail))
+                    or "")
+                .. (candidate.PreviousFailureActivationFailure
+                    and ("; last_activation_error="
+                        .. formatScalar(candidate.PreviousFailureActivationFailure))
+                    or "")
+                .. (type(candidate.PreviousFailureDisplacement) == "number"
+                    and ("; last_displacement="
+                        .. string.format("%.1f", candidate.PreviousFailureDisplacement))
+                    or "")
+                .. (type(candidate.PreviousFailureAge) == "number"
+                    and ("; last_failure_age="
+                        .. string.format("%.1f", candidate.PreviousFailureAge))
                     or "")
         )
     end
@@ -7834,7 +7894,7 @@ function TeleportFeature:_RunTravel(request, character)
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
-            self.GatewayService:MarkFailed(route)
+            self.GatewayService:MarkApproachFailed(route, movementError)
             local _, _, failedRoot = compatibility:GetCharacterParts()
             self.GatewayService:RecordTravelPhase(
                 "could not reach gateway stand; falling back to normal travel",
@@ -7867,7 +7927,7 @@ function TeleportFeature:_RunTravel(request, character)
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
-            self.GatewayService:MarkFailed(route)
+            self.GatewayService:MarkFailed(route, gatewayError)
             self.GatewayService:RecordTravelPhase(
                 "gateway activation failed; falling back to normal travel",
                 route,

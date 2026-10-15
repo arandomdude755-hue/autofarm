@@ -452,7 +452,7 @@ function TeleportFeature:_RunTravel(request, character)
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
-            self.GatewayService:MarkFailed(route)
+            self.GatewayService:MarkApproachFailed(route, movementError)
             local _, _, failedRoot = compatibility:GetCharacterParts()
             self.GatewayService:RecordTravelPhase(
                 "could not reach gateway stand; falling back to normal travel",
@@ -485,7 +485,7 @@ function TeleportFeature:_RunTravel(request, character)
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
-            self.GatewayService:MarkFailed(route)
+            self.GatewayService:MarkFailed(route, gatewayError)
             self.GatewayService:RecordTravelPhase(
                 "gateway activation failed; falling back to normal travel",
                 route,
