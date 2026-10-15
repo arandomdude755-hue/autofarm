@@ -426,6 +426,34 @@ require(
     and 'CFrame.new(7, 20, 0)' in attack_position_builder,
     "All farm modes must derive their attack position through the same category-aware helper",
 )
+fruit_knockback_recovery = function_body(
+    MAIN_FARM,
+    "function MainFarm:_UpdateFruitM1KnockbackRecovery",
+    "\nfunction MainFarm:_MoveToFarmAttackPosition",
+)
+fruit_movement_hold = function_body(
+    MAIN_FARM,
+    "function MainFarm:_MoveToFarmAttackPosition",
+    "\nfunction MainFarm:_IsAtFarmAttackPosition",
+)
+fruit_m1_dispatch = MAIN_FARM.split(
+    "local function tryMasteryFruitM1()",
+    1,
+)[1].split("    if self.FarmSkillActive then", 1)[0]
+require(
+    "watch.Target ~= target" in fruit_knockback_recovery
+    and "FRUIT_M1_KNOCKBACK_MIN_OBSERVE" in fruit_knockback_recovery
+    and "FRUIT_M1_KNOCKBACK_MAX_OBSERVE" in fruit_knockback_recovery
+    and "displacement < FRUIT_M1_KNOCKBACK_DISTANCE" in fruit_knockback_recovery
+    and "distance >= FRUIT_M1_MAX_ATTACK_DISTANCE" in fruit_knockback_recovery
+    and "FRUIT_M1_OUT_OF_RANGE_HOLD_SECONDS" in fruit_knockback_recovery
+    and "self:_HoldPosition(session)" in fruit_movement_hold
+    and "briefly recovering from Fruit M1 knockback" in fruit_movement_hold
+    and "self:_UpdateFruitM1KnockbackRecovery(target)" in fruit_m1_dispatch
+    and "self.FruitM1KnockbackWatch = {" in fruit_m1_dispatch
+    and "FRUIT_M1_MAX_ATTACK_DISTANCE" in fruit_m1_dispatch,
+    "Fruit M1 knockback recovery must only briefly hold after large post-hit displacement and resume faster when out of attack range",
+)
 ready_skill_scan = function_body(
     COMBAT,
     "function CombatService:_FindReadySkill",

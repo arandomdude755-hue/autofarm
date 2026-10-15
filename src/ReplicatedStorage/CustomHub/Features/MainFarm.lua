@@ -25,6 +25,13 @@ local FARM_SKILL_PREPARE_TIMEOUT = 1.2
 local FARM_SKILL_UNAVAILABLE_RETRY = 10
 local FARM_SKILL_ATTACK_POSITION_TOLERANCE = 6
 local GUN_KNOCKBACK_HOLD_SECONDS = 0.3
+local FRUIT_M1_KNOCKBACK_DISTANCE = 10
+local FRUIT_M1_KNOCKBACK_MIN_OBSERVE = 0.12
+local FRUIT_M1_KNOCKBACK_MAX_OBSERVE = 0.45
+local FRUIT_M1_KNOCKBACK_HOLD_SECONDS = 0.25
+local FRUIT_M1_OUT_OF_RANGE_HOLD_SECONDS = 0.12
+-- Keep aligned with CombatService:AttackM1's current range guard.
+local FRUIT_M1_MAX_ATTACK_DISTANCE = 70
 local FARM_GUN_SWAP_SETTLE_SECONDS = 0.6
 local TIKI_PUZZLE_ATTACK_RANGE = 8
 local TIKI_LOAD_ITEM_RETRY_INTERVAL = 3
@@ -952,6 +959,8 @@ function MainFarm:_ClearTarget(preserveMovement)
     self.TargetName = nil
     self.TargetIsBoss = nil
     self.GunKnockbackHold = nil
+    self.FruitM1KnockbackWatch = nil
+    self.FruitM1KnockbackHold = nil
     if self.CombatService then
         self.CombatService:ClearFarmSkillAimTarget()
     end
@@ -1152,6 +1161,56 @@ function MainFarm:_GetFarmAttackPosition(target, weaponCategory)
     return targetRoot.CFrame * targetOffset
 end
 
+function MainFarm:_UpdateFruitM1KnockbackRecovery(target)
+    local watch = self.FruitM1KnockbackWatch
+    if not watch then
+        return
+    end
+
+    local now = os.clock()
+    if watch.Target ~= target then
+        self.FruitM1KnockbackWatch = nil
+        return
+    end
+
+    local elapsed = now - watch.At
+    if elapsed < FRUIT_M1_KNOCKBACK_MIN_OBSERVE then
+        return
+    end
+    self.FruitM1KnockbackWatch = nil
+    if elapsed > FRUIT_M1_KNOCKBACK_MAX_OBSERVE then
+        return
+    end
+
+    local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
+    if not targetRoot or not self.EnemyService or not self.EnemyService:IsAlive(target) then
+        return
+    end
+    local displacement = (targetRoot.Position - watch.TargetPosition).Magnitude
+    if displacement < FRUIT_M1_KNOCKBACK_DISTANCE then
+        return
+    end
+
+    local compatibility = self.Context and self.Context.Compatibility
+    local playerRoot
+    if compatibility then
+        local _, _, currentRoot = compatibility:GetCharacterParts()
+        playerRoot = currentRoot
+    end
+    if not playerRoot then
+        return
+    end
+
+    local distance = (playerRoot.Position - targetRoot.Position).Magnitude
+    local holdSeconds = distance >= FRUIT_M1_MAX_ATTACK_DISTANCE
+        and FRUIT_M1_OUT_OF_RANGE_HOLD_SECONDS
+        or FRUIT_M1_KNOCKBACK_HOLD_SECONDS
+    self.FruitM1KnockbackHold = {
+        Target = target,
+        Until = now + holdSeconds,
+    }
+end
+
 function MainFarm:_MoveToFarmAttackPosition(
     target,
     weaponCategory,
@@ -1171,6 +1230,40 @@ function MainFarm:_MoveToFarmAttackPosition(
         else
             self.GunKnockbackHold = nil
         end
+    end
+    if weaponCategory == "Blox Fruit" then
+        self:_UpdateFruitM1KnockbackRecovery(target)
+        local fruitHold = self.FruitM1KnockbackHold
+        if fruitHold then
+            if fruitHold.Target == target and os.clock() < fruitHold.Until then
+                local compatibility = self.Context and self.Context.Compatibility
+                local playerRoot
+                if compatibility then
+                    local _, _, currentRoot = compatibility:GetCharacterParts()
+                    playerRoot = currentRoot
+                end
+                local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
+                if playerRoot and targetRoot
+                    and (playerRoot.Position - targetRoot.Position).Magnitude
+                        >= FRUIT_M1_MAX_ATTACK_DISTANCE
+                then
+                    fruitHold.Until = math.min(
+                        fruitHold.Until,
+                        os.clock() + FRUIT_M1_OUT_OF_RANGE_HOLD_SECONDS
+                    )
+                end
+                if os.clock() < fruitHold.Until then
+                    local held = self:_HoldPosition(session)
+                    if held then
+                        return true, "briefly recovering from Fruit M1 knockback"
+                    end
+                end
+            end
+            self.FruitM1KnockbackHold = nil
+        end
+    else
+        self.FruitM1KnockbackWatch = nil
+        self.FruitM1KnockbackHold = nil
     end
     if self.FarmSkillActive
         and self.FarmSkillTarget == target
@@ -1292,6 +1385,8 @@ function MainFarm:_SyncFarmSkillContext(
 
     if changed then
         self.GunKnockbackHold = nil
+        self.FruitM1KnockbackWatch = nil
+        self.FruitM1KnockbackHold = nil
         local gunToolChanged = nextContext.ActiveMasteryCategory == "Gun"
             and oldContext
             and (
@@ -1392,6 +1487,7 @@ function MainFarm:_TryStartFarmSkill(
         if masteryCategory ~= "Blox Fruit" or not self.CombatService then
             return
         end
+        self:_UpdateFruitM1KnockbackRecovery(target)
         -- Resolve only the selected hotbar fruit, never stored inventory.
         local fruitTool = self.CombatService:FindSkillWeapon("Blox Fruit", true)
         if not fruitTool then
@@ -1410,11 +1506,13 @@ function MainFarm:_TryStartFarmSkill(
             return
         end
 
+        local targetRoot = target:FindFirstChild("HumanoidRootPart")
+        local targetPosition = targetRoot and targetRoot.Position
         local callOk, inputSent, inputResult = pcall(
             self.CombatService.AttackM1,
             self.CombatService,
             target,
-            70,
+            FRUIT_M1_MAX_ATTACK_DISTANCE,
             "Blox Fruit",
             false,
             equippedFruit
@@ -1423,6 +1521,13 @@ function MainFarm:_TryStartFarmSkill(
             masteryFruitM1Error = "Fruit M1 execution failed: " .. tostring(inputSent)
         elseif inputSent then
             masteryFruitM1Result = inputResult
+            if targetPosition then
+                self.FruitM1KnockbackWatch = {
+                    Target = target,
+                    TargetPosition = targetPosition,
+                    At = os.clock(),
+                }
+            end
         elseif inputResult ~= "Blox Fruit M1 is cooling down"
             and inputResult ~= "Selected mastery weapon is no longer equipped"
             and inputResult ~= "Selected fruit tool has no supported M1 remote"
@@ -3457,6 +3562,8 @@ function MainFarm:Initialize(context)
     self.FarmSkillIgnoredTools = {}
     self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
+    self.FruitM1KnockbackWatch = nil
+    self.FruitM1KnockbackHold = nil
     self.TikiPuzzleActive = false
     self.TikiPuzzleRestorePending = false
     self.TikiEventComplete = false
@@ -3489,6 +3596,8 @@ function MainFarm:Initialize(context)
             self.FarmSkillPreparing = nil
             self.FarmSkillIgnoredTools = {}
             self.GunKnockbackHold = nil
+            self.FruitM1KnockbackWatch = nil
+            self.FruitM1KnockbackHold = nil
             self.TikiPuzzleActive = false
             self.TikiPuzzleRestorePending = false
             self.TikiEventComplete = false
@@ -3510,6 +3619,8 @@ function MainFarm:Initialize(context)
             self.FarmSkillTarget = nil
             self.FarmSkillPreparing = nil
             self.GunKnockbackHold = nil
+            self.FruitM1KnockbackWatch = nil
+            self.FruitM1KnockbackHold = nil
             self.QuestDialogueRecovery = nil
             self:_ClearTarget()
             self:_ResetSpawnSearch(nil)
@@ -3582,6 +3693,8 @@ function MainFarm:Start()
     self.FarmSkillIgnoredTools = {}
     self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
+    self.FruitM1KnockbackWatch = nil
+    self.FruitM1KnockbackHold = nil
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
@@ -3612,6 +3725,8 @@ function MainFarm:Stop()
     self.FarmSkillIgnoredTools = {}
     self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
+    self.FruitM1KnockbackWatch = nil
+    self.FruitM1KnockbackHold = nil
     self.TikiEventComplete = false
     self.NextTikiBossSearchAt = 0
     if self.TikiPuzzleActive then
