@@ -146,6 +146,7 @@ require(
     and "local function sampleMoonClockRate(statusFeature)" in FEATURE
     and "sampleMoonClockRate(self)" in FEATURE
     and "local function moonForecast(phaseText, clockTime, phaseNumber)" in FEATURE
+    and 'if phaseText == "Full Moon" or phaseText == "Blue Moon" then' in FEATURE
     and "Phase %d (%d nights until Full Moon)" in FEATURE
     and 'return "Full Moon ends in", 5 - clockTime' in FEATURE
     and 'return "Next Full Moon in", targetClock - clockTime' in FEATURE
@@ -154,6 +155,7 @@ require(
     and 'return string.format("~%dd %02dh", math.floor(hours / 24), hours % 24)' in FEATURE
     and 'return string.format("~%dm", minutes)' in FEATURE
     and 'local displayPhase = phaseText:match("^(Phase %d+)") or phaseText' in FEATURE
+    and 'if phaseText == "Blue Moon" then\n        forecastPhase = 5' in FEATURE
     and '" real time (estimate)"' not in FEATURE
     and '"game clock "' not in FEATURE
     and '" | no timing estimate"' not in FEATURE

@@ -324,7 +324,7 @@ end
 
 -- Keep BNN/Vxeze's phase boundaries, but convert them with measured clock speed.
 local function moonForecast(phaseText, clockTime, phaseNumber)
-    if phaseText == "Full Moon" then
+    if phaseText == "Full Moon" or phaseText == "Blue Moon" then
         if clockTime <= 5 then
             return "Full Moon ends in", 5 - clockTime
         elseif clockTime < 12 then
@@ -424,12 +424,10 @@ local function readMoonStatus(statusFeature)
         return displayPhase .. " · Calculating"
     end
 
-    if phaseText == "Blue Moon" then
-        return "Blue Moon"
-    end
-
     local forecastPhase = phaseNumber
-    if phaseText == "Phase 4 (next night is Full Moon)" then
+    if phaseText == "Blue Moon" then
+        forecastPhase = 5
+    elseif phaseText == "Phase 4 (next night is Full Moon)" then
         forecastPhase = 4
     elseif phaseText == "Full Moon" then
         forecastPhase = 5

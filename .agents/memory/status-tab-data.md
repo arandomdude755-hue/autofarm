@@ -14,3 +14,9 @@ Tiki eye progress is server-scoped and monotonic: keep the best observed cleared
 **How to apply:** while the island is present, update the remembered count from live eye objects; when objects stream out, keep the last known value instead of downgrading it. Do not carry it into a different server.
 
 **How to apply:** add status fields through StatusFeature and existing status-value rows; keep quest acceptance logic in QuestService, preserve unknown states, rate-limit remote reads, label timing as an estimate, allow calibration to gather samples, and avoid Heartbeat polling.
+
+For Blue Moon, show the same full-moon ending estimate using measured real-time clock speed, while keeping the distinct “Blue Moon” label.
+
+**Why:** the user asked for the full-moon ending estimate to remain available during Blue Moon.
+
+**How to apply:** treat Blue Moon as a full-moon phase for the existing start/end clock boundaries; do not introduce a separate timing model without evidence of different event timing.
