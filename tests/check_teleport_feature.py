@@ -266,8 +266,10 @@ require(
 require(
     '"requestEntrance"' in GATEWAYS
     and "BoatCastleTeleporter" in GATEWAYS
-    and "distance(currentRoot.Position, route.Destination) <= 200" in GATEWAYS
-    and "FAILED_ROUTE_COOLDOWN = 30" in GATEWAYS
+    and "local GATEWAY_ARRIVAL_RADIUS = 500" in GATEWAYS
+    and "activationDisplacement >= 200" in GATEWAYS
+    and "root.CFrame = CFrame.new(route.Stand)" in GATEWAYS
+    and "FAILED_ROUTE_COOLDOWN = 10" in GATEWAYS
     and "FAILED_APPROACH_COOLDOWN = 8" in GATEWAYS
     and "function MapGatewayService:MarkApproachFailed(route, reason)" in GATEWAYS
     and "candidate.PreviousFailure = lastFailure.Reason" in GATEWAYS
@@ -303,10 +305,19 @@ require(
 )
 require(
     "local GATEWAY_ACTIVATION_TIMEOUT = 5" in GATEWAYS
-    and "local REMOTE_RETRY_INTERVAL = 0.5" in GATEWAYS
+    and "local REMOTE_RETRY_INTERVAL = 0.3" in GATEWAYS
     and "remoteCallCount += 1" in GATEWAYS
     and "and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL" in GATEWAYS,
     "requestEntrance retries must be bounded to reduce waits and repeated calls",
+)
+require(
+    "function TeleportFeature:_StopMovementSession()" in FEATURE
+    and "movement:_StopMovement()" in FEATURE
+    and "DistanceBeforeAlignment" in FEATURE
+    and 'return false, failure, "approach"' in GATEWAYS
+    and "ActivationDisplacement" in GATEWAYS
+    and "DistanceBeforeAlignment" in GATEWAYS,
+    "gateway coordination must stabilize at the pad and stop movement without cancelling farm travel",
 )
 require(
     "local MAX_GATEWAY_ATTEMPTS = 4" in FEATURE

@@ -6724,11 +6724,14 @@ MapGatewayService.__index = MapGatewayService
 local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
 local ROUTE_LOCATION_REPEAT_DISTANCE = 500
-local FAILED_ROUTE_COOLDOWN = 30
+local FAILED_ROUTE_COOLDOWN = 10
 local FAILED_APPROACH_COOLDOWN = 8
 local GATEWAY_ACTIVATION_TIMEOUT = 5
 local GATEWAY_TOUCH_LOAD_TIMEOUT = 2
-local REMOTE_RETRY_INTERVAL = 0.5
+local GATEWAY_STAND_ACCEPTANCE = 25
+local GATEWAY_STAND_ALIGNMENT = 3
+local GATEWAY_ARRIVAL_RADIUS = 500
+local REMOTE_RETRY_INTERVAL = 0.3
 
 local SEA_LABELS = {
     [1] = "First Sea",
@@ -7306,6 +7309,31 @@ function MapGatewayService:Use(route, isCurrent)
         return false, "Character is unavailable"
     end
 
+    if typeof(route.Stand) ~= "Vector3" then
+        local failure = "Gateway stand position is unavailable"
+        self:RecordTravelPhase("gateway stand unavailable", route, {
+            Failure = failure,
+        })
+        return false, failure, "approach"
+    end
+    local standDistance = distance(root.Position, route.Stand)
+    if standDistance > GATEWAY_STAND_ACCEPTANCE then
+        local failure = "Character is not close enough to the gateway pad"
+        self:RecordTravelPhase("gateway stand not reached", route, {
+            DistanceAtStand = standDistance,
+            Failure = failure,
+        })
+        return false, failure, "approach"
+    end
+    pcall(function()
+        if standDistance > GATEWAY_STAND_ALIGNMENT then
+            root.CFrame = CFrame.new(route.Stand)
+        end
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end)
+
+    local activationStartPosition = root.Position
     self:RecordTravelPhase("activating gateway", route, {
         PositionBeforeActivation = root.Position,
         RemoteCallCount = 0,
@@ -7316,9 +7344,26 @@ function MapGatewayService:Use(route, isCurrent)
     local remoteCallPending = false
     local remoteCallCount = 0
     local lastRemoteCallAt = -math.huge
+    local function alignAtStand(currentRoot)
+        local offset = distance(currentRoot.Position, route.Stand)
+        if offset > GATEWAY_STAND_ALIGNMENT
+            and offset <= GATEWAY_ARRIVAL_RADIUS
+        then
+            currentRoot.CFrame = CFrame.new(route.Stand)
+        end
+        currentRoot.AssemblyLinearVelocity = Vector3.zero
+        currentRoot.AssemblyAngularVelocity = Vector3.zero
+    end
     local function invokeEntrance()
         if remoteCallPending or not isCurrent() then
             return
+        end
+        local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
+        if currentCharacter ~= character or not currentRoot then
+            return
+        end
+        if distance(currentRoot.Position, route.Stand) <= GATEWAY_ARRIVAL_RADIUS then
+            pcall(alignAtStand, currentRoot)
         end
         remoteCallPending = true
         remoteCallCount += 1
@@ -7444,19 +7489,34 @@ function MapGatewayService:Use(route, isCurrent)
             diagnostic.LastAttempt.PositionAfterActivation = currentRoot.Position
             diagnostic.LastAttempt.DistanceAfterActivation =
                 distance(currentRoot.Position, route.Destination)
+            diagnostic.LastAttempt.ActivationDisplacement = distance(
+                activationStartPosition,
+                currentRoot.Position
+            )
             diagnostic.LastAttempt.Displacement = distance(
                 diagnostic.LastAttempt.PositionBeforeActivation or root.Position,
                 currentRoot.Position
             )
         end
-        if distance(currentRoot.Position, route.Destination) <= 200 then
+        local destinationDistance = distance(currentRoot.Position, route.Destination)
+        local activationDisplacement = distance(
+            activationStartPosition,
+            currentRoot.Position
+        )
+        if destinationDistance <= GATEWAY_ARRIVAL_RADIUS
+            and activationDisplacement >= 200
+        then
             self.FailedUntil[route.Name] = nil
             self.LastFailures[route.Name] = nil
             self:RecordTravelPhase("gateway arrival confirmed", route, {
                 PositionAfterActivation = currentRoot.Position,
-                DistanceAfterActivation = distance(currentRoot.Position, route.Destination),
+                DistanceAfterActivation = destinationDistance,
+                ActivationDisplacement = activationDisplacement,
             })
             return true
+        end
+        if remote and distance(currentRoot.Position, route.Stand) <= GATEWAY_ARRIVAL_RADIUS then
+            pcall(alignAtStand, currentRoot)
         end
         if remote and not remoteCallPending
             and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL
@@ -7655,6 +7715,10 @@ function MapGatewayService:BuildDiagnosticReport()
                     .. (type(attempt.DistanceAtStand) == "number"
                         and string.format("%.1f", attempt.DistanceAtStand)
                         or "n/a")
+                    .. "; before_alignment="
+                    .. (type(attempt.DistanceBeforeAlignment) == "number"
+                        and string.format("%.1f", attempt.DistanceBeforeAlignment)
+                        or "n/a")
             )
         end
         if attempt.PositionBeforeActivation then
@@ -7671,6 +7735,10 @@ function MapGatewayService:BuildDiagnosticReport()
                     .. "; displacement="
                     .. (type(attempt.Displacement) == "number"
                         and string.format("%.1f", attempt.Displacement)
+                        or "n/a")
+                    .. "; activation_displacement="
+                    .. (type(attempt.ActivationDisplacement) == "number"
+                        and string.format("%.1f", attempt.ActivationDisplacement)
                         or "n/a")
             )
         end
@@ -7919,6 +7987,13 @@ function TeleportFeature:_IsTravelCurrent(request, character)
         and not (mainFarm and mainFarm.Running)
 end
 
+function TeleportFeature:_StopMovementSession()
+    local movement = self.MovementService
+    if movement and type(movement._StopMovement) == "function" then
+        movement:_StopMovement()
+    end
+end
+
 function TeleportFeature:_MoveAndWait(request, character, destination)
     local compatibility = self.Context.Compatibility
     local _, _, startRoot = compatibility:GetCharacterParts()
@@ -7939,7 +8014,7 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
         })
     end)
     if not moveCallOk then
-        self.MovementService:Cancel()
+        self:_StopMovementSession()
         return false, tostring(moved)
     end
     if not moved then
@@ -7995,12 +8070,14 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
                 return false, "Map transition did not reach the destination"
             end
             if self.MovementService.LastStallAt ~= lastStallAt then
+                self:_StopMovementSession()
                 return false, "Movement stalled before reaching the waypoint"
             end
+            self:_StopMovementSession()
             return false, "Movement stopped before reaching the waypoint"
         end
         if os.clock() >= deadline then
-            self.MovementService:Cancel()
+            self:_StopMovementSession()
             return false, "Movement timed out before reaching the waypoint"
         end
         task.wait(0.1)
@@ -8075,6 +8152,102 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
             )
         end
     end
+end
+
+function TeleportFeature:_ApproachGatewayStand(request, character, route)
+    local compatibility = self.Context.Compatibility
+    local _, _, approachRoot = compatibility:GetCharacterParts()
+    self.GatewayService:RecordTravelPhase("approaching gateway stand", route, {
+        PositionBeforeApproach = approachRoot and approachRoot.Position or nil,
+        DistanceToStand = approachRoot
+                and (approachRoot.Position - route.Stand).Magnitude
+            or nil,
+    })
+    self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
+
+    local reached, movementError = self:_MoveAndWait(
+        request,
+        character,
+        CFrame.new(route.Stand)
+    )
+    if not reached then
+        if not self:_IsTravelCurrent(request, character) then
+            return false, movementError
+        end
+        self.GatewayService:MarkApproachFailed(route, movementError)
+        local _, _, failedRoot = compatibility:GetCharacterParts()
+        self.GatewayService:RecordTravelPhase(
+            "could not reach gateway stand; trying another gateway",
+            route,
+            {
+                PositionAfterApproach = failedRoot and failedRoot.Position or nil,
+                Failure = movementError,
+            }
+        )
+        self:_SetStatus(
+            "Could not reach " .. route.Name .. "; checking another route.",
+            "warning"
+        )
+        return false, movementError
+    end
+
+    self:_StopMovementSession()
+    local _, _, gatewayRoot = compatibility:GetCharacterParts()
+    local standDistance = gatewayRoot
+            and (gatewayRoot.Position - route.Stand).Magnitude
+        or math.huge
+    if not gatewayRoot or standDistance > 25 then
+        local standError = "Could not reach the gateway pad closely enough"
+        self.GatewayService:MarkApproachFailed(route, standError)
+        self.GatewayService:RecordTravelPhase(
+            "gateway stand not reached; checking another gateway",
+            route,
+            {
+                PositionAtStand = gatewayRoot and gatewayRoot.Position or nil,
+                DistanceAtStand = standDistance,
+                Failure = standError,
+            }
+        )
+        self:_SetStatus(
+            route.Name .. " pad was not reached; checking another route.",
+            "warning"
+        )
+        return false, standError
+    end
+
+    local positionBeforeAlignment = gatewayRoot.Position
+    local aligned, alignmentError = pcall(function()
+        gatewayRoot.CFrame = CFrame.new(route.Stand)
+        gatewayRoot.AssemblyLinearVelocity = Vector3.zero
+        gatewayRoot.AssemblyAngularVelocity = Vector3.zero
+    end)
+    if not aligned then
+        local standError = "Could not align at the gateway pad: "
+            .. tostring(alignmentError)
+        self.GatewayService:MarkApproachFailed(route, standError)
+        self.GatewayService:RecordTravelPhase(
+            "gateway stand alignment failed; checking another gateway",
+            route,
+            {
+                PositionAtStand = positionBeforeAlignment,
+                DistanceAtStand = standDistance,
+                Failure = standError,
+            }
+        )
+        self:_SetStatus(
+            route.Name .. " pad alignment failed; checking another route.",
+            "warning"
+        )
+        return false, standError
+    end
+
+    self.GatewayService:RecordTravelPhase("at gateway stand; activating", route, {
+        PositionAtStand = positionBeforeAlignment,
+        DistanceAtStand = (gatewayRoot.Position - route.Stand).Magnitude,
+        PositionBeforeAlignment = positionBeforeAlignment,
+        DistanceBeforeAlignment = standDistance,
+    })
+    return true
 end
 
 function TeleportFeature:_RunTravel(request, character)
@@ -8178,67 +8351,47 @@ function TeleportFeature:_RunTravel(request, character)
         gatewayAttempts += 1
 
         self:_SetStatus("Using map gateway: " .. route.Name .. ".", "info")
-        local _, _, approachRoot = compatibility:GetCharacterParts()
-        self.GatewayService:RecordTravelPhase("approaching gateway stand", route, {
-            PositionBeforeApproach = approachRoot and approachRoot.Position or nil,
-            DistanceToStand = approachRoot
-                    and (approachRoot.Position - route.Stand).Magnitude
-                or nil,
-        })
-        self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
-        local reached, movementError = self:_MoveAndWait(
-            request,
-            character,
-            CFrame.new(route.Stand)
-        )
+        local reached = self:_ApproachGatewayStand(request, character, route)
         if not reached then
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
-            self.GatewayService:MarkApproachFailed(route, movementError)
-            local _, _, failedRoot = compatibility:GetCharacterParts()
-            self.GatewayService:RecordTravelPhase(
-                "could not reach gateway stand; trying another gateway",
-                route,
-                {
-                    PositionAfterApproach = failedRoot and failedRoot.Position or nil,
-                    Failure = movementError,
-                }
-            )
-            self:_SetStatus(
-                "Could not reach " .. route.Name .. "; checking another route.",
-                "warning"
-            )
             gatewayFailed = true
             request.RoutePlan = nil
             continue
         end
 
-        local _, _, gatewayRoot = compatibility:GetCharacterParts()
-        self.GatewayService:RecordTravelPhase("at gateway stand; activating", route, {
-            PositionAtStand = gatewayRoot and gatewayRoot.Position or nil,
-            DistanceAtStand = gatewayRoot
-                    and (gatewayRoot.Position - route.Stand).Magnitude
-                or nil,
-        })
         self:_SetStatus("Activating map gateway: " .. route.Name .. ".", "info")
-        local used, gatewayError = self.GatewayService:Use(route, function()
+        local used, gatewayError, failureStage = self.GatewayService:Use(route, function()
             return self:_IsTravelCurrent(request, character)
         end)
         if not used then
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
-            self.GatewayService:MarkFailed(route, gatewayError)
-            self.GatewayService:RecordTravelPhase(
-                "gateway activation failed; trying another gateway",
-                route,
-                { Failure = gatewayError }
-            )
-            self:_SetStatus(
-                route.Name .. " did not confirm arrival; checking another route.",
-                "warning"
-            )
+            if failureStage == "approach" then
+                self.GatewayService:MarkApproachFailed(route, gatewayError)
+                self.GatewayService:RecordTravelPhase(
+                    "gateway stand not reached; checking another gateway",
+                    route,
+                    { Failure = gatewayError }
+                )
+                self:_SetStatus(
+                    route.Name .. " pad was not reached; checking another route.",
+                    "warning"
+                )
+            else
+                self.GatewayService:MarkFailed(route, gatewayError)
+                self.GatewayService:RecordTravelPhase(
+                    "gateway activation failed; trying another gateway",
+                    route,
+                    { Failure = gatewayError }
+                )
+                self:_SetStatus(
+                    route.Name .. " did not confirm arrival; checking another route.",
+                    "warning"
+                )
+            end
             gatewayFailed = true
             if gatewayError then
                 request.LastGatewayError = tostring(gatewayError)
