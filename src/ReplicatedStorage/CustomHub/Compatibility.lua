@@ -413,6 +413,46 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     return found == true
 end
 
+function Compatibility:GetUnlockedTitleCheck(titleName)
+    if type(titleName) ~= "string" or titleName == "" then
+        return nil, "title name is unavailable", false
+    end
+
+    local now = os.clock()
+    self.TitleOwnershipCache = self.TitleOwnershipCache or {}
+    local cache = self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return cache.Value, cache.Reason, false
+    end
+
+    local pending = self.TitleOwnershipPending
+        and self.TitleOwnershipPending[titleName] == true
+    return nil, pending and "title check pending" or "title state is unknown", pending
+end
+
+function Compatibility:BeginUnlockedTitleCheck(titleName)
+    local state, reason, pending = self:GetUnlockedTitleCheck(titleName)
+    if type(state) == "boolean" or pending then
+        return state, reason, pending
+    end
+
+    local now = os.clock()
+    local cache = self.TitleOwnershipCache and self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return nil, reason, false
+    end
+
+    self.TitleOwnershipPending = self.TitleOwnershipPending or {}
+    self.TitleOwnershipPending[titleName] = true
+    task.spawn(function()
+        pcall(self.HasUnlockedTitle, self, titleName)
+        if self.TitleOwnershipPending then
+            self.TitleOwnershipPending[titleName] = nil
+        end
+    end)
+    return nil, "title check pending", true
+end
+
 function Compatibility:HasUnlockedTitle(titleName)
     if type(titleName) ~= "string" or titleName == "" then
         return nil, "title name is unavailable"

@@ -232,7 +232,7 @@ function TeleportFeature:_StopMovementSession()
     end
 end
 
-function TeleportFeature:_MoveAndWait(request, character, destination)
+function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbort)
     local compatibility = self.Context.Compatibility
     local _, _, startRoot = compatibility:GetCharacterParts()
     if not startRoot then
@@ -271,6 +271,15 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
     while self:_IsTravelCurrent(request, character) do
         if not self:_IsTravelCurrent(request, character) then
             return false, "Travel was interrupted"
+        end
+        if type(shouldAbort) == "function" then
+            local abortCheckOk, shouldStop, abortReason = pcall(shouldAbort)
+            if abortCheckOk and shouldStop == true then
+                self:_StopMovementSession()
+                return false,
+                    tostring(abortReason or "Route access could not be confirmed"),
+                    "title_access"
+            end
         end
         local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
         if currentCharacter ~= character or not currentRoot then
@@ -440,12 +449,22 @@ function TeleportFeature:_ApproachGatewayStand(request, character, route)
     })
     self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
 
-    local reached, movementError = self:_MoveAndWait(
+    local abortIfTitleUnknown
+    if route.ProvisionalTitleAccess == true or route.PlanTitleAccessRoute then
+        abortIfTitleUnknown = function()
+            return self.GatewayService:ShouldAbortForUnconfirmedTitle(route)
+        end
+    end
+    local reached, movementError, movementStage = self:_MoveAndWait(
         request,
         character,
-        CFrame.new(route.Stand)
+        CFrame.new(route.Stand),
+        abortIfTitleUnknown
     )
     if not reached then
+        if movementStage == "title_access" then
+            return false, movementError, "title_access"
+        end
         if not self:_IsTravelCurrent(request, character) then
             return false, movementError
         end
@@ -626,12 +645,51 @@ function TeleportFeature:_RunTravel(request, character)
         gatewayAttempts += 1
 
         self:_SetStatus("Using map gateway: " .. route.Name .. ".", "info")
-        local reached = self:_ApproachGatewayStand(request, character, route)
+        local reached, approachError, approachStage =
+            self:_ApproachGatewayStand(request, character, route)
         if not reached then
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
+            if approachStage == "title_access" then
+                self.GatewayService:RecordTravelPhase(
+                    "Tiki title access was not confirmed; using normal travel",
+                    route,
+                    { Failure = approachError }
+                )
+                self:_SetStatus(
+                    "Tiki access could not be confirmed; continuing without that gateway.",
+                    "info"
+                )
+                request.RoutePlan = nil
+                continue
+            end
             gatewayFailed = true
+            request.RoutePlan = nil
+            continue
+        end
+
+        local titleAccessOk, titleAccessError =
+            self.GatewayService:WaitForTitleAccess(
+                route,
+                TITLE_ACCESS_RECHECK_WINDOW,
+                function()
+                    return self:_IsTravelCurrent(request, character)
+                end
+            )
+        if not titleAccessOk then
+            if not self:_IsTravelCurrent(request, character) then
+                return
+            end
+            self.GatewayService:RecordTravelPhase(
+                "Tiki title access was not confirmed; using normal travel",
+                route,
+                { Failure = titleAccessError }
+            )
+            self:_SetStatus(
+                "Tiki access could not be confirmed; continuing without that gateway.",
+                "info"
+            )
             request.RoutePlan = nil
             continue
         end

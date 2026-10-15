@@ -1491,6 +1491,46 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     return found == true
 end
 
+function Compatibility:GetUnlockedTitleCheck(titleName)
+    if type(titleName) ~= "string" or titleName == "" then
+        return nil, "title name is unavailable", false
+    end
+
+    local now = os.clock()
+    self.TitleOwnershipCache = self.TitleOwnershipCache or {}
+    local cache = self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return cache.Value, cache.Reason, false
+    end
+
+    local pending = self.TitleOwnershipPending
+        and self.TitleOwnershipPending[titleName] == true
+    return nil, pending and "title check pending" or "title state is unknown", pending
+end
+
+function Compatibility:BeginUnlockedTitleCheck(titleName)
+    local state, reason, pending = self:GetUnlockedTitleCheck(titleName)
+    if type(state) == "boolean" or pending then
+        return state, reason, pending
+    end
+
+    local now = os.clock()
+    local cache = self.TitleOwnershipCache and self.TitleOwnershipCache[titleName]
+    if cache and now < cache.ExpiresAt then
+        return nil, reason, false
+    end
+
+    self.TitleOwnershipPending = self.TitleOwnershipPending or {}
+    self.TitleOwnershipPending[titleName] = true
+    task.spawn(function()
+        pcall(self.HasUnlockedTitle, self, titleName)
+        if self.TitleOwnershipPending then
+            self.TitleOwnershipPending[titleName] = nil
+        end
+    end)
+    return nil, "title check pending", true
+end
+
 function Compatibility:HasUnlockedTitle(titleName)
     if type(titleName) ~= "string" or titleName == "" then
         return nil, "title name is unavailable"
@@ -7071,19 +7111,44 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                     candidate.TitleRouteCost = titleRouteCost
                     candidate.TitleRouteSavings = titleRouteSavings
                     if titleRouteSavings >= MINIMUM_DISTANCE_SAVED then
-                        local titleCheckOk, titleOwned, titleError = pcall(
-                            compatibility.HasUnlockedTitle,
-                            compatibility,
-                            source.RequiresTitle
-                        )
+                        local titleCheckOk
+                        local titleOwned
+                        local titleError
+                        local titlePending = false
+                        local titleCheckIsAsync = false
+                        if type(compatibility.BeginUnlockedTitleCheck) == "function" then
+                            titleCheckIsAsync = true
+                            local beginOk
+                            beginOk, titleOwned, titleError, titlePending = pcall(
+                                compatibility.BeginUnlockedTitleCheck,
+                                compatibility,
+                                source.RequiresTitle
+                            )
+                            titleCheckOk = beginOk
+                        else
+                            titleCheckOk, titleOwned, titleError = pcall(
+                                compatibility.HasUnlockedTitle,
+                                compatibility,
+                                source.RequiresTitle
+                            )
+                        end
                         if titleCheckOk and type(titleOwned) == "boolean" then
                             candidate.TitleRequirementOwned = titleOwned
                         end
-                        candidate.TitleCheckPending =
-                            titleCheckOk and titleOwned == nil
+                        candidate.TitleCheckPending = titleCheckOk
+                            and (
+                                titleCheckIsAsync
+                                    and titlePending == true
+                                or not titleCheckIsAsync
+                                    and titleOwned == nil
+                            )
                         if titleCheckOk and titleOwned == true then
                             available = true
                             candidate.AccessBy = source.RequiresTitle
+                        elseif candidate.TitleCheckPending then
+                            available = true
+                            candidate.ProvisionalTitleAccess = true
+                            candidate.Reason = "title access is being checked"
                         else
                             local itemReason = checkOk
                                     and (inventoryError or "required item not found in inventory")
@@ -7106,7 +7171,8 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                         or ("inventory check failed: " .. formatScalar(owned))
                 end
             end
-            candidate.RequirementOwned = available
+            candidate.RequirementOwned =
+                available and candidate.ProvisionalTitleAccess ~= true
 
             local stand = available and self:_ResolveStand(source) or nil
             if available and typeof(stand) ~= "Vector3" then
@@ -7138,6 +7204,8 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                 local route = table.clone(source)
                 route.Stand = stand
                 route.TouchTarget = touchTarget
+                route.ProvisionalTitleAccess =
+                    candidate.ProvisionalTitleAccess == true
                 table.insert(routes, route)
             end
         end
@@ -7153,6 +7221,68 @@ function MapGatewayService:HasPendingTitleChecks()
         end
     end
     return false
+end
+
+function MapGatewayService:GetTitleAccessState(route)
+    local titleRoute = route and (
+        route.ProvisionalTitleAccess == true and route
+            or route.PlanTitleAccessRoute
+    )
+    if not titleRoute then
+        return true, "route access is already confirmed", false
+    end
+    local compatibility = self.Compatibility
+    if not compatibility or type(compatibility.GetUnlockedTitleCheck) ~= "function" then
+        return nil, "title access status is unavailable", false
+    end
+    local ok, state, reason, pending = pcall(
+        compatibility.GetUnlockedTitleCheck,
+        compatibility,
+        titleRoute.RequiresTitle
+    )
+    if not ok then
+        return nil, tostring(state), false
+    end
+    return state, reason, pending == true
+end
+
+function MapGatewayService:ShouldAbortForUnconfirmedTitle(route)
+    if not route
+        or (route.ProvisionalTitleAccess ~= true and not route.PlanTitleAccessRoute)
+    then
+        return false
+    end
+    local state, reason, pending = self:GetTitleAccessState(route)
+    if state == true or pending then
+        return false
+    end
+    return true, reason or "title access could not be confirmed"
+end
+
+function MapGatewayService:WaitForTitleAccess(route, timeout, isCurrent)
+    if not route
+        or (route.ProvisionalTitleAccess ~= true and not route.PlanTitleAccessRoute)
+    then
+        return true
+    end
+    local deadline = os.clock() + math.max(0, tonumber(timeout) or 0)
+    repeat
+        if type(isCurrent) == "function" and not isCurrent() then
+            return false, "Travel was cancelled"
+        end
+        local state, reason, pending = self:GetTitleAccessState(route)
+        if state == true then
+            return true
+        end
+        if state == false or not pending then
+            return false, reason or "title access could not be confirmed"
+        end
+        if os.clock() >= deadline then
+            break
+        end
+        task.wait(0.05)
+    until false
+    return false, "title access check timed out"
 end
 
 function MapGatewayService:FindPlan(
@@ -7247,6 +7377,11 @@ function MapGatewayService:FindPlan(
     diagnostic.SelectedRoutes = {}
     for _, route in ipairs(plan) do
         table.insert(diagnostic.SelectedRoutes, route.Name)
+        if route.ProvisionalTitleAccess == true
+            and not plan[1].PlanTitleAccessRoute
+        then
+            plan[1].PlanTitleAccessRoute = route
+        end
     end
     diagnostic.Phase = "gateway route selected"
     return plan, nil
@@ -8013,7 +8148,7 @@ function TeleportFeature:_StopMovementSession()
     end
 end
 
-function TeleportFeature:_MoveAndWait(request, character, destination)
+function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbort)
     local compatibility = self.Context.Compatibility
     local _, _, startRoot = compatibility:GetCharacterParts()
     if not startRoot then
@@ -8052,6 +8187,15 @@ function TeleportFeature:_MoveAndWait(request, character, destination)
     while self:_IsTravelCurrent(request, character) do
         if not self:_IsTravelCurrent(request, character) then
             return false, "Travel was interrupted"
+        end
+        if type(shouldAbort) == "function" then
+            local abortCheckOk, shouldStop, abortReason = pcall(shouldAbort)
+            if abortCheckOk and shouldStop == true then
+                self:_StopMovementSession()
+                return false,
+                    tostring(abortReason or "Route access could not be confirmed"),
+                    "title_access"
+            end
         end
         local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
         if currentCharacter ~= character or not currentRoot then
@@ -8221,12 +8365,22 @@ function TeleportFeature:_ApproachGatewayStand(request, character, route)
     })
     self:_SetStatus("Travelling to map gateway: " .. route.Name .. ".", "info")
 
-    local reached, movementError = self:_MoveAndWait(
+    local abortIfTitleUnknown
+    if route.ProvisionalTitleAccess == true or route.PlanTitleAccessRoute then
+        abortIfTitleUnknown = function()
+            return self.GatewayService:ShouldAbortForUnconfirmedTitle(route)
+        end
+    end
+    local reached, movementError, movementStage = self:_MoveAndWait(
         request,
         character,
-        CFrame.new(route.Stand)
+        CFrame.new(route.Stand),
+        abortIfTitleUnknown
     )
     if not reached then
+        if movementStage == "title_access" then
+            return false, movementError, "title_access"
+        end
         if not self:_IsTravelCurrent(request, character) then
             return false, movementError
         end
@@ -8407,12 +8561,51 @@ function TeleportFeature:_RunTravel(request, character)
         gatewayAttempts += 1
 
         self:_SetStatus("Using map gateway: " .. route.Name .. ".", "info")
-        local reached = self:_ApproachGatewayStand(request, character, route)
+        local reached, approachError, approachStage =
+            self:_ApproachGatewayStand(request, character, route)
         if not reached then
             if not self:_IsTravelCurrent(request, character) then
                 return
             end
+            if approachStage == "title_access" then
+                self.GatewayService:RecordTravelPhase(
+                    "Tiki title access was not confirmed; using normal travel",
+                    route,
+                    { Failure = approachError }
+                )
+                self:_SetStatus(
+                    "Tiki access could not be confirmed; continuing without that gateway.",
+                    "info"
+                )
+                request.RoutePlan = nil
+                continue
+            end
             gatewayFailed = true
+            request.RoutePlan = nil
+            continue
+        end
+
+        local titleAccessOk, titleAccessError =
+            self.GatewayService:WaitForTitleAccess(
+                route,
+                TITLE_ACCESS_RECHECK_WINDOW,
+                function()
+                    return self:_IsTravelCurrent(request, character)
+                end
+            )
+        if not titleAccessOk then
+            if not self:_IsTravelCurrent(request, character) then
+                return
+            end
+            self.GatewayService:RecordTravelPhase(
+                "Tiki title access was not confirmed; using normal travel",
+                route,
+                { Failure = titleAccessError }
+            )
+            self:_SetStatus(
+                "Tiki access could not be confirmed; continuing without that gateway.",
+                "info"
+            )
             request.RoutePlan = nil
             continue
         end

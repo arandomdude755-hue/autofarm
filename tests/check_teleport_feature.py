@@ -240,6 +240,26 @@ require(
     and "title_owned=" in GATEWAYS,
     "Tiki gateway eligibility must check Feathered Visage first, then an unlocked-title fallback, with diagnostics",
 )
+require(
+    "function Compatibility:GetUnlockedTitleCheck(titleName)" in COMPATIBILITY
+    and "function Compatibility:BeginUnlockedTitleCheck(titleName)" in COMPATIBILITY
+    and "self.TitleOwnershipPending[titleName] = true" in COMPATIBILITY
+    and "pcall(self.HasUnlockedTitle, self, titleName)" in COMPATIBILITY
+    and "compatibility.BeginUnlockedTitleCheck" in route_access
+    and "candidate.ProvisionalTitleAccess = true" in route_access
+    and "titlePending == true" in route_access
+    and "route.ProvisionalTitleAccess" in GATEWAYS
+    and "PlanTitleAccessRoute = route" in GATEWAYS
+    and "function MapGatewayService:ShouldAbortForUnconfirmedTitle(route)" in GATEWAYS
+    and "function MapGatewayService:WaitForTitleAccess(route, timeout, isCurrent)" in GATEWAYS
+    and "self.GatewayService:ShouldAbortForUnconfirmedTitle(route)" in FEATURE
+    and "route.ProvisionalTitleAccess == true or route.PlanTitleAccessRoute" in FEATURE
+    and "self.GatewayService:WaitForTitleAccess(" in FEATURE
+    and FEATURE.index("self.GatewayService:WaitForTitleAccess(")
+        < FEATURE.index("self.GatewayService:Use(route")
+    and 'movementStage == "title_access"' in FEATURE,
+    "Tiki title access must be checked asynchronously during approach and confirmed before touch activation",
+)
 gateway_touch = GATEWAYS[
     GATEWAYS.index("function MapGatewayService:_ResolveTouchTarget(route)"):
     GATEWAYS.index("\nfunction MapGatewayService:_GetAvailableRoutes")

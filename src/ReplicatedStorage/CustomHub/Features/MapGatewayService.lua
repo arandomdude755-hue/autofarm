@@ -332,19 +332,44 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                     candidate.TitleRouteCost = titleRouteCost
                     candidate.TitleRouteSavings = titleRouteSavings
                     if titleRouteSavings >= MINIMUM_DISTANCE_SAVED then
-                        local titleCheckOk, titleOwned, titleError = pcall(
-                            compatibility.HasUnlockedTitle,
-                            compatibility,
-                            source.RequiresTitle
-                        )
+                        local titleCheckOk
+                        local titleOwned
+                        local titleError
+                        local titlePending = false
+                        local titleCheckIsAsync = false
+                        if type(compatibility.BeginUnlockedTitleCheck) == "function" then
+                            titleCheckIsAsync = true
+                            local beginOk
+                            beginOk, titleOwned, titleError, titlePending = pcall(
+                                compatibility.BeginUnlockedTitleCheck,
+                                compatibility,
+                                source.RequiresTitle
+                            )
+                            titleCheckOk = beginOk
+                        else
+                            titleCheckOk, titleOwned, titleError = pcall(
+                                compatibility.HasUnlockedTitle,
+                                compatibility,
+                                source.RequiresTitle
+                            )
+                        end
                         if titleCheckOk and type(titleOwned) == "boolean" then
                             candidate.TitleRequirementOwned = titleOwned
                         end
-                        candidate.TitleCheckPending =
-                            titleCheckOk and titleOwned == nil
+                        candidate.TitleCheckPending = titleCheckOk
+                            and (
+                                titleCheckIsAsync
+                                    and titlePending == true
+                                or not titleCheckIsAsync
+                                    and titleOwned == nil
+                            )
                         if titleCheckOk and titleOwned == true then
                             available = true
                             candidate.AccessBy = source.RequiresTitle
+                        elseif candidate.TitleCheckPending then
+                            available = true
+                            candidate.ProvisionalTitleAccess = true
+                            candidate.Reason = "title access is being checked"
                         else
                             local itemReason = checkOk
                                     and (inventoryError or "required item not found in inventory")
@@ -367,7 +392,8 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                         or ("inventory check failed: " .. formatScalar(owned))
                 end
             end
-            candidate.RequirementOwned = available
+            candidate.RequirementOwned =
+                available and candidate.ProvisionalTitleAccess ~= true
 
             local stand = available and self:_ResolveStand(source) or nil
             if available and typeof(stand) ~= "Vector3" then
@@ -399,6 +425,8 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destin
                 local route = table.clone(source)
                 route.Stand = stand
                 route.TouchTarget = touchTarget
+                route.ProvisionalTitleAccess =
+                    candidate.ProvisionalTitleAccess == true
                 table.insert(routes, route)
             end
         end
@@ -414,6 +442,68 @@ function MapGatewayService:HasPendingTitleChecks()
         end
     end
     return false
+end
+
+function MapGatewayService:GetTitleAccessState(route)
+    local titleRoute = route and (
+        route.ProvisionalTitleAccess == true and route
+            or route.PlanTitleAccessRoute
+    )
+    if not titleRoute then
+        return true, "route access is already confirmed", false
+    end
+    local compatibility = self.Compatibility
+    if not compatibility or type(compatibility.GetUnlockedTitleCheck) ~= "function" then
+        return nil, "title access status is unavailable", false
+    end
+    local ok, state, reason, pending = pcall(
+        compatibility.GetUnlockedTitleCheck,
+        compatibility,
+        titleRoute.RequiresTitle
+    )
+    if not ok then
+        return nil, tostring(state), false
+    end
+    return state, reason, pending == true
+end
+
+function MapGatewayService:ShouldAbortForUnconfirmedTitle(route)
+    if not route
+        or (route.ProvisionalTitleAccess ~= true and not route.PlanTitleAccessRoute)
+    then
+        return false
+    end
+    local state, reason, pending = self:GetTitleAccessState(route)
+    if state == true or pending then
+        return false
+    end
+    return true, reason or "title access could not be confirmed"
+end
+
+function MapGatewayService:WaitForTitleAccess(route, timeout, isCurrent)
+    if not route
+        or (route.ProvisionalTitleAccess ~= true and not route.PlanTitleAccessRoute)
+    then
+        return true
+    end
+    local deadline = os.clock() + math.max(0, tonumber(timeout) or 0)
+    repeat
+        if type(isCurrent) == "function" and not isCurrent() then
+            return false, "Travel was cancelled"
+        end
+        local state, reason, pending = self:GetTitleAccessState(route)
+        if state == true then
+            return true
+        end
+        if state == false or not pending then
+            return false, reason or "title access could not be confirmed"
+        end
+        if os.clock() >= deadline then
+            break
+        end
+        task.wait(0.05)
+    until false
+    return false, "title access check timed out"
 end
 
 function MapGatewayService:FindPlan(
@@ -508,6 +598,11 @@ function MapGatewayService:FindPlan(
     diagnostic.SelectedRoutes = {}
     for _, route in ipairs(plan) do
         table.insert(diagnostic.SelectedRoutes, route.Name)
+        if route.ProvisionalTitleAccess == true
+            and not plan[1].PlanTitleAccessRoute
+        then
+            plan[1].PlanTitleAccessRoute = route
+        end
     end
     diagnostic.Phase = "gateway route selected"
     return plan, nil
