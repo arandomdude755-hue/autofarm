@@ -7459,9 +7459,9 @@ local STALL_RETRY_DELAY = 1.1
 local MAX_TRAVEL_TIMEOUT = 150
 local TITLE_ACCESS_RECHECK_WINDOW = 1
 local NPC_DIAGNOSTIC_TARGETS = {
-    { Label = "Titles Specialist", Names = { "titles specialist" } },
-    { Label = "Awakening Expert", Names = { "awakening expert" } },
-    { Label = "Blox Fruits Gacha", Names = { "blox fruit gacha", "blox fruits gacha" } },
+    { Label = "Titles Specialist", Names = { "Titles Specialist" } },
+    { Label = "Awakening Expert", Names = { "Awakening Expert" } },
+    { Label = "Blox Fruits Gacha", Names = { "Blox Fruit Gacha", "Blox Fruits Gacha" } },
 }
 
 local function disconnect(connection)
@@ -8078,7 +8078,7 @@ function TeleportFeature:BuildNpcAvailabilityReport()
     local lines = {
         "===== [TravelNpcDiagnostic] REPORT BEGIN =====",
         "Sea index: " .. tostring(currentSeaIndex(compatibility) or "unknown"),
-        "Scan scope: NPCs folders plus exact-name descendants of Workspace and ReplicatedStorage; read-only; no remotes invoked",
+        "Scan scope: direct NPC folders, targeted exact-name lookups in Workspace/ReplicatedStorage, and local NPCManager lookup; no remotes invoked",
     }
 
     for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
@@ -8114,40 +8114,118 @@ function TeleportFeature:BuildNpcAvailabilityReport()
         { Instance = workspace, Label = "Workspace" },
         { Instance = replicatedStorage, Label = "ReplicatedStorage" },
     }
-    local scanLimit = 20000
-    for _, scanRoot in ipairs(scanRoots) do
-        local descendants = scanRoot.Instance:GetDescendants()
-        local scanCount = math.min(#descendants, scanLimit)
-        for index = 1, scanCount do
-            local instance = descendants[index]
-            if instance:IsA("Model") then
-                local target = targetForName(instance.Name)
-                if target then
-                    local added = describeModel(
-                        instance,
-                        scanRoot.Label .. " descendant (outside direct NPC listing unless stated)",
-                        instance:IsDescendantOf(workspace),
-                        false,
-                        seenPaths,
-                        lines
-                    )
-                    if added then
-                        matches[target] += 1
+    local seenNamedInstances = {}
+    for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
+        for _, lookupName in ipairs(target.Names) do
+            for _, scanRoot in ipairs(scanRoots) do
+                local instance = scanRoot.Instance:FindFirstChild(lookupName, true)
+                if instance and not seenNamedInstances[instance] then
+                    seenNamedInstances[instance] = true
+                    if instance:IsA("Model") then
+                        local added = describeModel(
+                            instance,
+                            scanRoot.Label .. " descendant (outside direct NPC listing unless stated)",
+                            instance:IsDescendantOf(workspace),
+                            false,
+                            seenPaths,
+                            lines
+                        )
+                        if added then
+                            matches[target] += 1
+                        end
+                    else
+                        table.insert(
+                            lines,
+                            scanRoot.Label
+                                .. " exact-name instance "
+                                .. pathOf(instance)
+                                .. " is "
+                                .. instance.ClassName
+                                .. ", not an NPC Model"
+                        )
                     end
                 end
             end
         end
-        if #descendants > scanLimit then
+    end
+
+    local managerModule = replicatedStorage:FindFirstChild("NPCManager")
+    local managerOk, npcManager
+    if managerModule and managerModule:IsA("ModuleScript") then
+        managerOk, npcManager = pcall(require, managerModule)
+    else
+        managerOk = false
+        npcManager = "NPCManager ModuleScript is unavailable"
+    end
+    local managerFound = {}
+    for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
+        local foundManagerModel = false
+        if managerOk and type(npcManager) == "table"
+            and type(npcManager.getNPCsByName) == "function"
+        then
+            for _, lookupName in ipairs(target.Names) do
+                local lookupOk, entries = pcall(npcManager.getNPCsByName, lookupName)
+                local entryCount = lookupOk and type(entries) == "table" and #entries or 0
+                table.insert(
+                    lines,
+                    "NPCManager lookup "
+                        .. lookupName
+                        .. ": "
+                        .. (lookupOk
+                            and (tostring(entryCount) .. " entr(y/ies)")
+                            or ("failed: " .. tostring(entries)))
+                )
+                if lookupOk and type(entries) == "table" then
+                    for index, entry in ipairs(entries) do
+                        if index > 5 then
+                            break
+                        end
+                        local modelOk, model = pcall(function()
+                            local modelState = entry and entry._modelState
+                            return modelState and modelState._instance
+                        end)
+                        if modelOk and model and typeof(model) == "Instance" then
+                            foundManagerModel = true
+                            local isLive = model:IsDescendantOf(workspace)
+                            local isDirectNpcSource = model.Parent == liveFolder
+                                or model.Parent == templateFolder
+                            describeModel(
+                                model,
+                                "NPCManager.getNPCsByName",
+                                isLive,
+                                isDirectNpcSource,
+                                seenPaths,
+                                lines
+                            )
+                        else
+                            table.insert(
+                                lines,
+                                "  NPCManager entry "
+                                    .. tostring(index)
+                                    .. " has no model instance in _modelState._instance"
+                            )
+                        end
+                    end
+                end
+            end
+        else
             table.insert(
                 lines,
-                scanRoot.Label .. " descendant scan capped at " .. tostring(scanLimit)
+                "NPCManager lookup unavailable: "
+                    .. tostring(npcManager or "getNPCsByName is unavailable")
             )
         end
+        managerFound[target] = foundManagerModel
     end
 
     for _, target in ipairs(NPC_DIAGNOSTIC_TARGETS) do
-        if matches[target] == 0 then
-            table.insert(lines, "  No exact-name model found in the scanned folders or descendants.")
+        if matches[target] == 0 and not managerFound[target] then
+            table.insert(
+                lines,
+                "No exact-name model found for "
+                    .. target.Label
+                    .. " in the scanned folders, descendants, or NPCManager."
+            )
         end
     end
     table.insert(lines, "")

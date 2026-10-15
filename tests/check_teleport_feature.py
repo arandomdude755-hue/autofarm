@@ -89,9 +89,13 @@ require(
         "Blox Fruits Gacha",
     ))
     and 'FindFirstChild("NPCs")' in npc_report
-    and "GetDescendants()" in npc_report
+    and 'FindFirstChild(lookupName, true)' in npc_report
     and "discoverable_by_current_dropdown=" in npc_report
     and "IsTravelNpcPositionInCurrentSea" in npc_report
+    and "pcall(require, managerModule)" in npc_report
+    and "npcManager.getNPCsByName" in npc_report
+    and "No exact-name model found for " in npc_report
+    and "GetDescendants()" not in npc_report
     and "setclipboard(report)" in FEATURE
     and "InvokeServer" not in npc_report
     and "FireServer" not in npc_report
