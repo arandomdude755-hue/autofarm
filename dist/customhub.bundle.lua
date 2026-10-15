@@ -3512,7 +3512,6 @@ function UI:_ApplyControlSearchHighlight()
                 header.IconStroke.Color = matched and theme.Accent or theme.AccentBorder
                 header.Stroke.Color = matched and theme.AccentBorder or theme.Border
                 header.Stroke.Transparency = matched and 0.08 or 0.18
-                header.Rule.BackgroundColor3 = theme.Border
             else
                 row.BackgroundColor3 = matched and theme.Selected
                     or control.Kind == "collapsibleHeader" and theme.Header
@@ -4581,21 +4580,11 @@ function UI:_CreateControlGroup(group, layoutOrder)
             TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 3,
         }, group.Card)
-        group.Rule = create("Frame", {
-            Name = "SectionDivider",
-            Position = UDim2.new(0, padding, 0, headerHeight - 1),
-            Size = UDim2.new(1, -padding * 2, 0, 1),
-            BackgroundColor3 = theme.Border,
-            BackgroundTransparency = 0.28,
-            BorderSizePixel = 0,
-            ZIndex = 3,
-        }, group.Card)
         self.ControlRows[group.HeaderControl] = group.Title
         self.SectionHeaderRecords[group.HeaderControl] = {
             Title = group.Title,
             IconStroke = group.IconStroke,
             Stroke = group.Stroke,
-            Rule = group.Rule,
         }
     end
 
