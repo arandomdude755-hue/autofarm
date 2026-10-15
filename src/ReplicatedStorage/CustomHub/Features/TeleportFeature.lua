@@ -16,7 +16,7 @@ local MAX_STALL_RETRIES = 2
 local STALL_RETRY_DELAY = 1.1
 local MAX_TRAVEL_TIMEOUT = 150
 local MAX_GATEWAY_ATTEMPTS = 4
-local TITLE_ACCESS_RECHECK_WINDOW = 1
+local TITLE_ACCESS_RECHECK_WINDOW = 6
 local NPC_DIAGNOSTIC_TARGETS = {
     { Label = "Titles Specialist", Names = { "Titles Specialist" } },
     { Label = "Awakenings Expert", Names = { "Awakenings Expert", "Awakening Expert" } },

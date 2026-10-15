@@ -8,7 +8,7 @@ local CollectionService = game:GetService("CollectionService")
 local Compatibility = {}
 Compatibility.__index = Compatibility
 
-local TITLE_MENU_PROBE_TIMEOUT = 0.35
+local TITLE_MENU_PROBE_TIMEOUT = 5
 local TITLE_MENU_PROBE_INTERVAL = 0.05
 local TITLE_MENU_CLOSE_GUARD_DURATION = 1.5
 local TITLE_LOCKED_CONFIRMATION_DELAY = 0.25
@@ -641,6 +641,7 @@ function Compatibility:HasUnlockedTitle(titleName)
                 openEvent:Fire()
             end)
             if fired then
+                task.wait(0.05)
                 suppressProbeMenu()
             else
                 openedForProbe = false

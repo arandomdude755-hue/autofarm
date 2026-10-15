@@ -203,7 +203,7 @@ require(
     and 'FindFirstChild("lockedImage", true)' in title_access
     and 'FindFirstChild("Open")' in title_access
     and "openEvent:Fire()" in title_access
-    and "TITLE_MENU_PROBE_TIMEOUT = 0.35" in COMPATIBILITY
+    and "TITLE_MENU_PROBE_TIMEOUT = 5" in COMPATIBILITY
     and "activeFrame.Visible = false" in title_access
     and "closeButton:Activate()" in title_access
     and "TITLE_MENU_CLOSE_GUARD_DURATION = 1.5" in COMPATIBILITY
@@ -214,6 +214,9 @@ require(
     and "TITLE_STATE_CACHE_TTL = 5" in COMPATIBILITY
     and "TITLE_STATE_UNKNOWN_CACHE_TTL = 1" in COMPATIBILITY
     and "task.wait(0.05)" in title_access
+    and title_access.index("openEvent:Fire()")
+        < title_access.index("task.wait(0.05)")
+        < title_access.index("suppressProbeMenu()")
     and "InvokeServer" not in title_access
     and "FireServer" not in title_access,
     "title access lookup must read the loaded TitlesMenu, hide/restore a bounded UI probe, cache results, and avoid unknown remotes",
@@ -234,7 +237,7 @@ require(
     and "candidate.TitleRouteSavings" in route_access
     and "; title_route_saved=" in GATEWAYS
     and "function MapGatewayService:HasPendingTitleChecks()" in GATEWAYS
-    and "TITLE_ACCESS_RECHECK_WINDOW = 1" in FEATURE
+    and "TITLE_ACCESS_RECHECK_WINDOW = 6" in FEATURE
     and "self.GatewayService:HasPendingTitleChecks()" in FEATURE
     and "fallback_title=" in GATEWAYS
     and "title_owned=" in GATEWAYS,
