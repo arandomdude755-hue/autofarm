@@ -74,3 +74,9 @@ For Gun M1 knockback, pause target-chasing briefly after the game reports a clie
 **Why:** the user approved reducing chase jitter after Gun M1 because following each small knockback can push the player or NPC into walls.
 
 **How to apply:** gate the pause on observed client firing state, scope it to the same target, keep it short and bounded, and clear it on target/method/tool changes or farm shutdown.
+
+Double Quest keeps the active quest and farms a nearby previous-quest mob only while the active target is absent. The fallback does not advance the active quest, does not change or accept quests, and must not send the farm across the map; prioritize the active target as soon as it returns.
+
+**Why:** the user chose farm-extra behavior while waiting for the main quest target, rather than abandoning/replacing the quest or attempting simultaneous quest tracking.
+
+**How to apply:** expose it as an opt-in Farm setting, search already-loaded previous-quest targets within a bounded distance, and keep the active quest target's normal spawn/retry logic intact.

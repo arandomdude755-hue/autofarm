@@ -46,6 +46,10 @@ require('Label = "Auto quest Cake/Bones/Tyrant"' in farm_config
         and 'Action = "farm.autoModeQuest"' in farm_config
         and 'Setting = "AutoModeQuest"' in farm_config
         and "AutoModeQuest = false" in CONFIG
+        and 'Label = "Double Quest"' in farm_config
+        and 'Action = "farm.doubleQuest"' in farm_config
+        and 'Setting = "DoubleQuestEnabled"' in farm_config
+        and "DoubleQuestEnabled = false" in CONFIG
         and 'Label = "Ignore Cake Prince boss"' in farm_config
         and 'Action = "farm.ignoreCakePrince"' in farm_config
         and 'Setting = "IgnoreCakePrince"' in farm_config,
@@ -133,6 +137,17 @@ require('Label = "Bring mobs"' in farm_settings_config
 require('local weaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG
         and "WeaponCategories = weaponCategories" in CONFIG,
         "Weapon selector must use the supported category choices")
+double_quest_action = function_body(
+    MAIN_FARM,
+    'if actionId == "farm.doubleQuest" then',
+    'if actionId == "farm.ignoreCakePrince" then',
+)
+require(
+    "farmSettings.DoubleQuestEnabled = payload" in double_quest_action
+    and "nearby earlier-quest mobs" in double_quest_action
+    and "Double Quest disabled." in double_quest_action,
+    "Double Quest control must update its setting and give clear on/off feedback",
+)
 
 activate = function_body(UI, "function UI:_ActivateControl(control)", "\nfunction UI:_AddControl")
 require("snapshot.featureEnabled[control.Action] ~= true" in activate,

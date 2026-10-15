@@ -465,6 +465,7 @@ local Config = {
         MasteryHealthPercentMax = 100,
         MasteryHealthPercentStep = 1,
         AutoModeQuest = false,
+        DoubleQuestEnabled = false,
         IgnoreCakePrince = false,
         AuraDistance = 300,
         AuraDistanceMin = 0,
@@ -628,6 +629,12 @@ local Config = {
                     Label = "Auto quest Cake/Bones/Tyrant",
                     Action = "farm.autoModeQuest",
                     Setting = "AutoModeQuest",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Double Quest",
+                    Action = "farm.doubleQuest",
+                    Setting = "DoubleQuestEnabled",
                 },
                 {
                     Kind = "settingToggle",
@@ -10450,6 +10457,90 @@ function QuestService:SelectLevelQuest()
     return bestCandidate
 end
 
+function QuestService:SelectPreviousLevelQuestTarget(activeTarget)
+    if type(activeTarget) ~= "string" or activeTarget == "" then
+        return nil, "Active quest target is unavailable"
+    end
+
+    local level = self:GetPlayerLevel()
+    local guideData = self.Guide and self.Guide.Data
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if not level or type(npcList) ~= "table" or type(self.Quests) ~= "table" then
+        return nil, "Player level or quest catalog is unavailable"
+    end
+
+    local bestCurrentLevel = -1
+    local bestCandidate = nil
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table"
+            and not excludedQuestNames[npcEntry.InternalQuestName]
+            and type(npcEntry.Levels) == "table"
+        then
+            local questName = npcEntry.InternalQuestName
+            local questGroup = type(questName) == "string" and self.Quests[questName] or nil
+            if type(questGroup) == "table" then
+                for questId, requiredLevel in pairs(npcEntry.Levels) do
+                    local numericQuestId = tonumber(questId)
+                    local currentLevel = tonumber(requiredLevel)
+                    local currentQuest = questGroup[questId]
+                        or (numericQuestId and questGroup[numericQuestId])
+                    if numericQuestId and numericQuestId > 1
+                        and currentLevel and currentLevel <= level
+                        and currentLevel >= bestCurrentLevel
+                        and type(currentQuest) == "table"
+                        and type(currentQuest.Task) == "table"
+                        and tonumber(currentQuest.Task[activeTarget])
+                    then
+                        local previousQuestId = numericQuestId - 1
+                        local previousQuest = questGroup[previousQuestId]
+                            or questGroup[tostring(previousQuestId)]
+                        if type(previousQuest) == "table"
+                            and type(previousQuest.Task) == "table"
+                        then
+                            local previousLevel = tonumber(previousQuest.LevelReq) or 0
+                            for listedId, listedLevel in pairs(npcEntry.Levels) do
+                                if tonumber(listedId) == previousQuestId then
+                                    previousLevel = math.max(
+                                        previousLevel,
+                                        tonumber(listedLevel) or 0
+                                    )
+                                    break
+                                end
+                            end
+
+                            if previousLevel <= level then
+                                for previousMob, previousCount in pairs(previousQuest.Task) do
+                                    if type(previousMob) == "string"
+                                        and previousMob ~= activeTarget
+                                        and tonumber(previousCount)
+                                        and tonumber(previousCount) > 1
+                                    then
+                                        bestCurrentLevel = currentLevel
+                                        bestCandidate = {
+                                            Level = previousLevel,
+                                            Name = npcEntry.NPCName,
+                                            QuestName = questName,
+                                            Pos = npcEntry.Position,
+                                            Id = previousQuestId,
+                                            Mob = previousMob,
+                                        }
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not bestCandidate then
+        return nil, "No eligible previous quest target for the active quest"
+    end
+    return bestCandidate
+end
+
 function QuestService:GetQuestTargets(prefix, maximumLevel)
     if type(prefix) ~= "string" or prefix == "" then
         return nil, "Quest family prefix is invalid"
@@ -13825,6 +13916,8 @@ local QUEST_DIALOGUE_MOVE_RETRY_INTERVAL = 0.5
 local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
 local FARM_STEP_INTERVAL = 0.1
 local NPC_SCAN_INTERVAL = 0.15
+local DOUBLE_QUEST_SCAN_INTERVAL = 0.5
+local DOUBLE_QUEST_MAX_FALLBACK_DISTANCE = 3000
 local SPAWN_SCAN_INTERVAL = 1
 local TIKI_EVENT_SCAN_INTERVAL = 1
 local TIKI_ACTION_INTERVAL = 0.4
@@ -14761,6 +14854,10 @@ function MainFarm:_ClearTarget(preserveMovement)
     self.TargetName = nil
     self.TargetIsBoss = nil
     self.GunKnockbackHold = nil
+    self.DoubleQuestFallbackFor = nil
+    self.DoubleQuestFallbackName = nil
+    self.DoubleQuestScanTarget = nil
+    self.NextDoubleQuestScanAt = 0
     if self.CombatService then
         self.CombatService:ClearFarmSkillAimTarget()
     end
@@ -16631,6 +16728,39 @@ function MainFarm:_StepFarmMaterials(session, root)
     )
 end
 
+function MainFarm:_FindDoubleQuestFallback(activeTarget, root, now)
+    local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
+    if farmSettings.DoubleQuestEnabled ~= true then
+        return nil
+    end
+
+    if self.DoubleQuestScanTarget ~= activeTarget then
+        self.DoubleQuestScanTarget = activeTarget
+        self.NextDoubleQuestScanAt = 0
+    end
+    if now < (self.NextDoubleQuestScanAt or 0) then
+        return nil
+    end
+    self.NextDoubleQuestScanAt = now + DOUBLE_QUEST_SCAN_INTERVAL
+
+    local candidate = self.QuestService:SelectPreviousLevelQuestTarget(activeTarget)
+    if not candidate or type(candidate.Mob) ~= "string" or candidate.Mob == activeTarget then
+        return nil
+    end
+
+    local target = self.EnemyService:FindNearest(candidate.Mob, root.Position)
+    if not target or not self.EnemyService:IsAlive(target) then
+        return nil
+    end
+    local targetRoot = target:FindFirstChild("HumanoidRootPart")
+    if not targetRoot
+        or (targetRoot.Position - root.Position).Magnitude > DOUBLE_QUEST_MAX_FALLBACK_DISTANCE
+    then
+        return nil
+    end
+    return target, candidate.Mob
+end
+
 function MainFarm:_Step(session)
     if not self:_IsCurrent(session) then
         return
@@ -16657,6 +16787,10 @@ function MainFarm:_Step(session)
         self.Character = character
         self.Target = nil
         self.TargetName = nil
+        self.DoubleQuestFallbackFor = nil
+        self.DoubleQuestFallbackName = nil
+        self.DoubleQuestScanTarget = nil
+        self.NextDoubleQuestScanAt = 0
         self.TikiPuzzleActive = false
         self.TikiPuzzleRestorePending = false
         self.TikiEventComplete = false
@@ -16871,7 +17005,12 @@ function MainFarm:_Step(session)
         return
     end
 
-    if self.TargetName ~= activeTarget then
+    local keepDoubleQuestFallback = farmSettings.DoubleQuestEnabled == true
+        and self.DoubleQuestFallbackFor == activeTarget
+        and self.TargetName == self.DoubleQuestFallbackName
+        and self.Target ~= nil
+        and self.EnemyService:IsAlive(self.Target)
+    if self.TargetName ~= activeTarget and not keepDoubleQuestFallback then
         self:_ClearTarget(true)
         self:_ResetSpawnSearch(activeTarget)
         self.TargetName = activeTarget
@@ -16879,11 +17018,27 @@ function MainFarm:_Step(session)
 
     local now = os.clock()
     local target
+    local targetName = activeTarget
+    local isDoubleQuestFallback = false
     if self.Target and self.TargetName == activeTarget and self.EnemyService:IsAlive(self.Target) then
         target = self.Target
     elseif now >= (self.NextEnemySearchAt or 0) then
         target = self.EnemyService:FindNearest(activeTarget, root.Position)
+        if not target then
+            if keepDoubleQuestFallback then
+                target = self.Target
+                targetName = self.DoubleQuestFallbackName
+                isDoubleQuestFallback = true
+            else
+                target, targetName = self:_FindDoubleQuestFallback(activeTarget, root, now)
+                isDoubleQuestFallback = target ~= nil
+            end
+        end
         self.NextEnemySearchAt = now + NPC_SCAN_INTERVAL
+    elseif keepDoubleQuestFallback then
+        target = self.Target
+        targetName = self.DoubleQuestFallbackName
+        isDoubleQuestFallback = true
     end
     if not target then
         if self.Target then
@@ -17053,8 +17208,18 @@ function MainFarm:_Step(session)
     if self.Target ~= target then
         self:_ClearTarget(true)
         self.Target = target
-        self.TargetName = activeTarget
-        self:_SetStatus("Target acquired: " .. activeTarget, "success")
+        self.TargetName = targetName
+        if isDoubleQuestFallback then
+            self.DoubleQuestFallbackFor = activeTarget
+            self.DoubleQuestFallbackName = targetName
+            self:_SetStatus(
+                "Double Quest: farming " .. targetName .. " while "
+                    .. activeTarget .. " respawns",
+                "info"
+            )
+        else
+            self:_SetStatus("Target acquired: " .. activeTarget, "success")
+        end
     end
     if not self.EnemyService:IsAlive(target) then
         self:_ClearTarget(true)
@@ -17137,6 +17302,10 @@ function MainFarm:_Run(session)
             end
             self.Target = nil
             self.TargetName = nil
+            self.DoubleQuestFallbackFor = nil
+            self.DoubleQuestFallbackName = nil
+            self.DoubleQuestScanTarget = nil
+            self.NextDoubleQuestScanAt = 0
             self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
         end
         task.wait(FARM_STEP_INTERVAL)
@@ -17226,6 +17395,10 @@ function MainFarm:Initialize(context)
     self.Character = nil
     self.Target = nil
     self.TargetName = nil
+    self.DoubleQuestFallbackFor = nil
+    self.DoubleQuestFallbackName = nil
+    self.DoubleQuestScanTarget = nil
+    self.NextDoubleQuestScanAt = 0
     self.QuestService = nil
     self.EnemyService = nil
     self.MovementService = nil
@@ -17287,6 +17460,10 @@ function MainFarm:Initialize(context)
             end
             self.Target = nil
             self.TargetName = nil
+            self.DoubleQuestFallbackFor = nil
+            self.DoubleQuestFallbackName = nil
+            self.DoubleQuestScanTarget = nil
+            self.NextDoubleQuestScanAt = 0
             self.Character = nil
             self.QuestDialogueRecovery = nil
             self.NextTikiEventScanAt = 0
@@ -17391,6 +17568,10 @@ function MainFarm:Start()
     self.FarmSkillIgnoredTools = {}
     self.FarmGunToolSettleUntil = 0
     self.GunKnockbackHold = nil
+    self.DoubleQuestFallbackFor = nil
+    self.DoubleQuestFallbackName = nil
+    self.DoubleQuestScanTarget = nil
+    self.NextDoubleQuestScanAt = 0
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     self.Context.State:SetFeatureEnabled("farm.main", true)
@@ -17437,6 +17618,10 @@ function MainFarm:Stop()
     end
     self.Target = nil
     self.TargetName = nil
+    self.DoubleQuestFallbackFor = nil
+    self.DoubleQuestFallbackName = nil
+    self.DoubleQuestScanTarget = nil
+    self.NextDoubleQuestScanAt = 0
     self.TargetIsBoss = nil
     self.NextTikiEventScanAt = 0
     self.TikiEventActive = false
@@ -17653,6 +17838,20 @@ function MainFarm:Handle(actionId, payload)
         farmSettings.AutoModeQuest = payload
         self:_SetStatus(
             "Auto quest Cake/Bones/Tyrant " .. (payload and "enabled" or "disabled"),
+            "success"
+        )
+        return true
+    end
+    if actionId == "farm.doubleQuest" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Double Quest setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.DoubleQuestEnabled = payload
+        self:_SetStatus(
+            payload
+                and "Double Quest on: farm nearby earlier-quest mobs while waiting; no quest credit."
+                or "Double Quest disabled.",
             "success"
         )
         return true

@@ -436,6 +436,7 @@ local Config = {
         MasteryHealthPercentMax = 100,
         MasteryHealthPercentStep = 1,
         AutoModeQuest = false,
+        DoubleQuestEnabled = false,
         IgnoreCakePrince = false,
         AuraDistance = 300,
         AuraDistanceMin = 0,
@@ -599,6 +600,12 @@ local Config = {
                     Label = "Auto quest Cake/Bones/Tyrant",
                     Action = "farm.autoModeQuest",
                     Setting = "AutoModeQuest",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Double Quest",
+                    Action = "farm.doubleQuest",
+                    Setting = "DoubleQuestEnabled",
                 },
                 {
                     Kind = "settingToggle",

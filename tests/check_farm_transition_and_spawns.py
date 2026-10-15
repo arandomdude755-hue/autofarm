@@ -119,6 +119,37 @@ require(
     ],
     "a validated manual acceptance must cancel retreat before quest-target farming resumes",
 )
+double_quest_lookup = FARM[
+    FARM.index("function MainFarm:_FindDoubleQuestFallback"):
+    FARM.index("\nfunction MainFarm:_Step(session)")
+]
+require(
+    "farmSettings.DoubleQuestEnabled ~= true" in double_quest_lookup
+    and "SelectPreviousLevelQuestTarget(activeTarget)" in double_quest_lookup
+    and "FindNearest(candidate.Mob, root.Position)" in double_quest_lookup
+    and "DOUBLE_QUEST_MAX_FALLBACK_DISTANCE = 3000" in FARM
+    and "DOUBLE_QUEST_SCAN_INTERVAL = 0.5" in FARM
+    and "targetRoot.Position - root.Position" in double_quest_lookup,
+    "Double Quest must use a throttled, nearby live previous-quest target only",
+)
+double_quest_start = step.index("local keepDoubleQuestFallback =")
+double_quest_end = step.index("if self.SpawnSearchExhausted then", double_quest_start)
+double_quest_step = step[double_quest_start:double_quest_end]
+require(
+    "FindNearest(activeTarget, root.Position)" in double_quest_step
+    and "if not target then" in double_quest_step
+    and "keepDoubleQuestFallback" in double_quest_step
+    and "_FindDoubleQuestFallback(activeTarget, root, now)" in double_quest_step
+    and "self.TargetName = targetName" in step
+    and "self.DoubleQuestFallbackFor = activeTarget" in step
+    and "self:_RequestQuest" not in double_quest_step,
+    "the active quest target must take priority and remain active while fallback mobs are farmed",
+)
+require(
+    'self.EnemyService:FindSpawn(activeTarget, root.Position)' in step
+    and 'self:_SetStatus(\n                "Double Quest: farming " .. targetName' in step,
+    "Double Quest must never travel to fallback spawn markers and should identify fallback farming",
+)
 require(
     "if self.QuestDeferredForDialogue then\n                self.PendingQuestReachedAt = os.clock() - 2"
     in step

@@ -784,6 +784,90 @@ function QuestService:SelectLevelQuest()
     return bestCandidate
 end
 
+function QuestService:SelectPreviousLevelQuestTarget(activeTarget)
+    if type(activeTarget) ~= "string" or activeTarget == "" then
+        return nil, "Active quest target is unavailable"
+    end
+
+    local level = self:GetPlayerLevel()
+    local guideData = self.Guide and self.Guide.Data
+    local npcList = type(guideData) == "table" and guideData.NPCList or nil
+    if not level or type(npcList) ~= "table" or type(self.Quests) ~= "table" then
+        return nil, "Player level or quest catalog is unavailable"
+    end
+
+    local bestCurrentLevel = -1
+    local bestCandidate = nil
+    for _, npcEntry in pairs(npcList) do
+        if type(npcEntry) == "table"
+            and not excludedQuestNames[npcEntry.InternalQuestName]
+            and type(npcEntry.Levels) == "table"
+        then
+            local questName = npcEntry.InternalQuestName
+            local questGroup = type(questName) == "string" and self.Quests[questName] or nil
+            if type(questGroup) == "table" then
+                for questId, requiredLevel in pairs(npcEntry.Levels) do
+                    local numericQuestId = tonumber(questId)
+                    local currentLevel = tonumber(requiredLevel)
+                    local currentQuest = questGroup[questId]
+                        or (numericQuestId and questGroup[numericQuestId])
+                    if numericQuestId and numericQuestId > 1
+                        and currentLevel and currentLevel <= level
+                        and currentLevel >= bestCurrentLevel
+                        and type(currentQuest) == "table"
+                        and type(currentQuest.Task) == "table"
+                        and tonumber(currentQuest.Task[activeTarget])
+                    then
+                        local previousQuestId = numericQuestId - 1
+                        local previousQuest = questGroup[previousQuestId]
+                            or questGroup[tostring(previousQuestId)]
+                        if type(previousQuest) == "table"
+                            and type(previousQuest.Task) == "table"
+                        then
+                            local previousLevel = tonumber(previousQuest.LevelReq) or 0
+                            for listedId, listedLevel in pairs(npcEntry.Levels) do
+                                if tonumber(listedId) == previousQuestId then
+                                    previousLevel = math.max(
+                                        previousLevel,
+                                        tonumber(listedLevel) or 0
+                                    )
+                                    break
+                                end
+                            end
+
+                            if previousLevel <= level then
+                                for previousMob, previousCount in pairs(previousQuest.Task) do
+                                    if type(previousMob) == "string"
+                                        and previousMob ~= activeTarget
+                                        and tonumber(previousCount)
+                                        and tonumber(previousCount) > 1
+                                    then
+                                        bestCurrentLevel = currentLevel
+                                        bestCandidate = {
+                                            Level = previousLevel,
+                                            Name = npcEntry.NPCName,
+                                            QuestName = questName,
+                                            Pos = npcEntry.Position,
+                                            Id = previousQuestId,
+                                            Mob = previousMob,
+                                        }
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not bestCandidate then
+        return nil, "No eligible previous quest target for the active quest"
+    end
+    return bestCandidate
+end
+
 function QuestService:GetQuestTargets(prefix, maximumLevel)
     if type(prefix) ~= "string" or prefix == "" then
         return nil, "Quest family prefix is invalid"

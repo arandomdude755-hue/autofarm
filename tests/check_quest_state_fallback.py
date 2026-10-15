@@ -78,6 +78,20 @@ require(
     "not excludedQuestNames[npcEntry.InternalQuestName]" in selector,
     "existing level-quest exclusions were removed",
 )
+previous_target_selector = QUEST_SERVICE[
+    QUEST_SERVICE.index("function QuestService:SelectPreviousLevelQuestTarget(activeTarget)"):
+    QUEST_SERVICE.index("\nfunction QuestService:GetQuestTargets")
+]
+require(
+    "local previousQuestId = numericQuestId - 1" in previous_target_selector
+    and "currentQuest.Task[activeTarget]" in previous_target_selector
+    and "previousQuest.Task" in previous_target_selector
+    and "previousMob ~= activeTarget" in previous_target_selector
+    and "previousLevel <= level" in previous_target_selector
+    and "Id = previousQuestId" in previous_target_selector
+    and "Mob = previousMob" in previous_target_selector,
+    "Double Quest fallback must resolve a prior target from the same active quest group and level range",
+)
 for excluded_name in ("BartiloQuest", "Trainees", "MarineQuest", "CitizenQuest"):
     require(f"{excluded_name} = true" in QUEST_SERVICE,
             f"existing quest-selection exclusion changed: {excluded_name}")
