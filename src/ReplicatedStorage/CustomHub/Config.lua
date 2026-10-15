@@ -488,6 +488,7 @@ local Config = {
         SidebarChildRowHeight = 25,
         SidebarChildIndent = 12,
         PageHeaderHeight = 32,
+        SectionHeaderHeight = 46,
         StatusTop = 0,
         StatusHeight = 30,
         StatusInset = 8,

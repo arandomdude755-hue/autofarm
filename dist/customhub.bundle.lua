@@ -517,6 +517,7 @@ local Config = {
         SidebarChildRowHeight = 25,
         SidebarChildIndent = 12,
         PageHeaderHeight = 32,
+        SectionHeaderHeight = 46,
         StatusTop = 0,
         StatusHeight = 30,
         StatusInset = 8,
@@ -3951,8 +3952,15 @@ function UI:_AddControl(control)
         local isCollapsible = control.Kind == "collapsibleHeader"
         local row = create(isCollapsible and "TextButton" or "Frame", {
             Name = self:_ControlNodeName(control),
-            Size = UDim2.new(1, 0, 0, layout.RowHeight),
-            BackgroundColor3 = theme.Control,
+            Size = UDim2.new(
+                1,
+                0,
+                0,
+                isCollapsible and layout.RowHeight
+                    or layout.SectionHeaderHeight
+                    or layout.RowHeight
+            ),
+            BackgroundColor3 = isCollapsible and theme.Control or theme.Panel,
             BorderSizePixel = 0,
             LayoutOrder = #self.ControlsContainer:GetChildren(),
         }, self.ControlsContainer)
@@ -3966,25 +3974,41 @@ function UI:_AddControl(control)
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
                 Transparency = 0.4,
             }, row)
+        else
+            create("UIStroke", {
+                Color = theme.Border,
+                Thickness = layout.BorderThickness,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Transparency = 0.18,
+            }, row)
         end
         addCorner(row, 4)
-        create("Frame", {
-            Name = "Accent",
-            Position = UDim2.new(0, layout.RowInset, 0.5, -7),
-            Size = UDim2.fromOffset(3, 14),
-            BackgroundColor3 = theme.Accent,
-            BorderSizePixel = 0,
-        }, row)
-        create("TextLabel", {
+        if isCollapsible then
+            create("Frame", {
+                Name = "Accent",
+                Position = UDim2.new(0, layout.RowInset, 0.5, -7),
+                Size = UDim2.fromOffset(3, 14),
+                BackgroundColor3 = theme.Accent,
+                BorderSizePixel = 0,
+            }, row)
+        end
+        local title = create("TextLabel", {
             Name = "Title",
-            Position = UDim2.new(0, layout.RowInset + 12, 0, 0),
-            Size = UDim2.new(1, -(layout.RowInset * 2 + 12 + (isCollapsible and 30 or 0)), 1, 0),
+            Position = isCollapsible
+                and UDim2.new(0, layout.RowInset + 12, 0, 0)
+                or UDim2.new(0, layout.RowInset, 0, 0),
+            Size = isCollapsible
+                and UDim2.new(1, -(layout.RowInset * 2 + 42), 1, 0)
+                or UDim2.new(1, -layout.RowInset * 2, 1, -7),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = control.Label,
             TextColor3 = theme.Text,
-            TextSize = theme.TextSizes.Control,
-            TextXAlignment = Enum.TextXAlignment.Left,
+            TextSize = isCollapsible and theme.TextSizes.Control or theme.TextSizes.Control + 2,
+            TextXAlignment = isCollapsible
+                and Enum.TextXAlignment.Left
+                or Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
         }, row)
         if isCollapsible then
             local arrow = create("TextLabel", {
@@ -4003,6 +4027,16 @@ function UI:_AddControl(control)
             self:_Connect(self.PageConnections, row.Activated, function()
                 self:_ToggleControlGroup(control.GroupId)
             end)
+        else
+            create("Frame", {
+                Name = "AccentRule",
+                AnchorPoint = Vector2.new(0.5, 1),
+                Position = UDim2.new(0.5, 0, 1, -4),
+                Size = UDim2.new(1, -layout.RowInset * 2, 0, 2),
+                BackgroundColor3 = theme.Accent,
+                BackgroundTransparency = 0.18,
+                BorderSizePixel = 0,
+            }, row)
         end
         return row
     end
