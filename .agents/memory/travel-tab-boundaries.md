@@ -26,3 +26,9 @@ For farm targets in Submerged, plan map gateways toward Tiki staging first, then
 **Why:** Submerged is entered through the Tiki NPC transport, so comparing map gateways against the underwater target as if it were a normal island endpoint can hide a much shorter composite route.
 
 **How to apply:** keep map-gateway planning aimed at the Tiki staging point for outbound Submerged trips; retain the existing MovementService route as fallback when no shorter gateway plan is available.
+
+For travel starting inside Submerged and heading elsewhere, first use the Submerged exit transport to Tiki Outpost, confirm arrival, then plan map gateways from Tiki to the final destination. This applies to both farm travel and manual Travel-tab trips.
+
+**Why:** map gateways are outside Submerged; scoring them from the underwater starting position can choose a poor route or skip the necessary Submarine Transportation step.
+
+**How to apply:** move to the existing submerged exit staging point, use the shared MovementService route request, verify arrival near Tiki Outpost, and only then compute gateway legs to the destination.

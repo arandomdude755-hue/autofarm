@@ -388,17 +388,40 @@ require(
     and 'Name = "Submerged"' in movement_service
     and "ArrivalReference = SUBMERGED_REFERENCE" in movement_service
     and "function MovementService:RequestSpecialTravelRoute(route, isCurrent)" in movement_service
+    and "local TIKI_OUTPOST_REFERENCE = Vector3.new(-16204, 10, 479)" in movement_service
+    and "ArrivalReference = TIKI_OUTPOST_REFERENCE" in movement_service
     and 'FindFirstChild("RF/SubmarineWorkerSpeak")' in movement_service
     and 'remote:InvokeServer("TravelToSubmergedIsland")' in movement_service
     and '"SetLastSpawnPoint", "SubmergedIsland"' in movement_service
+    and 'remote:InvokeServer("InitiateTeleport", "Tiki Outpost")' in movement_service
     and "self.MovementService:GetSpecialTravelRoute(" in FEATURE
     and "Tiki staging for Submerged" in FEATURE
+    and "Submerged exit staging" in FEATURE
     and "RoutePlanDestination = gatewayDestination.Position" in FEATURE
-    and "gatewayDestination.Position,\n        root.Position,\n        gatewayPlanLabel" in FEATURE
+    and "gatewayDestination.Position" in FEATURE
+    and "gatewayPlanLabel" in FEATURE
     and "self.MovementService:RequestSpecialTravelRoute(" in FEATURE
-    and "Submerged transport did not confirm arrival" in FEATURE
+    and "at Submerged exit staging; requesting Tiki transport" in FEATURE
+    and "Tiki arrival confirmed; planning gateway route" in FEATURE
+    and "request.GatewayDestination = request.Destination" in FEATURE
+    and "local outboundTiki = specialRoute and specialRoute.Name == \"Tiki\"" in FEATURE
+    and "if not outboundTiki then" in FEATURE
+    and 'arrivalName .. " transport did not confirm arrival"' in FEATURE
     and "self:_RunDirectTravel(request, character, false, request.Destination, true)" in FEATURE,
-    "Submerged farm travel must plan map gateways to Tiki, use the Submarine Worker, confirm arrival, then continue to the target",
+    "Submerged farm and manual trips must compose the Tiki transport with gateway routing in both directions",
+)
+manual_start_travel = FEATURE[
+    FEATURE.index("function TeleportFeature:_StartTravel("):
+    FEATURE.index("\nfunction TeleportFeature:_SelectSetting(")
+]
+require(
+    "self.MovementService:GetSpecialTravelRoute(" in manual_start_travel
+    and 'specialRoute.Name == "Tiki"' in manual_start_travel
+    and "GatewayDestination = gatewayDestination" in manual_start_travel
+    and "SpecialTravelRoute = specialRoute" in manual_start_travel
+    and "request.SpecialTravelRoute.Name == \"Tiki\"" in FEATURE
+    and "request.GatewayDestination = request.Destination" in FEATURE,
+    "manual Travel-tab trips leaving Submerged must exit to Tiki before map gateway planning",
 )
 require(
     "ROUTE_LOCATION_REPEAT_DISTANCE = 500" in GATEWAYS

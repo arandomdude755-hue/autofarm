@@ -2,6 +2,7 @@ local MovementService = {}
 MovementService.__index = MovementService
 
 local SUBMERGED_REFERENCE = Vector3.new(11538.599609375, -2154.7021484375, 9827.3125)
+local TIKI_OUTPOST_REFERENCE = Vector3.new(-16204, 10, 479)
 local SUBMERGED_STAGING = CFrame.new(
     -16269.4082,
     23.9799957,
@@ -83,7 +84,12 @@ function MovementService:_GetRoute(destination, currentPosition)
         }
     end
     if destinationDistance > 3000 and currentDistance <= 3000 then
-        return { Name = "Tiki", Stage = TIKI_STAGING }
+        return {
+            Name = "Tiki",
+            Stage = TIKI_STAGING,
+            ArrivalReference = TIKI_OUTPOST_REFERENCE,
+            ArrivalRadius = 3000,
+        }
     end
     return nil
 end
