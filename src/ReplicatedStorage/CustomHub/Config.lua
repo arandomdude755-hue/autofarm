@@ -585,6 +585,10 @@ local Config = {
         Farm = {
             Controls = {
                 {
+                    Kind = "sectionHeader",
+                    Label = "Farm controls",
+                },
+                {
                     Kind = "settingDropdown",
                     Label = "Farm method",
                     Action = "farm.mode.select",
@@ -629,6 +633,11 @@ local Config = {
                     Kind = "featureToggle",
                     Label = "Start Farm",
                     Action = "farm.main",
+                },
+                {
+                    Kind = "button",
+                    Label = "Copy status report",
+                    Action = "farm.status.copy",
                 },
                 {
                     Kind = "sectionHeader",
@@ -677,11 +686,6 @@ local Config = {
                     Action = "farm.material.enabled",
                     Setting = "FarmMaterialsEnabled",
                 },
-                {
-                    Kind = "button",
-                    Label = "Copy status report",
-                    Action = "farm.status.copy",
-                },
             },
         },
         Player = {
@@ -694,6 +698,7 @@ local Config = {
             },
         },
         Teleport = {
+            SingleColumn = true,
             Controls = {
                 {
                     Kind = "sectionHeader",
@@ -749,6 +754,10 @@ local Config = {
             SingleColumn = true,
             Controls = {
                 {
+                    Kind = "sectionHeader",
+                    Label = "Status tools",
+                },
+                {
                     Kind = "button",
                     Label = "Refresh status",
                     Action = "status.refresh",
@@ -799,6 +808,10 @@ local Config = {
             SingleColumn = true,
             Controls = {
                 {
+                    Kind = "sectionHeader",
+                    Label = "Status tools",
+                },
+                {
                     Kind = "button",
                     Label = "Refresh status",
                     Action = "status.refresh",
@@ -828,6 +841,10 @@ local Config = {
             SingleColumn = true,
             Controls = {
                 {
+                    Kind = "sectionHeader",
+                    Label = "Interface",
+                },
+                {
                     Kind = "settingDropdown",
                     Label = "UI size",
                     Action = "settings.uiSize.select",
@@ -850,6 +867,10 @@ local Config = {
             Title = "Farm settings",
             SingleColumn = true,
             Controls = {
+                {
+                    Kind = "sectionHeader",
+                    Label = "Farm options",
+                },
                 {
                     Kind = "settingDropdown",
                     Label = "Farm weapon",

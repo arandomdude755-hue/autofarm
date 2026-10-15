@@ -189,6 +189,6 @@ require(
 )
 
 print("PASS: production CustomHub Rojo mapping and LocalScript entrypoint")
-print("PASS: Main Farm toggle is connected without a visual layout rewrite")
+print("PASS: Main Farm toggle remains connected after the shared UI layout update")
 print("PASS: quest confirmation, target selection, movement, combat, and cancellation paths are wired")
 print("PASS: module whitespace and executor-only API checks")

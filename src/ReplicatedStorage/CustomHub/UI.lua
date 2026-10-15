@@ -176,6 +176,8 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         ControlGridLayout = nil,
         ActiveControls = nil,
         ControlRows = {},
+        ControlGroups = {},
+        SectionHeaderRecords = {},
         GroupArrows = {},
         CollapsedGroups = {},
         ActiveTab = nil,
@@ -823,6 +825,8 @@ function UI:_ClearPage()
     self.ControlGridLayout = nil
     self.ActiveControls = nil
     self.ControlRows = {}
+    self.ControlGroups = {}
+    self.SectionHeaderRecords = {}
     self.GroupArrows = {}
     for _, child in ipairs(self.Content:GetChildren()) do
         if child ~= self.ContentLayout then
@@ -844,6 +848,29 @@ function UI:_SyncControlGridHeight()
     end
 end
 
+function UI:_SyncControlGroupHeight(group)
+    if not group or not group.Card or not group.Card.Parent then
+        return
+    end
+    local contentHeight = group.Layout.AbsoluteContentSize.Y
+    local contentTop = group.HeaderHeight > 0
+        and (group.HeaderHeight + 4)
+        or group.Padding
+    group.ControlsFrame.Position = UDim2.fromOffset(group.Padding, contentTop)
+    group.ControlsFrame.Size = UDim2.new(
+        1,
+        -group.Padding * 2,
+        0,
+        contentHeight
+    )
+    group.Card.Size = UDim2.new(
+        1,
+        0,
+        0,
+        contentTop + contentHeight + group.Padding
+    )
+end
+
 function UI:_UpdateControlGridLayout()
     if not self.ControlsContainer or not self.ControlGridLayout then
         return
@@ -854,20 +881,22 @@ function UI:_UpdateControlGridLayout()
         viewport = Vector2.new(390, 844)
     end
     local landscape = viewport.X > viewport.Y
-    local columnCount = 1
-    if not (self.ActivePage and self.ActivePage.SingleColumn) then
-        columnCount = landscape
-            and self.ControlsContainer.AbsoluteSize.X >= 620
-            and self.ActiveControls
-            and #self.ActiveControls > 1
-            and 2
-            or 1
-    end
     local rowHeight = self.Config.Layout.RowHeight
-    self.ControlGridLayout.FillDirectionMaxCells = columnCount
-    self.ControlGridLayout.CellSize = columnCount == 2
-        and UDim2.new(0.5, -4, 0, rowHeight)
-        or UDim2.new(1, 0, 0, rowHeight)
+    for _, group in ipairs(self.ControlGroups) do
+        local columnCount = 1
+        if not (self.ActivePage and self.ActivePage.SingleColumn)
+            and landscape
+            and group.ControlsFrame.AbsoluteSize.X >= 620
+            and #group.Controls > 1
+        then
+            columnCount = 2
+        end
+        group.Layout.FillDirectionMaxCells = columnCount
+        group.Layout.CellSize = columnCount == 2
+            and UDim2.new(0.5, -3, 0, rowHeight)
+            or UDim2.new(1, 0, 0, rowHeight)
+        self:_SyncControlGroupHeight(group)
+    end
 end
 
 function UI:_TabMatchesSearch(tabName, query)
@@ -931,6 +960,9 @@ function UI:_RefreshControlGroups(animate)
         if not self.Scroll or not self.ControlsContainer then
             return
         end
+        for _, group in ipairs(self.ControlGroups) do
+            self:_SyncControlGroupHeight(group)
+        end
         self:_SyncControlGridHeight()
         local maximumY = math.max(
             0,
@@ -993,6 +1025,9 @@ function UI:_ExpandMatchingControlGroups()
         end
         task.defer(function()
             if self.ControlsContainer then
+                for _, group in ipairs(self.ControlGroups) do
+                    self:_SyncControlGroupHeight(group)
+                end
                 self:_SyncControlGridHeight()
             end
         end)
@@ -1157,11 +1192,22 @@ function UI:_ApplyControlSearchHighlight()
             row.Visible = self:_IsControlVisible(control)
             local matched = query ~= ""
                 and string.find(normalizeSearchText(control.Label), query, 1, true) ~= nil
-            row.BackgroundColor3 = matched and theme.Selected or theme.Control
-            local stroke = row:FindFirstChildOfClass("UIStroke")
-            if stroke then
-                stroke.Color = matched and theme.AccentBorder or theme.Border
-                stroke.Transparency = matched and 0.12 or 0.4
+            local header = self.SectionHeaderRecords[control]
+            if header then
+                header.Title.TextColor3 = matched and theme.Accent or theme.Text
+                header.Stroke.Color = matched and theme.AccentBorder or theme.Border
+                header.Stroke.Transparency = matched and 0.08 or 0.18
+                header.Rule.BackgroundColor3 = theme.Accent
+            else
+                row.BackgroundColor3 = matched and theme.Selected or theme.Panel
+                row.BackgroundTransparency = matched and 0.58
+                    or control.Kind == "collapsibleHeader" and 0
+                    or 1
+                local stroke = row:FindFirstChildOfClass("UIStroke")
+                if stroke then
+                    stroke.Color = matched and theme.AccentBorder or theme.Border
+                    stroke.Transparency = matched and 0.12 or 0.4
+                end
             end
         end
     end
@@ -1641,24 +1687,19 @@ function UI:_CommitActiveSlider()
     end
 end
 
-function UI:_AddControl(control)
+function UI:_AddControl(control, parent)
     local theme = self.Config.Theme
     local layout = self.Config.Layout
+    local controlParent = parent or self.ControlsContainer
     if control.Kind == "statusValue" then
         local row = create("Frame", {
             Name = self:_ControlNodeName(control),
             Size = UDim2.new(1, 0, 0, layout.RowHeight),
-            BackgroundColor3 = theme.Control,
+            BackgroundColor3 = theme.Panel,
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            LayoutOrder = #self.ControlsContainer:GetChildren(),
-        }, self.ControlsContainer)
-        addCorner(row, 4)
-        create("UIStroke", {
-            Color = theme.Border,
-            Thickness = layout.BorderThickness,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-            Transparency = 0.15,
-        }, row)
+            LayoutOrder = #controlParent:GetChildren(),
+        }, controlParent)
         local titleWidth = control.Key == "moon" and 0.36 or 0.45
         local valueWidth = 1 - titleWidth
         create("TextLabel", {
@@ -1692,96 +1733,51 @@ function UI:_AddControl(control)
         })
         return row
     end
-    if control.Kind == "sectionHeader" or control.Kind == "collapsibleHeader" then
-        local isCollapsible = control.Kind == "collapsibleHeader"
-        local row = create(isCollapsible and "TextButton" or "Frame", {
+    if control.Kind == "collapsibleHeader" then
+        local row = create("TextButton", {
             Name = self:_ControlNodeName(control),
             Size = UDim2.new(
                 1,
                 0,
                 0,
-                isCollapsible and layout.RowHeight
-                    or layout.SectionHeaderHeight
-                    or layout.RowHeight
+                layout.RowHeight
             ),
-            BackgroundColor3 = isCollapsible and theme.Control or theme.Panel,
+            BackgroundColor3 = theme.Control,
             BorderSizePixel = 0,
-            LayoutOrder = #self.ControlsContainer:GetChildren(),
-        }, self.ControlsContainer)
-        if isCollapsible then
-            row.AutoButtonColor = false
-            row.Text = ""
-            self:_AttachButtonFeedback(row, self.PageConnections, 0.985)
-            create("UIStroke", {
-                Color = theme.Border,
-                Thickness = layout.BorderThickness,
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                Transparency = 0.4,
-            }, row)
-        else
-            create("UIStroke", {
-                Color = theme.Border,
-                Thickness = layout.BorderThickness,
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                Transparency = 0.18,
-            }, row)
-        end
+            LayoutOrder = #controlParent:GetChildren(),
+        }, controlParent)
+        row.AutoButtonColor = false
+        row.Text = ""
+        self:_AttachButtonFeedback(row, self.PageConnections, 0.985)
         addCorner(row, 4)
-        if isCollapsible then
-            create("Frame", {
-                Name = "Accent",
-                Position = UDim2.new(0, layout.RowInset, 0.5, -7),
-                Size = UDim2.fromOffset(3, 14),
-                BackgroundColor3 = theme.Accent,
-                BorderSizePixel = 0,
-            }, row)
-        end
-        local title = create("TextLabel", {
+        create("TextLabel", {
             Name = "Title",
-            Position = isCollapsible
-                and UDim2.new(0, layout.RowInset + 12, 0, 0)
-                or UDim2.new(0, layout.RowInset, 0, 0),
-            Size = isCollapsible
-                and UDim2.new(1, -(layout.RowInset * 2 + 42), 1, 0)
-                or UDim2.new(1, -layout.RowInset * 2, 1, -7),
+            Position = UDim2.new(0, layout.RowInset + 12, 0, 0),
+            Size = UDim2.new(1, -(layout.RowInset * 2 + 42), 1, 0),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = control.Label,
             TextColor3 = theme.Text,
-            TextSize = isCollapsible and theme.TextSizes.Control or theme.TextSizes.Control + 2,
-            TextXAlignment = isCollapsible
-                and Enum.TextXAlignment.Left
-                or Enum.TextXAlignment.Center,
+            TextSize = theme.TextSizes.Control,
+            TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
         }, row)
-        if isCollapsible then
-            local arrow = create("TextLabel", {
-                Name = "GroupArrow",
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, -layout.RowInset, 0.5, 0),
-                Size = UDim2.fromOffset(18, 18),
-                BackgroundTransparency = 1,
-                Font = theme.StrongFont,
-                Text = "▼",
-                TextColor3 = theme.MutedText,
-                TextSize = 10,
-                Rotation = self.CollapsedGroups[control.GroupId] == true and 0 or 180,
-            }, row)
-            self.GroupArrows[control.GroupId] = arrow
-            self:_Connect(self.PageConnections, row.Activated, function()
-                self:_ToggleControlGroup(control.GroupId)
-            end)
-        else
-            create("Frame", {
-                Name = "AccentRule",
-                AnchorPoint = Vector2.new(0.5, 1),
-                Position = UDim2.new(0.5, 0, 1, -4),
-                Size = UDim2.new(1, -layout.RowInset * 2, 0, 2),
-                BackgroundColor3 = theme.Accent,
-                BackgroundTransparency = 0.18,
-                BorderSizePixel = 0,
-            }, row)
-        end
+        local arrow = create("TextLabel", {
+            Name = "GroupArrow",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -layout.RowInset, 0.5, 0),
+            Size = UDim2.fromOffset(18, 18),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = "▼",
+            TextColor3 = theme.MutedText,
+            TextSize = 10,
+            Rotation = self.CollapsedGroups[control.GroupId] == true and 0 or 180,
+        }, row)
+        self.GroupArrows[control.GroupId] = arrow
+        self:_Connect(self.PageConnections, row.Activated, function()
+            self:_ToggleControlGroup(control.GroupId)
+        end)
         return row
     end
 
@@ -1790,14 +1786,19 @@ function UI:_AddControl(control)
     local isSelector = control.Kind == "settingSelect"
     local isDropdown = control.Kind == "settingDropdown"
     local isSlider = control.Kind == "settingSlider"
-    local reservedTitleSpace = hasToggle and (layout.ToggleValueWidth + layout.ToggleGap) or 0
+    local reservedTitleSpace = hasToggle
+        and (layout.ToggleValueWidth + layout.ToggleGap)
+        or control.Kind == "button"
+            and 24
+            or 0
     local row = create((isSelector or isSlider) and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
         Size = UDim2.new(1, 0, 0, layout.RowHeight),
-        BackgroundColor3 = theme.Control,
+        BackgroundColor3 = theme.Panel,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        LayoutOrder = #self.ControlsContainer:GetChildren(),
-    }, self.ControlsContainer)
+        LayoutOrder = #controlParent:GetChildren(),
+    }, controlParent)
     if row:IsA("TextButton") then
         row.AutoButtonColor = false
         row.Text = ""
@@ -1807,13 +1808,6 @@ function UI:_AddControl(control)
         row.TextXAlignment = Enum.TextXAlignment.Left
         self:_AttachButtonFeedback(row, self.PageConnections)
     end
-    addCorner(row, 4)
-
-    local rowStroke = create("UIStroke", {
-        Color = theme.Border,
-        Thickness = layout.BorderThickness,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-    }, row)
 
     local titleTop = isSelector and layout.SelectorTitleTop
         or isSlider and layout.RowTitleTop
@@ -1858,6 +1852,21 @@ function UI:_AddControl(control)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
+    if control.Kind == "button" then
+        create("TextLabel", {
+            Name = "ActionIndicator",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -layout.RowInset, 0.5, 0),
+            Size = UDim2.fromOffset(18, 20),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = "›",
+            TextColor3 = theme.Accent,
+            TextSize = 20,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+        }, row)
+    end
 
     if hasToggle then
         local toggleLabel = create("TextLabel", {
@@ -1883,7 +1892,6 @@ function UI:_AddControl(control)
 
     if isSelector then
         row.Size = UDim2.new(1, 0, 0, layout.RowHeight)
-        rowStroke.Transparency = 0.15
         local options = self:_GetControlOptions(control)
         local optionsFrame = create("Frame", {
             Name = "Options",
@@ -1959,7 +1967,6 @@ function UI:_AddControl(control)
             Options = optionEntries,
         })
     elseif isDropdown then
-        rowStroke.Transparency = 0.15
         local options = self:_GetControlOptions(control)
         local settings = self:_GetControlSettings(control)
         local selectedValue = control.Setting == "UiSize"
@@ -2049,7 +2056,6 @@ function UI:_AddControl(control)
             end
         end)
     elseif isSlider then
-        rowStroke.Transparency = 0.15
         local farmSettings = self.Config.FarmSettings or {}
         local minimum = tonumber(control.Min) or 0
         local maximum = tonumber(control.Max) or minimum
@@ -2127,6 +2133,91 @@ function UI:_AddControl(control)
     return row
 end
 
+function UI:_CreateControlGroup(group, layoutOrder)
+    local theme = self.Config.Theme
+    local layout = self.Config.Layout
+    local padding = layout.Padding
+    local headerHeight = group.HeaderControl
+        and (layout.SectionHeaderHeight or 42)
+        or 0
+    local cardName = group.HeaderControl
+        and self:_ControlNodeName(group.HeaderControl)
+        or ("ControlGroup_" .. tostring(layoutOrder))
+
+    group.Padding = padding
+    group.HeaderHeight = headerHeight
+    group.Card = create("Frame", {
+        Name = cardName .. "_Card",
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = theme.Panel,
+        BorderSizePixel = 0,
+        LayoutOrder = layoutOrder,
+    }, self.ControlsContainer)
+    addCorner(group.Card, 5)
+    group.Stroke = create("UIStroke", {
+        Color = theme.Border,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Transparency = 0.18,
+    }, group.Card)
+
+    if group.HeaderControl then
+        group.Title = create("TextLabel", {
+            Name = "SectionTitle",
+            Position = UDim2.new(0, padding, 0, 0),
+            Size = UDim2.new(1, -padding * 2, 0, headerHeight - 4),
+            BackgroundTransparency = 1,
+            Font = theme.StrongFont,
+            Text = group.HeaderControl.Label,
+            TextColor3 = theme.Text,
+            TextSize = theme.TextSizes.Control + 1,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, group.Card)
+        group.Rule = create("Frame", {
+            Name = "SectionAccentRule",
+            Position = UDim2.new(0, padding, 0, headerHeight - 3),
+            Size = UDim2.new(1, -padding * 2, 0, 2),
+            BackgroundColor3 = theme.Accent,
+            BackgroundTransparency = 0.18,
+            BorderSizePixel = 0,
+        }, group.Card)
+        self.ControlRows[group.HeaderControl] = group.Title
+        self.SectionHeaderRecords[group.HeaderControl] = {
+            Title = group.Title,
+            Stroke = group.Stroke,
+            Rule = group.Rule,
+        }
+    end
+
+    group.ControlsFrame = create("Frame", {
+        Name = "SectionControls",
+        Position = UDim2.fromOffset(padding, headerHeight + (headerHeight > 0 and 4 or 0)),
+        Size = UDim2.new(1, -padding * 2, 0, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    }, group.Card)
+    group.Layout = create("UIGridLayout", {
+        CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
+        CellPadding = UDim2.fromOffset(6, 4),
+        FillDirection = Enum.FillDirection.Horizontal,
+        FillDirectionMaxCells = 1,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, group.ControlsFrame)
+    table.insert(self.ControlGroups, group)
+    self:_Connect(
+        self.PageConnections,
+        group.Layout:GetPropertyChangedSignal("AbsoluteContentSize"),
+        function()
+            self:_SyncControlGroupHeight(group)
+            self:_SyncControlGridHeight()
+        end
+    )
+    self:_SyncControlGroupHeight(group)
+    return group
+end
+
 function UI:_RenderTab(tabName)
     local page = self.Config.Pages[tabName]
     if not page then
@@ -2138,11 +2229,12 @@ function UI:_RenderTab(tabName)
         self.PageTitle.Text = page.Title or displayTabName(tabName)
     end
     self:_ClearPage()
-    local theme = self.Config.Theme
     local layout = self.Config.Layout
     self.ActivePage = page
     self.ActiveControls = page.Controls
     self.ControlRows = {}
+    self.ControlGroups = {}
+    self.SectionHeaderRecords = {}
     self.GroupArrows = {}
     self.ControlsContainer = create("Frame", {
         Name = "ControlGrid",
@@ -2150,11 +2242,9 @@ function UI:_RenderTab(tabName)
         BackgroundTransparency = 1,
         LayoutOrder = 1,
     }, self.Content)
-    self.ControlGridLayout = create("UIGridLayout", {
-        CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
-        CellPadding = UDim2.fromOffset(6, 5),
-        FillDirection = Enum.FillDirection.Horizontal,
-        FillDirectionMaxCells = 1,
+    self.ControlGridLayout = create("UIListLayout", {
+        Padding = UDim.new(0, layout.Spacing),
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
         SortOrder = Enum.SortOrder.LayoutOrder,
     }, self.ControlsContainer)
     self:_Connect(
@@ -2171,13 +2261,37 @@ function UI:_RenderTab(tabName)
             self:_UpdateControlGridLayout()
         end
     )
-    for index, control in ipairs(page.Controls) do
-        local row = self:_AddControl(control)
-        if row then
-            row.LayoutOrder = index
-            row.Visible = self:_IsControlVisible(control)
-            self.ControlRows[control] = row
+    local groups = {}
+    local currentGroup
+    for _, control in ipairs(page.Controls) do
+        if control.Kind == "sectionHeader" then
+            currentGroup = {
+                HeaderControl = control,
+                Controls = {},
+            }
+            table.insert(groups, currentGroup)
+        else
+            if not currentGroup then
+                currentGroup = {
+                    Controls = {},
+                }
+                table.insert(groups, currentGroup)
+            end
+            table.insert(currentGroup.Controls, control)
         end
+    end
+
+    for groupIndex, group in ipairs(groups) do
+        self:_CreateControlGroup(group, groupIndex)
+        for controlIndex, control in ipairs(group.Controls) do
+            local row = self:_AddControl(control, group.ControlsFrame)
+            if row then
+                row.LayoutOrder = controlIndex
+                row.Visible = self:_IsControlVisible(control)
+                self.ControlRows[control] = row
+            end
+        end
+        self:_SyncControlGroupHeight(group)
     end
     self:_UpdateControlGridLayout()
     self:_SyncControlGridHeight()
@@ -3025,9 +3139,8 @@ function UI:Destroy()
     self.ControlGridLayout = nil
     self.ActiveControls = nil
     self.ControlRows = {}
-    self.GroupArrows = {}
-    self.CollapsedGroups = {}
-    self.ControlRows = {}
+    self.ControlGroups = {}
+    self.SectionHeaderRecords = {}
     self.GroupArrows = {}
     self.CollapsedGroups = {}
     self.ActiveTab = nil

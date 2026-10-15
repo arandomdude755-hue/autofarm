@@ -84,21 +84,28 @@ require(
 )
 
 require("RowHeight = 40" in CONFIG, "production control rows should stay compact")
-section_header_start = UI_MODULE.index(
-    'if control.Kind == "sectionHeader" or control.Kind == "collapsibleHeader" then'
-)
-section_header_end = UI_MODULE.index("\n    local hasToggle =", section_header_start)
-section_header = UI_MODULE[section_header_start:section_header_end]
+group_builder_start = UI_MODULE.index("function UI:_CreateControlGroup")
+group_builder_end = UI_MODULE.index("\nfunction UI:_RenderTab", group_builder_start)
+group_builder = UI_MODULE[group_builder_start:group_builder_end]
+render_tab_start = UI_MODULE.index("function UI:_RenderTab")
+render_tab_end = UI_MODULE.index("\nfunction UI:Mount", render_tab_start)
+render_tab = UI_MODULE[render_tab_start:render_tab_end]
+control_builder_start = UI_MODULE.index("function UI:_AddControl")
+control_builder_end = UI_MODULE.index("\nfunction UI:_CreateControlGroup", control_builder_start)
+control_builder = UI_MODULE[control_builder_start:control_builder_end]
 require(
     "SectionHeaderHeight = 46" in CONFIG
-    and "BackgroundColor3 = isCollapsible and theme.Control or theme.Panel" in section_header
-    and "Transparency = 0.18" in section_header
-    and "Enum.TextXAlignment.Center" in section_header
-    and 'Name = "AccentRule"' in section_header
-    and "BackgroundColor3 = theme.Accent" in section_header
-    and "if isCollapsible then" in section_header
-    and 'Name = "GroupArrow"' in section_header,
-    "section headings should use a centered, framed title with a blue rule while collapsible controls retain their behavior",
+    and 'Name = cardName .. "_Card"' in group_builder
+    and 'Name = "SectionTitle"' in group_builder
+    and 'Name = "SectionAccentRule"' in group_builder
+    and "group.Stroke = create(\"UIStroke\"" in group_builder
+    and 'Name = "ActionIndicator"' in control_builder
+    and 'create("UIListLayout"' in render_tab
+    and 'if control.Kind == "sectionHeader" then' in render_tab
+    and 'self:_AddControl(control, group.ControlsFrame)' in render_tab
+    and "BackgroundTransparency = 1" in control_builder
+    and "Name = \"GroupArrow\"" in control_builder,
+    "controls should share framed section cards, with flat child rows and working collapsible skill keys",
 )
 require("MobileWidth = 0.86" in CONFIG
         and "ExpandedWidth = 0.98" in CONFIG
