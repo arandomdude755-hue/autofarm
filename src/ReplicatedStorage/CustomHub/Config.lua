@@ -437,6 +437,7 @@ local Config = {
         MasteryHealthPercentStep = 1,
         AutoModeQuest = false,
         DoubleQuestEnabled = false,
+        InstantAcceptQuest = false,
         IgnoreCakePrince = false,
         AuraDistance = 300,
         AuraDistanceMin = 0,
@@ -854,6 +855,12 @@ local Config = {
                     Action = "farm.weaponCategory.select",
                     Setting = "WeaponCategory",
                     Options = weaponCategories,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Instant accept quest (RISK)",
+                    Action = "farm.settings.instantQuest",
+                    Setting = "InstantAcceptQuest",
                 },
                 {
                     Kind = "settingToggle",

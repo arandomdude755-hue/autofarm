@@ -134,6 +134,24 @@ require('Label = "Bring mobs"' in farm_settings_config
         and 'Action = "farm.skills." .. category.Token .. "." .. keyName' in CONFIG
         and 'Setting = settingName' in CONFIG,
         "Farm settings must expose opt-in Bring mobs and Auto Buso controls")
+require(
+    'Label = "Instant accept quest (RISK)"' in farm_settings_config
+    and 'Action = "farm.settings.instantQuest"' in farm_settings_config
+    and 'Setting = "InstantAcceptQuest"' in farm_settings_config
+    and "InstantAcceptQuest = false" in CONFIG,
+    "Farm settings must expose risk-labelled instant quest acceptance and default it off",
+)
+instant_quest_action = function_body(
+    MAIN_FARM,
+    'if actionId == "farm.settings.instantQuest" then',
+    'if actionId == "farm.autoModeQuest" then',
+)
+require(
+    "farmSettings.InstantAcceptQuest = payload" in instant_quest_action
+    and "RISK" in instant_quest_action
+    and "Instant quest acceptance off" in instant_quest_action,
+    "instant quest toggle must update the shared setting and warn when enabled",
+)
 require('local weaponCategories = { "Melee", "Sword", "Blox Fruit" }' in CONFIG
         and "WeaponCategories = weaponCategories" in CONFIG,
         "Weapon selector must use the supported category choices")

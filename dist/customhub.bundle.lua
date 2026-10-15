@@ -466,6 +466,7 @@ local Config = {
         MasteryHealthPercentStep = 1,
         AutoModeQuest = false,
         DoubleQuestEnabled = false,
+        InstantAcceptQuest = false,
         IgnoreCakePrince = false,
         AuraDistance = 300,
         AuraDistanceMin = 0,
@@ -883,6 +884,12 @@ local Config = {
                     Action = "farm.weaponCategory.select",
                     Setting = "WeaponCategory",
                     Options = weaponCategories,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Instant accept quest (RISK)",
+                    Action = "farm.settings.instantQuest",
+                    Setting = "InstantAcceptQuest",
                 },
                 {
                     Kind = "settingToggle",
@@ -13914,6 +13921,7 @@ local QUEST_DIALOGUE_RETREAT_INCREMENT = 24
 local QUEST_DIALOGUE_MAX_RETREAT_DISTANCE = 80
 local QUEST_DIALOGUE_MOVE_RETRY_INTERVAL = 0.5
 local MAX_QUEST_DIALOGUE_MOVE_FAILURES = 3
+local QUEST_GIVER_REQUEST_DELAY = 2
 local FARM_STEP_INTERVAL = 0.1
 local NPC_SCAN_INTERVAL = 0.15
 local DOUBLE_QUEST_SCAN_INTERVAL = 0.5
@@ -14897,6 +14905,14 @@ function MainFarm:_TimeoutQuestConfirmation(key, now)
     )
 end
 
+function MainFarm:_GetQuestGiverRequestDelay()
+    local farmSettings = self.Context and self.Context.Config
+        and self.Context.Config.FarmSettings
+    return farmSettings and farmSettings.InstantAcceptQuest == true
+        and 0
+        or QUEST_GIVER_REQUEST_DELAY
+end
+
 function MainFarm:_RequestQuest(candidate, session)
     local key = questKey(candidate)
     local now = os.clock()
@@ -15778,15 +15794,19 @@ function MainFarm:_StepModeQuestGiver(candidate, root, session)
         self:_SetStatus("Approaching mode quest giver: " .. tostring(candidate.Name), "info")
         return
     end
+    local requestDelay = self:_GetQuestGiverRequestDelay()
     if not self.PendingQuestReachedAt then
         if self.QuestDeferredForDialogue then
             self.PendingQuestReachedAt = os.clock() - 2
+        elseif requestDelay == 0 then
+            self.PendingQuestReachedAt = os.clock()
+            self:_SetStatus("At mode quest giver; requesting quest immediately (RISK)", "warning")
         else
             self.PendingQuestReachedAt = os.clock()
             self:_SetStatus("At mode quest giver; waiting before quest request", "info")
             return
         end
-    elseif os.clock() - self.PendingQuestReachedAt < 2 then
+    elseif os.clock() - self.PendingQuestReachedAt < requestDelay then
         return
     end
     if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then
@@ -16987,15 +17007,19 @@ function MainFarm:_Step(session)
             self:_SetStatus("Approaching quest giver: " .. tostring(candidate.Name), "info")
             return
         end
+        local requestDelay = self:_GetQuestGiverRequestDelay()
         if not self.PendingQuestReachedAt then
             if self.QuestDeferredForDialogue then
                 self.PendingQuestReachedAt = os.clock() - 2
+            elseif requestDelay == 0 then
+                self.PendingQuestReachedAt = os.clock()
+                self:_SetStatus("At quest giver; requesting quest immediately (RISK)", "warning")
             else
                 self.PendingQuestReachedAt = os.clock()
                 self:_SetStatus("At quest giver; waiting before quest request", "info")
                 return
             end
-        elseif os.clock() - self.PendingQuestReachedAt < 2 then
+        elseif os.clock() - self.PendingQuestReachedAt < requestDelay then
             return
         end
         if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then
@@ -17827,6 +17851,20 @@ function MainFarm:Handle(actionId, payload)
             farmSkillToken .. " " .. farmSkillKey .. " skill "
                 .. (payload and "selected" or "unselected"),
             "success"
+        )
+        return true
+    end
+    if actionId == "farm.settings.instantQuest" then
+        if not farmSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Instant quest acceptance setting is unavailable or invalid", "error")
+            return false
+        end
+        farmSettings.InstantAcceptQuest = payload
+        self:_SetStatus(
+            payload
+                and "Instant quest acceptance on (RISK): a request may be too early."
+                or "Instant quest acceptance off; waiting before requesting quests.",
+            payload and "warning" or "success"
         )
         return true
     end

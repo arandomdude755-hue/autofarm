@@ -67,12 +67,34 @@ require(
     "quest requests must pass through dialogue recovery after the arrival delay",
 )
 require(
-    step.index("elseif os.clock() - self.PendingQuestReachedAt < 2 then")
+    step.index("elseif os.clock() - self.PendingQuestReachedAt < requestDelay then")
     < step.rindex("if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then")
     < request_call_start
     and "self:_RequestQuest" not in dialogue_recovery
     and "RequestStart" not in dialogue_recovery,
     "dialogue recovery must run after the initial delay and never consume a quest request itself",
+)
+mode_quest_giver = FARM[
+    FARM.index("function MainFarm:_StepModeQuestGiver"):
+    FARM.index("\nfunction MainFarm:_FindModeSpawn")
+]
+quest_request_delay = FARM[
+    FARM.index("function MainFarm:_GetQuestGiverRequestDelay"):
+    FARM.index("\nfunction MainFarm:_RequestQuest")
+]
+require(
+    "InstantAcceptQuest == true" in quest_request_delay
+    and "and 0" in quest_request_delay
+    and "QUEST_GIVER_REQUEST_DELAY = 2" in FARM
+    and "requestDelay == 0" in mode_quest_giver
+    and "requestDelay == 0" in step
+    and mode_quest_giver.index("requestDelay == 0")
+        < mode_quest_giver.rindex("self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session)")
+        < mode_quest_giver.index("self:_RequestQuest(candidate, session)")
+    and step.index("requestDelay == 0")
+        < step.rindex("if self:_HandleQuestDialogueRecovery(candidate, giverCFrame, root, session) then")
+        < request_call_start,
+    "instant acceptance must remove only the arrival wait while retaining dialogue recovery and quest confirmation",
 )
 require(
     "QUEST_DIALOGUE_RETREAT_DISTANCE = 32" in FARM
