@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=844, height=390, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Roblox Mobile Game Hub - Main &amp; Farm</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 844px;
+      height: 390px;
+      background-color: #0b0d11;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+      position: relative;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Simulated 3D game backdrop */
+    .game-viewport {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 25%, #182235 0%, #0c111a 55%, #05070b 100%);
+      overflow: hidden;
+      z-index: 1;
+    }
+    .game-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(to right, rgba(255,255,255,0.035) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 26px 26px;
+      transform: perspective(300px) rotateX(48deg) translateY(-40px);
+      transform-origin: top center;
+      opacity: 0.7;
+    }
+    /* Roblox In-game Topbar simulator */
+    .roblox-topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 40px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 10;
+      pointer-events: none;
+    }
+    /* Custom Roblox Scrollbar */
+    .roblox-scroll::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .roblox-scroll::-webkit-scrollbar-track {
+      background: rgba(16, 20, 27, 0.4);
+      border-radius: 2px;
+    }
+    .roblox-scroll::-webkit-scrollbar-thumb {
+      background: #2b3342;
+      border-radius: 2px;
+    }
+    .roblox-scroll::-webkit-scrollbar-thumb:hover {
+      background: #3b82f6;
+    }
+  </style>
+</head>
+<body class="flex flex-col items-center justify-center p-3 text-slate-200" style="width: 844px; height: 390px; margin: 0 auto;">
+<!-- 3D Game World Background Simulation -->
+<div class="game-viewport">
+<div class="game-grid"></div>
+<!-- Simulated 3D low-poly environment silhouettes (Blox Fruit / RPG aesthetic) -->
+<div class="absolute bottom-16 left-6 w-24 h-36 bg-slate-900/40 border border-slate-800/40 rounded-sm transform rotate-6 pointer-events-none"></div>
+<div class="absolute bottom-28 right-8 w-20 h-28 bg-slate-900/35 border border-slate-800/30 rounded-sm transform -rotate-12 pointer-events-none"></div>
+<!-- In-game player leaderstats HUD chip on top-right -->
+<div class="absolute top-2 right-24 flex items-center gap-2 px-2.5 py-0.5 bg-[#12151c]/90 backdrop-blur-sm border border-[#232936] rounded text-[10px] font-mono text-slate-300 z-10 shadow-sm">
+<span class="text-emerald-400 font-semibold">$ 1,480,250</span>
+<span class="text-slate-600">|</span>
+<span class="text-amber-400 font-semibold">LV. 84</span>
+</div>
+<!-- Game Title Indicator Floating on Top Center -->
+<div class="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-0.5 bg-[#12151c]/80 backdrop-blur-sm border border-[#242c3d]/60 rounded-full text-[10px] font-mono text-amber-300/90 shadow-sm z-10">
+<span class="font-bold text-amber-400">APEX HUB</span>
+<span class="text-slate-500">-</span>
+<span class="text-slate-300 text-[9px]">Blox Fruit Engine v2.4</span>
+</div>
+</div>
+<!-- Roblox Native System Bar (Top) -->
+<div class="roblox-topbar">
+<div class="flex items-center gap-2 pointer-events-auto">
+<!-- Roblox Icon standard button -->
+<div class="w-8 h-8 rounded-md bg-[#161922]/90 border border-[#2b3342] flex items-center justify-center text-slate-200 shadow-sm cursor-pointer hover:bg-[#1f2430]">
+<svg class="w-4 h-4 fill-current transform rotate-12" viewbox="0 0 24 24"><path d="M5.2 2.5L21.5 6.8 18.8 21.5 2.5 17.2zM9.8 9.5l1.3 4.9 4.9-1.3-1.3-4.9z"></path></svg>
+</div>
+<!-- Menu burger standard button -->
+<div class="w-8 h-8 rounded-md bg-[#161922]/90 border border-[#2b3342] flex items-center justify-center text-slate-300 shadow-sm cursor-pointer hover:bg-[#1f2430]">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"></path></svg>
+</div>
+<!-- In-game chat bubble button with badge -->
+<div class="relative w-8 h-8 rounded-md bg-[#161922]/90 border border-[#2b3342] flex items-center justify-center text-slate-300 shadow-sm cursor-pointer hover:bg-[#1f2430]">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+<span class="absolute -top-1 -right-1 bg-blue-600 text-[8px] font-bold text-white rounded-full w-3.5 h-3.5 flex items-center justify-center">5</span>
+</div>
+</div>
+<!-- Quick collapse trigger indicator / latency ping -->
+<div class="text-[11px] font-mono text-slate-400 flex items-center gap-1.5 bg-[#12151c]/90 px-2.5 py-0.5 rounded border border-[#222733] pointer-events-auto">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+<span>42ms</span>
+</div>
+</div>
+<!-- NATIVE ROBLOX FLOATING GUI HUB WINDOW (Re-oriented with Left Sidebar Layout) -->
+<div class="relative z-20 w-full bg-[#111319]/95 backdrop-blur-md border border-[#252a36] rounded-md shadow-2xl flex flex-col overflow-hidden" style="width: 770px; max-width: 770px; height: 322px; margin-top: 14px;">
+<!-- Master Window Frame Header / Title Drag Handle -->
+<div class="h-8 px-3 bg-[#151922] border-b border-[#222836] flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2">
+<div class="w-2.5 h-2.5 rounded-sm bg-blue-500 flex items-center justify-center">
+<div class="w-1 h-1 bg-white rounded-[0.5px]"></div>
+</div>
+<div class="flex items-baseline gap-1.5">
+<span class="text-xs font-bold tracking-tight text-white font-mono uppercase">APEX HUB</span>
+<span class="text-[9px] font-mono text-blue-400 px-1 py-0.2 bg-blue-500/10 border border-blue-500/20 rounded">v2.4.1</span>
+<span class="text-[9px] font-mono text-slate-500">• Linoria / Rayfield Architecture</span>
+</div>
+</div>
+<!-- Window Controls (Minimize / Pin / Close) -->
+<div class="flex items-center gap-1">
+<button class="w-5 h-5 rounded bg-[#1e232e] border border-[#2a3242] text-slate-300 hover:text-white flex items-center justify-center text-xs transition active:scale-95" title="Minimize">
+<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><path d="M19 12H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+<button class="w-5 h-5 rounded bg-[#1e232e] border border-[#2a3242] text-slate-300 hover:text-rose-400 flex items-center justify-center text-xs transition active:scale-95" title="Close GUI">
+<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+</div>
+</div>
+<!-- Main Split Container: Left Sidebar Navigation + Right Content Canvas -->
+<div class="flex-1 flex overflow-hidden">
+<!-- LEFT VERTICAL NAVIGATION SIDEBAR (Matching reference image layout) -->
+<div class="w-48 shrink-0 bg-[#0f1218] border-r border-[#202533] flex flex-col justify-between overflow-hidden">
+<!-- Top Sidebar Area: Search Box -->
+<div class="p-2 border-b border-[#1b202c]">
+<div class="relative flex items-center">
+<svg class="w-3 h-3 text-slate-400 absolute left-2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="11" cy="11" r="8"></circle>
+<line x1="21" x2="16.65" y1="21" y2="16.65"></line>
+</svg>
+<input class="w-full bg-[#161a23] border border-[#262c3b] rounded py-1 pl-6 pr-2 text-[10px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/70 font-mono tracking-tight" placeholder="Search section or Func" type="text"/>
+</div>
+</div>
+<!-- Vertical Tab List (Lua ScrollingFrame Navigation) -->
+<div class="flex-1 overflow-y-auto roblox-scroll p-1.5 flex flex-col gap-0.5">
+<!-- Shop -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Shop &amp; Merchant</span>
+</button>
+<!-- Status and Server -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Status And Server</span>
+</button>
+<!-- LocalPlayer -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">LocalPlayer</span>
+</button>
+<!-- Setting Farm -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Setting Farm</span>
+</button>
+<!-- Hold and Select Skill -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Hold and Select Skill</span>
+</button>
+<!-- Farming (ACTIVE TAB with Cobalt indicator pill) -->
+<button class="relative w-full px-2.5 py-1.5 rounded bg-[#171d29] text-white flex items-center gap-2 text-left text-[11px] font-semibold border border-blue-500/30 shadow-sm">
+<!-- Active Indicator Pill on left -->
+<span class="w-1 h-3.5 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.6)]"></span>
+<span class="text-blue-400 font-bold truncate">Farming</span>
+<span class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+</button>
+<!-- Stack Farming -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Stack Farming</span>
+</button>
+<!-- Farming Orther -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Farming Other</span>
+</button>
+<!-- Fruits and Raid, Dungeon -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Fruits &amp; Raid Dungeon</span>
+</button>
+<!-- Teleport -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">Teleport &amp; World</span>
+</button>
+<!-- Settings -->
+<button class="group relative w-full px-2.5 py-1.5 rounded flex items-center gap-2 text-left text-slate-400 hover:text-slate-200 hover:bg-[#151922] transition text-[11px] font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-slate-400"></span>
+<span class="truncate">GUI Config &amp; Hotkeys</span>
+</button>
+</div>
+<!-- Bottom Sidebar Mini Profile / Hub Emblem Card -->
+</div>
+<!-- RIGHT PRIMARY CONTENT PANE (Matching reference screenshot structure) -->
+<div class="flex-1 flex flex-col bg-[#12151d] overflow-hidden">
+<!-- Section Header Bar (Title, Character Emblem, Quick Search) -->
+<div class="h-9 px-3 bg-[#151922] border-b border-[#212735] flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-white tracking-wide">Farming</span>
+<span class="text-slate-600 font-mono text-[10px]">/</span>
+<span class="text-[10px] font-medium text-slate-400">Combat Automation</span>
+<!-- Character/Ninja Emblem Icon Badge -->
+<div class="w-5 h-5 rounded-full bg-[#1b212e] border border-blue-500/40 flex items-center justify-center text-[9px] text-blue-400 shadow-sm ml-1">
+⚔️
+</div>
+</div>
+<div class="flex items-center gap-2">
+<!-- In-section quick search toggle -->
+<button class="w-6 h-6 rounded bg-[#1a1f2b] border border-[#262e3e] text-slate-300 hover:text-white flex items-center justify-center text-xs">
+<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="11" cy="11" r="8"></circle>
+<line x1="21" x2="16.65" y1="21" y2="16.65"></line>
+</svg>
+</button>
+<span class="text-[9px] font-mono text-slate-500 bg-[#0e1117] px-1.5 py-0.5 rounded border border-[#202636]">HOOKS: 04</span>
+</div>
+</div>
+<!-- Section Category Banner (Sub-header pill like 'Setting Farm') -->
+<div class="px-3 py-1 bg-[#10131a] border-b border-[#1d222e] flex items-center justify-between text-[10px] text-slate-300 font-medium shrink-0">
+<span class="font-semibold text-slate-200 font-mono tracking-tight text-[10px] flex items-center gap-1.5">
+<span class="w-1 h-2 bg-blue-500 rounded-[1px]"></span>
+Setting Farm &amp; Target Parameters
+</span>
+<span class="text-[8.5px] font-mono text-blue-400">MODE: AUTO_LOOP</span>
+</div>
+<!-- Scrollable Control Surface with Grouped Lua GUI Modules -->
+<div class="flex-1 p-2.5 overflow-y-auto roblox-scroll flex flex-col gap-2">
+<!-- ROW 1: Method Dropdown Row (Select Method Farm) -->
+<div class="flex items-center justify-between py-1.5 px-2.5 rounded bg-[#161a24] border border-[#252c3c] hover:border-[#333d52] transition">
+<div class="flex flex-col">
+<span class="text-[11px] font-semibold text-slate-200">Select Method Farm:</span>
+<span class="text-[8px] text-slate-400 font-mono">Algorithm &amp; attack vector selection</span>
+</div>
+<div class="flex items-center gap-1.5 bg-[#10131a] hover:bg-[#1a202d] px-2.5 py-1 rounded border border-[#2d3648] text-[10px] text-blue-400 font-mono font-medium cursor-pointer shadow-sm">
+<span>Closest Mob &amp; Quest</span>
+<svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M9 18l6-6-6-6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</div>
+</div>
+<!-- ROW 2: Distance / Aura Slider with Direct Value Input Box (Distance Farm Aura) -->
+<div class="p-2 rounded bg-[#161a24] border border-[#252c3c] flex flex-col gap-1.5">
+<div class="flex items-center justify-between">
+<div class="flex flex-col">
+<span class="text-[11px] font-semibold text-slate-200">Distance Farm Aura</span>
+<span class="text-[8px] text-slate-400 font-mono">Radius detection envelope (Studs)</span>
+</div>
+<!-- Numeric Value Display Box matching screenshot '300' -->
+<div class="bg-[#0f121a] border border-[#2b3345] px-3 py-0.5 rounded text-[11px] font-mono font-bold text-white tracking-wide text-right shadow-inner min-w-[58px]">
+300
+</div>
+</div>
+<!-- Roblox Custom Slider Bar with Stud Track -->
+<div class="relative w-full h-2.5 bg-[#0e1118] rounded border border-[#242b3b] flex items-center px-0.5 cursor-pointer">
+<div class="h-1.5 bg-blue-600 rounded-[1px]" style="width: 75%;"></div>
+<div class="absolute w-2.5 h-3.5 bg-slate-200 rounded-[1px] border border-blue-900 shadow -ml-1 cursor-grab" style="left: 75%;"></div>
+</div>
+<div class="flex justify-between text-[7.5px] text-slate-500 font-mono">
+<span>50 STUDS</span>
+<span>CURRENT: 300</span>
+<span>500 STUDS</span>
+</div>
+</div>
+<!-- ROW 3: Discrete Checkboxes / Toggles List (Matching screenshot layout) -->
+<div class="flex flex-col gap-1 bg-[#131620] border border-[#222736] rounded p-1.5">
+<!-- Item 1: Ignore Attack Katakuri -->
+<div class="flex items-center justify-between py-1 px-2 rounded bg-[#161a24] hover:bg-[#1a1f2b] transition border border-[#232938]">
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-medium text-slate-200">Ignore Attack Katakuri</span>
+<span class="text-[8px] font-mono text-slate-500">(Boss Safety)</span>
+</div>
+<!-- Roblox Style Square Checkbox (Active checked) -->
+<div class="w-4 h-4 rounded-[2px] bg-blue-600 border border-blue-400/50 flex items-center justify-center cursor-pointer shadow-sm">
+<svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewbox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</div>
+</div>
+<!-- Item 2: Hop Find Katakuri -->
+<div class="flex items-center justify-between py-1 px-2 rounded bg-[#161a24] hover:bg-[#1a1f2b] transition border border-[#232938]">
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-medium text-slate-200">Hop Find Katakuri</span>
+<span class="text-[8px] font-mono text-slate-500">(Auto ServerHop)</span>
+</div>
+<!-- Roblox Style Square Checkbox (Inactive unchecked) -->
+<div class="w-4 h-4 rounded-[2px] bg-[#10131b] border border-[#2d3648] hover:border-slate-400 flex items-center justify-center cursor-pointer">
+</div>
+</div>
+<!-- Item 3: Auto Quest [Katakuri/Bone/Tyrant] -->
+<div class="flex items-center justify-between py-1 px-2 rounded bg-[#161a24] hover:bg-[#1a1f2b] transition border border-[#232938]">
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-medium text-slate-200">Auto Quest [Katakuri / Bone / Tyrant]</span>
+<span class="text-[8px] font-mono text-amber-400/80">REPEATING</span>
+</div>
+<!-- Roblox Style Square Checkbox (Active checked) -->
+<div class="w-4 h-4 rounded-[2px] bg-blue-600 border border-blue-400/50 flex items-center justify-center cursor-pointer shadow-sm">
+<svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewbox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</div>
+</div>
+<!-- Item 4: Start Farm (Master Trigger Switch) -->
+<div class="flex items-center justify-between py-1 px-2 rounded bg-[#181d29] hover:bg-[#1c2230] transition border border-blue-500/40">
+<div class="flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="text-[10.5px] font-bold text-white">Start Farm</span>
+<span class="text-[8px] font-mono text-emerald-400 font-semibold px-1 py-0.2 bg-emerald-500/10 border border-emerald-500/20 rounded">LOOP RUNNING</span>
+</div>
+<span class="text-[8px] text-slate-400 font-mono">Bypasses Anti-Cheat detection delay</span>
+</div>
+<!-- Roblox Style Square Checkbox (Active checked with amber highlight) -->
+<div class="w-4 h-4 rounded-[2px] bg-amber-500 border border-amber-300 flex items-center justify-center cursor-pointer shadow-sm">
+<svg class="w-2.5 h-2.5 text-slate-950 font-black" fill="none" stroke="currentColor" stroke-width="3.5" viewbox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</div>
+</div>
+</div>
+<!-- ROW 4: Extra Fast Action Triggers / Humanoid Utilities -->
+<div class="grid grid-cols-2 gap-1.5">
+<button class="py-1 px-2 rounded bg-[#161a24] border border-[#262c3c] hover:border-blue-500/50 flex items-center justify-between text-left transition active:scale-98">
+<div class="flex flex-col">
+<span class="text-[9.5px] font-bold text-slate-200">Instant Kill Aura</span>
+<span class="text-[7.5px] font-mono text-slate-400">Tween Position: YES</span>
+</div>
+<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"></span>
+</button>
+<button class="py-1 px-2 rounded bg-[#161a24] border border-[#262c3c] hover:border-blue-500/50 flex items-center justify-between text-left transition active:scale-98">
+<div class="flex flex-col">
+<span class="text-[9.5px] font-bold text-slate-200">Mastery Farm Skills</span>
+<span class="text-[7.5px] font-mono text-blue-400">Slot: Z, X, C</span>
+</div>
+<span class="text-[8px] font-mono px-1 py-0.2 bg-[#0e1117] rounded border border-[#222836] text-slate-300">AUTO</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Window Footer / Status Frame & Telemetry -->
+<div class="h-6 px-3 bg-[#0d1016] border-t border-[#1f2430] flex items-center justify-between text-[8.5px] font-mono text-slate-400 shrink-0">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+<span class="text-slate-300">Target: <strong class="text-white font-medium">Katakuri Boss [LV. 2800]</strong></span>
+<span class="text-slate-600">|</span>
+<span class="text-slate-400">Method: <span class="text-blue-400 font-medium">BONE_FARM</span></span>
+</div>
+<div class="flex items-center gap-2.5">
+<span>FPS: <strong class="text-emerald-400">60.0</strong></span>
+<span class="text-slate-600">|</span>
+<span>PING: <strong class="text-slate-300">42ms</strong></span>
+<span class="text-slate-600">|</span>
+<span>MEM: <strong class="text-slate-300">388 MB</strong></span>
+</div>
+</div>
+</div>
+<!-- Simulated Mobile Touch Controls (Bottom Edge for Roblox Ergonomics) -->
+<div class="absolute bottom-1 left-10 right-10 flex items-center justify-between pointer-events-none z-10 text-[9px] font-mono text-slate-500">
+<div class="flex items-center gap-1.5 bg-[#10141d]/85 px-2 py-0.5 rounded border border-[#1f2634]">
+<span class="w-2 h-2 rounded-full border border-slate-500 flex items-center justify-center text-[7px]">⌂</span>
+<span>Tap outside to unfocus hub</span>
+</div>
+<div class="bg-[#10141d]/85 px-2 py-0.5 rounded border border-[#1f2634]">
+<span>Roblox Mobile • Landscape HUD Mode</span>
+</div>
+</div>
+</body></html>

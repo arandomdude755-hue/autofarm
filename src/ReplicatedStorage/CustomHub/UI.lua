@@ -335,33 +335,54 @@ function UI:_ApplySize(snapshot)
     local widthScale = snapshot.compact
         and (touch and layout.MobileWidth or layout.DesktopWidth)
         or layout.ExpandedWidth
-    local maxWidth = landscape and layout.MaxSize.X or 500
+    local baseMaxWidth = landscape and layout.MaxSize.X or 500
     local verticalInset = landscape and 56 or 32
-    local maxHeight = math.min(
-        landscape and 420 or 740,
-        math.max(1, viewport.Y - verticalInset)
-    )
-    local minHeight = math.min(landscape and 370 or 320, maxHeight)
-    local sizeScale = layout.UiSizeScales and layout.UiSizeScales[snapshot.uiSize]
-    if type(sizeScale) ~= "number" or sizeScale <= 0 then
+    local footprint = layout.UiSizeFootprints
+        and layout.UiSizeFootprints[snapshot.uiSize]
+    if type(footprint) ~= "number" or footprint <= 0 then
         return false, "Invalid UI size"
     end
-    local currentScale = self.RootScale and self.RootScale.Scale or 1
+
+    -- UI size changes the window footprint, not control/text scale. This keeps
+    -- touch targets readable and lets smaller sizes use the normal scroll flow.
+    if self.RootScale then
+        self.RootScale.Scale = 1
+    end
+    local maxWidth = math.min(
+        baseMaxWidth * footprint,
+        math.max(1, viewport.X - 16)
+    )
+    local availableHeight = math.max(1, viewport.Y - verticalInset)
+    local maxHeight = math.min(landscape and 420 or 740, availableHeight)
+        * footprint
+    local minWidth = math.min(
+        math.max(
+            layout.MinSize.X * footprint,
+            layout.MinUsableWidth or layout.MinSize.X
+        ),
+        maxWidth
+    )
+    local minHeight = math.min(layout.MinSize.Y * footprint, maxHeight)
     local pageHeight = self.ContentLayout
-        and self.ContentLayout.AbsoluteContentSize.Y / currentScale
+        and self.ContentLayout.AbsoluteContentSize.Y
         or 0
     local desiredHeight = HEADER_HEIGHT + layout.PageHeaderHeight + pageHeight + FOOTER_HEIGHT + 14
-    local width = math.min(viewport.X * widthScale, maxWidth, math.max(1, viewport.X - 16))
-    local height = math.clamp(desiredHeight, minHeight, maxHeight)
-    if self.RootScale then
-        self.RootScale.Scale = sizeScale
-    end
+    local width = math.max(
+        minWidth,
+        math.min(viewport.X * widthScale * footprint, maxWidth)
+    )
+    local height = math.clamp(desiredHeight * footprint, minHeight, maxHeight)
     if self.SizeConstraint then
-        self.SizeConstraint.MinSize = Vector2.new(math.min(280, width), minHeight)
+        self.SizeConstraint.MinSize = Vector2.new(
+            math.min(minWidth, width),
+            minHeight
+        )
         self.SizeConstraint.MaxSize = Vector2.new(maxWidth, maxHeight)
     end
     self.Root.Size = UDim2.fromOffset(math.floor(width), math.floor(height))
     self:_UpdateShellLayout()
+    self:_UpdateControlGridLayout()
+    self:_SyncControlGridHeight()
     self:_ClampWindow()
 end
 
@@ -682,8 +703,7 @@ function UI:_Refresh(snapshot)
         if entry.Control.Kind == "featureToggle" then
             enabled = snapshot.featureEnabled[entry.Control.Action] == true
             entry.Label.Text = enabled and "ON" or "OFF"
-            entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
-            entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
+            entry.Label.TextColor3 = enabled and theme.Accent or theme.MutedText
         elseif entry.Control.Kind == "settingToggle" then
             local settingName = entry.Control.Setting
             if settingName then
@@ -693,8 +713,22 @@ function UI:_Refresh(snapshot)
                 enabled = snapshot.compact
             end
             entry.Label.Text = enabled and "On" or "Off"
-            entry.Label.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
-            entry.Label.TextColor3 = enabled and theme.Text or theme.MutedText
+            entry.Label.TextColor3 = enabled and theme.Accent or theme.MutedText
+        end
+        if entry.Track then
+            entry.Track.BackgroundColor3 = enabled and theme.Accent or theme.TabBar
+            if entry.TrackStroke then
+                entry.TrackStroke.Color = enabled and theme.AccentBorder or theme.Border
+                entry.TrackStroke.Transparency = enabled and 0.18 or 0.28
+            end
+        end
+        if entry.Thumb then
+            entry.Thumb.Position = UDim2.new(
+                0,
+                enabled and 17 or 3,
+                0.5,
+                0
+            )
         end
     end
 
@@ -1195,14 +1229,18 @@ function UI:_ApplyControlSearchHighlight()
             local header = self.SectionHeaderRecords[control]
             if header then
                 header.Title.TextColor3 = matched and theme.Accent or theme.Text
+                header.IconStroke.Color = matched and theme.Accent or theme.AccentBorder
                 header.Stroke.Color = matched and theme.AccentBorder or theme.Border
                 header.Stroke.Transparency = matched and 0.08 or 0.18
-                header.Rule.BackgroundColor3 = theme.Accent
+                header.Rule.BackgroundColor3 = theme.Border
             else
-                row.BackgroundColor3 = matched and theme.Selected or theme.Panel
-                row.BackgroundTransparency = matched and 0.58
-                    or control.Kind == "collapsibleHeader" and 0
-                    or 1
+                row.BackgroundColor3 = matched and theme.Selected
+                    or control.Kind == "collapsibleHeader" and theme.Header
+                    or theme.Control
+                row.BackgroundTransparency = matched and 0.06
+                    or control.Kind == "collapsibleHeader" and 0.04
+                    or control.Kind == "statusValue" and 0.46
+                    or 0.18
                 local stroke = row:FindFirstChildOfClass("UIStroke")
                 if stroke then
                     stroke.Color = matched and theme.AccentBorder or theme.Border
@@ -1696,10 +1734,11 @@ function UI:_AddControl(control, parent)
             Name = self:_ControlNodeName(control),
             Size = UDim2.new(1, 0, 0, layout.RowHeight),
             BackgroundColor3 = theme.Panel,
-            BackgroundTransparency = 1,
+            BackgroundTransparency = 0.46,
             BorderSizePixel = 0,
             LayoutOrder = #controlParent:GetChildren(),
         }, controlParent)
+        addCorner(row, 4)
         local titleWidth = control.Key == "moon" and 0.36 or 0.45
         local valueWidth = 1 - titleWidth
         create("TextLabel", {
@@ -1742,7 +1781,7 @@ function UI:_AddControl(control, parent)
                 0,
                 layout.RowHeight
             ),
-            BackgroundColor3 = theme.Control,
+            BackgroundColor3 = theme.Header,
             BorderSizePixel = 0,
             LayoutOrder = #controlParent:GetChildren(),
         }, controlParent)
@@ -1750,6 +1789,12 @@ function UI:_AddControl(control, parent)
         row.Text = ""
         self:_AttachButtonFeedback(row, self.PageConnections, 0.985)
         addCorner(row, 4)
+        create("UIStroke", {
+            Color = theme.Border,
+            Thickness = layout.BorderThickness,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Transparency = 0.48,
+        }, row)
         create("TextLabel", {
             Name = "Title",
             Position = UDim2.new(0, layout.RowInset + 12, 0, 0),
@@ -1794,11 +1839,18 @@ function UI:_AddControl(control, parent)
     local row = create((isSelector or isSlider) and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
         Size = UDim2.new(1, 0, 0, layout.RowHeight),
-        BackgroundColor3 = theme.Panel,
-        BackgroundTransparency = 1,
+        BackgroundColor3 = theme.Control,
+        BackgroundTransparency = 0.18,
         BorderSizePixel = 0,
         LayoutOrder = #controlParent:GetChildren(),
     }, controlParent)
+    addCorner(row, 4)
+    create("UIStroke", {
+        Color = theme.Border,
+        Thickness = layout.BorderThickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Transparency = 0.52,
+    }, row)
     if row:IsA("TextButton") then
         row.AutoButtonColor = false
         row.Text = ""
@@ -1869,25 +1921,55 @@ function UI:_AddControl(control, parent)
     end
 
     if hasToggle then
-        local toggleLabel = create("TextLabel", {
-            Name = "Value",
+        local toggleControl = create("Frame", {
+            Name = "ToggleControl",
             AnchorPoint = Vector2.new(1, 0),
             Position = UDim2.new(1, -layout.RowInset, 0, layout.ToggleValueTop),
             Size = UDim2.fromOffset(layout.ToggleValueWidth, layout.ToggleValueHeight),
-            BackgroundColor3 = theme.TabBar,
-            Font = theme.StrongFont,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+        }, row)
+        local toggleLabel = create("TextLabel", {
+            Name = "Value",
+            Size = UDim2.new(1, -36, 1, 0),
+            BackgroundTransparency = 1,
+            Font = theme.MonoFont,
             Text = "OFF",
             TextColor3 = theme.MutedText,
-            TextSize = 9,
-            TextXAlignment = Enum.TextXAlignment.Center,
-        }, row)
-        addCorner(toggleLabel, 3)
-        create("UIStroke", {
+            TextSize = 8,
+            TextXAlignment = Enum.TextXAlignment.Right,
+        }, toggleControl)
+        local track = create("Frame", {
+            Name = "SwitchTrack",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.fromOffset(32, 18),
+            BackgroundColor3 = theme.TabBar,
+            BorderSizePixel = 0,
+        }, toggleControl)
+        addCorner(track, 9)
+        local trackStroke = create("UIStroke", {
             Color = theme.Border,
             Thickness = layout.BorderThickness,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        }, toggleLabel)
-        table.insert(self.ToggleLabels, { Control = control, Label = toggleLabel })
+            Transparency = 0.28,
+        }, track)
+        local thumb = create("Frame", {
+            Name = "SwitchThumb",
+            Position = UDim2.new(0, 3, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            Size = UDim2.fromOffset(12, 12),
+            BackgroundColor3 = theme.Text,
+            BorderSizePixel = 0,
+        }, track)
+        addCorner(thumb, 6)
+        table.insert(self.ToggleLabels, {
+            Control = control,
+            Label = toggleLabel,
+            Track = track,
+            TrackStroke = trackStroke,
+            Thumb = thumb,
+        })
     end
 
     if isSelector then
@@ -1993,7 +2075,7 @@ function UI:_AddControl(control, parent)
         local valueStroke = create("UIStroke", {
             Color = theme.AccentBorder,
             Thickness = layout.BorderThickness,
-            Transparency = 0.42,
+            Transparency = 0.28,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
         }, valueFrame)
         local valueLabel = create("TextLabel", {
@@ -2008,7 +2090,7 @@ function UI:_AddControl(control, parent)
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = tostring(selectedValue or "Select"),
-            TextColor3 = theme.Text,
+            TextColor3 = theme.Accent,
             TextSize = 11,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -2162,30 +2244,63 @@ function UI:_CreateControlGroup(group, layoutOrder)
     }, group.Card)
 
     if group.HeaderControl then
+        group.HeaderBand = create("Frame", {
+            Name = "SectionHeaderBand",
+            Position = UDim2.fromOffset(1, 1),
+            Size = UDim2.new(1, -2, 0, math.max(0, headerHeight - 1)),
+            BackgroundColor3 = theme.Header,
+            BackgroundTransparency = 0.42,
+            BorderSizePixel = 0,
+        }, group.Card)
+        addCorner(group.HeaderBand, 4)
+        group.Icon = create("Frame", {
+            Name = "SectionIcon",
+            Position = UDim2.new(0, padding, 0.5, -9),
+            Size = UDim2.fromOffset(18, 18),
+            BackgroundColor3 = theme.AccentSoft or theme.Selected,
+            BorderSizePixel = 0,
+        }, group.Card)
+        addCorner(group.Icon, 5)
+        group.IconStroke = create("UIStroke", {
+            Color = theme.AccentBorder,
+            Thickness = layout.BorderThickness,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Transparency = 0.42,
+        }, group.Icon)
+        group.IconDot = create("Frame", {
+            Name = "SectionIconDot",
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(6, 6),
+            BackgroundColor3 = theme.Accent,
+            BorderSizePixel = 0,
+        }, group.Icon)
+        addCorner(group.IconDot, 4)
         group.Title = create("TextLabel", {
             Name = "SectionTitle",
-            Position = UDim2.new(0, padding, 0, 0),
-            Size = UDim2.new(1, -padding * 2, 0, headerHeight - 4),
+            Position = UDim2.new(0, padding + 27, 0, 0),
+            Size = UDim2.new(1, -(padding * 2 + 27), 1, -1),
             BackgroundTransparency = 1,
             Font = theme.StrongFont,
             Text = group.HeaderControl.Label,
             TextColor3 = theme.Text,
-            TextSize = theme.TextSizes.Control + 1,
-            TextXAlignment = Enum.TextXAlignment.Center,
+            TextSize = theme.TextSizes.Control,
+            TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
             TextTruncate = Enum.TextTruncate.AtEnd,
         }, group.Card)
         group.Rule = create("Frame", {
-            Name = "SectionAccentRule",
-            Position = UDim2.new(0, padding, 0, headerHeight - 3),
-            Size = UDim2.new(1, -padding * 2, 0, 2),
-            BackgroundColor3 = theme.Accent,
-            BackgroundTransparency = 0.18,
+            Name = "SectionDivider",
+            Position = UDim2.new(0, padding, 0, headerHeight - 1),
+            Size = UDim2.new(1, -padding * 2, 0, 1),
+            BackgroundColor3 = theme.Border,
+            BackgroundTransparency = 0.28,
             BorderSizePixel = 0,
         }, group.Card)
         self.ControlRows[group.HeaderControl] = group.Title
         self.SectionHeaderRecords[group.HeaderControl] = {
             Title = group.Title,
+            IconStroke = group.IconStroke,
             Stroke = group.Stroke,
             Rule = group.Rule,
         }
@@ -2200,7 +2315,7 @@ function UI:_CreateControlGroup(group, layoutOrder)
     }, group.Card)
     group.Layout = create("UIGridLayout", {
         CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
-        CellPadding = UDim2.fromOffset(6, 4),
+        CellPadding = UDim2.fromOffset(7, 5),
         FillDirection = Enum.FillDirection.Horizontal,
         FillDirectionMaxCells = 1,
         SortOrder = Enum.SortOrder.LayoutOrder,
@@ -3012,11 +3127,14 @@ function UI:Mount()
     self._contentSizeConnection = self.ContentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if self.Scroll and self.ContentLayout then
             local scale = self.RootScale and self.RootScale.Scale or 1
+            local contentTop = self.Content and self.Content.Position.Y.Offset or 0
+            local bottomPadding = layout.ScrollBottomPadding or 28
             self.Scroll.CanvasSize = UDim2.new(
                 0,
                 0,
                 0,
-                self.ContentLayout.AbsoluteContentSize.Y / scale + 4
+                (contentTop + self.ContentLayout.AbsoluteContentSize.Y) / scale
+                    + bottomPadding
             )
         end
         self:_ApplySize(self.State:GetSnapshot())

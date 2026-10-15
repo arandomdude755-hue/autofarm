@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=844, height=390, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Roblox Mobile Game Hub - Settings &amp; Config</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 844px;
+      height: 390px;
+      background-color: #0d0e14;
+      font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+      position: relative;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Simulated 3D game backdrop */
+    .game-viewport {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 20%, #1e1132 0%, #110d1c 50%, #08090d 100%);
+      overflow: hidden;
+      z-index: 1;
+    }
+    .game-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(to right, rgba(168,85,247,0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(168,85,247,0.06) 1px, transparent 1px);
+      background-size: 28px 28px;
+      transform: perspective(350px) rotateX(50deg) translateY(-30px);
+      transform-origin: top center;
+      opacity: 0.85;
+    }
+    /* Roblox In-game Topbar */
+    .roblox-topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 38px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 10;
+      pointer-events: none;
+    }
+    /* Ultra-clean custom scrollbar */
+    .roblox-scroll::-webkit-scrollbar {
+      width: 3.5px;
+      height: 3.5px;
+    }
+    .roblox-scroll::-webkit-scrollbar-track {
+      background: rgba(14, 15, 23, 0.5);
+      border-radius: 2px;
+    }
+    .roblox-scroll::-webkit-scrollbar-thumb {
+      background: rgba(168, 85, 247, 0.35);
+      border-radius: 2px;
+    }
+    .roblox-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(192, 132, 252, 0.7);
+    }
+    /* Specular glass highlight */
+    .glass-specular {
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 20px 50px rgba(0, 0, 0, 0.65);
+    }
+    .card-specular {
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+  </style>
+</head>
+<body class="flex flex-col items-center justify-center p-3 text-slate-200" style="width: 844px; height: 390px; margin: 0 auto;">
+<!-- 3D Game World Background Simulation -->
+<div class="game-viewport">
+<div class="game-grid"></div>
+<!-- Floating ambient glow orbs -->
+<div class="absolute top-10 left-1/4 w-72 h-72 bg-purple-600/10 rounded-full blur-3xl pointer-events-none"></div>
+<div class="absolute bottom-4 right-1/4 w-80 h-80 bg-violet-500/10 rounded-full blur-3xl pointer-events-none"></div>
+<!-- Simulated 3D low-poly environment silhouettes -->
+<div class="absolute bottom-16 left-6 w-24 h-36 bg-[#1a1b21]/50 border border-[#34343b]/40 rounded-sm transform rotate-6 pointer-events-none"></div>
+<div class="absolute bottom-28 right-8 w-20 h-28 bg-[#1a1b21]/40 border border-[#34343b]/30 rounded-sm transform -rotate-12 pointer-events-none"></div>
+<!-- In-game player leaderstats HUD chip on top-right -->
+<div class="absolute top-2 right-24 flex items-center gap-2 px-2.5 py-1 bg-[#0e0f17]/90 backdrop-blur-md border border-purple-500/20 rounded-md text-[10px] font-mono text-slate-300 z-10 shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
+<span class="text-emerald-400 font-semibold">$ 1,480,250</span>
+<span class="text-purple-400/40">|</span>
+<span class="text-purple-300 font-semibold">LV. 84</span>
+</div>
+<!-- Game Title Indicator Floating on Top Center -->
+<div class="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-0.5 bg-[#0e0f17]/85 backdrop-blur-md border border-purple-500/30 rounded-full text-[10px] font-mono text-purple-200 shadow-[0_0_16px_rgba(168,85,247,0.2)] z-10">
+<span class="font-bold text-purple-300 tracking-wider">NEKO HUB</span>
+<span class="text-purple-400/50">•</span>
+<span class="text-slate-300 text-[9px]">Blox Fruit Engine v2.4</span>
+</div>
+</div>
+<!-- Roblox Native System Bar (Top) -->
+<div class="roblox-topbar">
+<div class="flex items-center gap-2 pointer-events-auto">
+<!-- Roblox Icon standard button -->
+<div class="w-7 h-7 rounded-md bg-[#12131b]/80 backdrop-blur-sm border border-[#2b2d3c] flex items-center justify-center text-slate-200 shadow-sm cursor-pointer hover:bg-[#1c1d29] hover:border-purple-500/40 transition">
+<svg class="w-3.5 h-3.5 fill-current transform rotate-12" viewbox="0 0 24 24"><path d="M5.2 2.5L21.5 6.8 18.8 21.5 2.5 17.2zM9.8 9.5l1.3 4.9 4.9-1.3-1.3-4.9z"></path></svg>
+</div>
+<!-- Menu burger standard button -->
+<div class="w-7 h-7 rounded-md bg-[#12131b]/80 backdrop-blur-sm border border-[#2b2d3c] flex items-center justify-center text-slate-300 shadow-sm cursor-pointer hover:bg-[#1c1d29] hover:border-purple-500/40 transition">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"></path></svg>
+</div>
+<!-- In-game chat bubble button with badge -->
+<div class="relative w-7 h-7 rounded-md bg-[#12131b]/80 backdrop-blur-sm border border-[#2b2d3c] flex items-center justify-center text-slate-300 shadow-sm cursor-pointer hover:bg-[#1c1d29] hover:border-purple-500/40 transition">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+<span class="absolute -top-1 -right-1 bg-purple-600 text-[8px] font-bold text-white rounded-full w-3.5 h-3.5 flex items-center justify-center shadow-[0_0_8px_rgba(168,85,247,0.9)]">5</span>
+</div>
+</div>
+<!-- Quick latency ping indicator -->
+<div class="text-[10px] font-mono text-slate-300 flex items-center gap-1.5 bg-[#0e0f17]/90 backdrop-blur-sm px-2.5 py-0.5 rounded-md border border-purple-500/20 pointer-events-auto shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse"></span>
+<span class="text-slate-400">42ms</span>
+</div>
+</div>
+<!-- NATIVE ROBLOX FLOATING GUI HUB WINDOW (AAA Cyberpunk Glassmorphism HUD) -->
+<div class="relative z-20 w-full rounded-xl flex flex-col overflow-hidden glass-specular transition-all duration-300" style="width: 780px; max-width: 780px; height: 326px; margin-top: 14px; background: rgba(14, 15, 23, 0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(168, 85, 247, 0.25);">
+<!-- Master Window Frame Header / Title Drag Handle -->
+<div class="h-9 px-3.5 flex items-center justify-between shrink-0 border-b border-purple-500/15" style="background: linear-gradient(180deg, rgba(26, 27, 40, 0.7) 0%, rgba(16, 17, 26, 0.5) 100%);">
+<!-- Brand / Title Section -->
+<div class="flex items-center gap-2.5">
+<!-- Glowing Neon Cat Hub Logo with Violet Bevel Ring -->
+<div class="relative w-6 h-6 rounded-lg overflow-hidden flex items-center justify-center p-0.5 bg-[#0b0c13] border border-purple-400/50 shadow-[0_0_10px_rgba(168,85,247,0.5)] shrink-0">
+<img alt="Neon Cat Hub Logo" class="w-full h-full object-cover rounded-md" src="https://lh3.googleusercontent.com/aida/AEtjO1Xm0iDV7NNW8T0syxgZVuEe_AvlyfWIBumLm0CUEDxSZ8flGih8OYlExoweQnctgO-Jq4zDSDR0rQ06KYb5rHL07j50UAv4lOT5HKdUXWc4bnCg3FNS7LT-8WFvIYYgCjkD4XV_c2RRzW7nOdStJx9mUTslHXPoW3I6B_GMu_VNnOi39Gif3VIzfff44vN7-fl078sGmow6MppuOgA-OAOjhFx1Qilom3jSGQFNXfLO2OCxqHXoDpVCnAuq"/>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold tracking-wider text-white font-mono uppercase bg-gradient-to-r from-purple-200 via-purple-300 to-fuchsia-300 bg-clip-text text-transparent drop-shadow-[0_0_10px_rgba(168,85,247,0.4)]">NEKO HUB</span>
+<span class="text-[9px] font-mono text-purple-300 font-semibold px-1.5 py-0.2 bg-purple-500/20 border border-purple-500/40 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.2)]">v2.4.1</span>
+<span class="text-[9px] font-mono text-slate-400 hidden sm:inline-block">• Blox Fruit Engine</span>
+</div>
+</div>
+<!-- Center/Right Breadcrumb & Controls -->
+<div class="flex items-center gap-3">
+<!-- Section Breadcrumb & Status -->
+<div class="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-purple-950/40 border border-purple-500/20 text-[9.5px] font-mono">
+<svg class="w-3 h-3 text-purple-300 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+<span class="text-slate-300">Settings</span>
+<span class="text-purple-400/60">/</span>
+<span class="text-purple-300 font-semibold">Hub Configuration &amp; Themes</span>
+</div>
+<!-- Window Control Action Buttons -->
+<div class="flex items-center gap-1">
+<!-- Minimize -->
+<button class="w-5 h-5 rounded-md bg-[#1a1b28]/70 border border-purple-500/20 hover:border-purple-400 text-slate-300 hover:text-white flex items-center justify-center text-xs transition hover:shadow-[0_0_8px_rgba(168,85,247,0.4)] active:scale-95" title="Minimize">
+<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><path d="M19 12H5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+<!-- Pin / Expand -->
+<button class="w-5 h-5 rounded-md bg-[#1a1b28]/70 border border-purple-500/20 hover:border-purple-400 text-slate-300 hover:text-white flex items-center justify-center text-xs transition hover:shadow-[0_0_8px_rgba(168,85,247,0.4)] active:scale-95" title="Expand / Pin">
+<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+<!-- Close -->
+<button class="w-5 h-5 rounded-md bg-[#1a1b28]/70 border border-purple-500/20 hover:border-rose-500/80 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 flex items-center justify-center text-xs transition hover:shadow-[0_0_8px_rgba(244,63,94,0.4)] active:scale-95" title="Close GUI">
+<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+</div>
+</div>
+</div>
+<!-- Main Split Container: Left Sidebar Navigation + Right Content Canvas -->
+<div class="flex-1 flex overflow-hidden">
+<!-- LEFT VERTICAL NAVIGATION SIDEBAR -->
+<div class="w-48 shrink-0 flex flex-col justify-between overflow-hidden border-r border-purple-500/15" style="background: rgba(10, 11, 18, 0.75);">
+<!-- Top Sidebar Area: Sleek Rounded Search Box -->
+<div class="p-2 border-b border-purple-500/15">
+<div class="relative flex items-center">
+<svg class="w-3.5 h-3.5 text-purple-400/80 absolute left-2.5 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="11" cy="11" r="8"></circle>
+<line x1="21" x2="16.65" y1="21" y2="16.65"></line>
+</svg>
+<input class="w-full bg-[#141522]/90 border border-purple-500/25 rounded-md py-1.5 pl-8 pr-2.5 text-[10px] text-slate-200 placeholder-slate-400 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400/30 font-mono tracking-tight transition" placeholder="Search function..." type="text"/>
+</div>
+</div>
+<!-- Vertical Tab List (Lua ScrollingFrame Navigation with Lucide-style SVG icons) -->
+<div class="flex-1 overflow-y-auto roblox-scroll p-1.5 flex flex-col gap-1">
+<!-- Main / Overview -->
+<button class="group w-full px-2.5 py-1.5 rounded-md flex items-center justify-between text-left text-slate-400 hover:text-purple-200 hover:bg-[#1a1c2e]/60 transition text-[11px] font-medium border border-transparent hover:border-purple-500/20">
+<div class="flex items-center gap-2 truncate">
+<svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 transition" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><rect height="7" rx="1" width="7" x="3" y="3"></rect><rect height="7" rx="1" width="7" x="14" y="3"></rect><rect height="7" rx="1" width="7" x="14" y="14"></rect><rect height="7" rx="1" width="7" x="3" y="14"></rect></svg>
+<span class="truncate">Main / Overview</span>
+</div>
+</button>
+<!-- Farming (INACTIVE TAB) -->
+<button class="group w-full px-2.5 py-1.5 rounded-md flex items-center justify-between text-left text-slate-400 hover:text-purple-200 hover:bg-[#1a1c2e]/60 transition text-[11px] font-medium border border-transparent hover:border-purple-500/20">
+<div class="flex items-center gap-2 truncate">
+<svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 transition" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5"></path><path d="M13 19l6-6"></path><path d="M16 16l4 4"></path><path d="M19 21l2-2"></path></svg>
+<span class="truncate">Farming</span>
+</div>
+</button>
+<!-- LocalPlayer -->
+<button class="group w-full px-2.5 py-1.5 rounded-md flex items-center justify-between text-left text-slate-400 hover:text-purple-200 hover:bg-[#1a1c2e]/60 transition text-[11px] font-medium border border-transparent hover:border-purple-500/20">
+<div class="flex items-center gap-2 truncate">
+<svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 transition" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+<span class="truncate">LocalPlayer</span>
+</div>
+</button>
+<!-- Teleport & World -->
+<button class="group w-full px-2.5 py-1.5 rounded-md flex items-center justify-between text-left text-slate-400 hover:text-purple-200 hover:bg-[#1a1c2e]/60 transition text-[11px] font-medium border border-transparent hover:border-purple-500/20">
+<div class="flex items-center gap-2 truncate">
+<svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 transition" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
+<span class="truncate">Teleport &amp; World</span>
+</div>
+</button>
+<!-- Shop & Merchant -->
+<button class="group w-full px-2.5 py-1.5 rounded-md flex items-center justify-between text-left text-slate-400 hover:text-purple-200 hover:bg-[#1a1c2e]/60 transition text-[11px] font-medium border border-transparent hover:border-purple-500/20">
+<div class="flex items-center gap-2 truncate">
+<svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 transition" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+<span class="truncate">Shop &amp; Merchant</span>
+</div>
+</button>
+<!-- Status & Server -->
+<button class="group w-full px-2.5 py-1.5 rounded-md flex items-center justify-between text-left text-slate-400 hover:text-purple-200 hover:bg-[#1a1c2e]/60 transition text-[11px] font-medium border border-transparent hover:border-purple-500/20">
+<div class="flex items-center gap-2 truncate">
+<svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 transition" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><rect height="8" rx="2" width="20" x="2" y="2"></rect><rect height="8" rx="2" width="20" x="2" y="14"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></svg>
+<span class="truncate">Status &amp; Server</span>
+</div>
+<svg class="w-2.5 h-2.5 text-slate-600 group-hover:text-purple-400 transition shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M9 18l6-6-6-6"></path></svg>
+</button>
+<!-- Settings & Config (ACTIVE TAB with luminous electric violet gradient fill and glowing accent) -->
+<button class="relative w-full px-2.5 py-1.5 rounded-md text-white flex items-center justify-between text-left text-[11px] font-semibold border border-purple-500/40 shadow-[0_0_16px_rgba(168,85,247,0.25)] overflow-hidden" style="background: linear-gradient(90deg, rgba(168, 85, 247, 0.24) 0%, rgba(139, 92, 246, 0.12) 100%);">
+<!-- Left luminous electric violet glowing bar -->
+<span class="absolute left-0 top-1 bottom-1 w-1 bg-gradient-to-b from-purple-300 via-purple-500 to-fuchsia-400 rounded-r shadow-[0_0_10px_rgba(192,132,252,1)]"></span>
+<div class="flex items-center gap-2 pl-1 truncate">
+<svg class="w-3.5 h-3.5 text-purple-300 shrink-0 drop-shadow-[0_0_6px_rgba(168,85,247,0.8)]" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+<span class="text-purple-100 font-bold tracking-tight truncate">Settings &amp; Config</span>
+</div>
+<!-- Active pulsating indicator badge -->
+<span class="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,1)] animate-pulse shrink-0"></span>
+</button>
+</div>
+</div>
+<!-- RIGHT PRIMARY CONTENT PANE -->
+<div class="flex-1 flex flex-col overflow-hidden" style="background: rgba(14, 15, 24, 0.65);">
+<!-- Section Header Bar (Title, Gradient Divider, Filter Hooks) -->
+<div class="px-3 py-1.5 flex items-center justify-between shrink-0 border-b border-purple-500/15" style="background: rgba(19, 21, 33, 0.7);">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.9)]"></div>
+<span class="font-semibold text-slate-100 font-mono tracking-tight text-[11px]">Hub Configuration &amp; Appearance</span>
+</div>
+<div class="flex items-center gap-2 font-mono text-[9px]">
+<span class="text-purple-300 bg-purple-900/30 border border-purple-500/30 px-2 py-0.5 rounded text-[8.5px] font-semibold">PRESET: HYBRID_MOBILE</span>
+<span class="text-purple-400/80 bg-[#0d0e14]/80 px-2 py-0.5 rounded border border-purple-900/40">CONFIG: SYNCED</span>
+</div>
+</div>
+<!-- Gradient divider line fading to transparent -->
+<div class="h-[1px] w-full" style="background: linear-gradient(90deg, #a855f7 0%, rgba(168, 85, 247, 0.25) 65%, transparent 100%);"></div>
+<!-- Scrollable Control Surface with Categorized Settings Cards -->
+<div class="flex-1 p-2.5 overflow-y-auto roblox-scroll flex flex-col gap-2.5">
+<!-- CARD A: Keybinds & Execution Shortcuts Card -->
+<div class="p-2.5 rounded-lg border border-purple-500/20 flex flex-col gap-2 card-specular" style="background: rgba(20, 22, 34, 0.65);">
+<div class="flex items-center justify-between border-b border-purple-500/10 pb-1.5">
+<div class="flex flex-col">
+<span class="text-[11px] font-bold text-slate-100 flex items-center gap-1.5">
+<svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><rect height="16" rx="2" width="20" x="2" y="4"></rect><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M6 12h.001M10 12h.001M14 12h.001M18 12h.001M8 16h8"></path></svg>
+              Keybinds &amp; Trigger Mappings
+            </span>
+<span class="text-[8px] text-slate-400 font-mono pl-5">Global input hooks and executor hotkeys</span>
+</div>
+<span class="text-[8px] font-mono text-purple-300/80 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-500/20">HOOKS ENABLED</span>
+</div>
+<!-- Keybind item 1: Toggle GUI Keybind -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+<div class="flex items-center justify-between p-1.5 px-2 rounded-md bg-[#131522]/80 border border-purple-500/15">
+<span class="text-[10px] text-slate-300 font-medium">Toggle GUI</span>
+<div class="group flex items-center gap-1 bg-[#1c1d2e] hover:bg-purple-900/40 border border-purple-400/30 px-1.5 py-0.5 rounded cursor-pointer transition shadow-sm">
+<span class="text-[9.5px] font-mono font-bold text-purple-300 group-hover:text-purple-200">[ RightShift ]</span>
+<span class="text-[7.5px] text-purple-400/60 font-mono hidden group-hover:inline">Rebind</span>
+</div>
+</div>
+<!-- Keybind item 2: Panic / Emergency Unload Keybind -->
+<div class="flex items-center justify-between p-1.5 px-2 rounded-md bg-[#131522]/80 border border-purple-500/15">
+<span class="text-[10px] text-slate-300 font-medium">Panic Unload</span>
+<div class="flex items-center gap-1 bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/40 px-1.5 py-0.5 rounded cursor-pointer transition shadow-[0_0_8px_rgba(244,63,94,0.15)]">
+<span class="text-[9.5px] font-mono font-bold text-rose-300">[ End ]</span>
+<span class="text-[7.5px] text-rose-400/80 font-mono">EMERGENCY</span>
+</div>
+</div>
+<!-- Keybind item 3: Minimized Bar Toggle -->
+<div class="flex items-center justify-between p-1.5 px-2 rounded-md bg-[#131522]/80 border border-purple-500/15">
+<span class="text-[10px] text-slate-300 font-medium">Mini Bar</span>
+<div class="bg-[#1c1d2e] border border-purple-400/30 px-2 py-0.5 rounded cursor-pointer hover:border-purple-400 transition">
+<span class="text-[9.5px] font-mono font-bold text-purple-300">[ F4 ]</span>
+</div>
+</div>
+</div>
+<!-- Mobile Floating Bubble Toggle Switch -->
+<div class="flex items-center justify-between py-1 px-2.5 rounded-md bg-[#131522]/80 hover:bg-[#1a1c2e] transition border border-purple-500/15">
+<div class="flex items-center gap-2">
+<span class="text-[10.5px] font-medium text-slate-200">Enable Mobile Floating Bubble Toggle</span>
+<span class="text-[8px] font-mono text-purple-300 font-semibold bg-purple-900/30 px-1.5 py-0.2 rounded border border-purple-500/25">TOUCH COMPAT</span>
+</div>
+<!-- Glowing Toggle Switch (ON) -->
+<div class="w-8 h-4 rounded-full bg-purple-600 border border-purple-300 flex items-center justify-end px-0.5 cursor-pointer shadow-[0_0_10px_rgba(168,85,247,0.8)] transition">
+<div class="w-3 h-3 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.9)]"></div>
+</div>
+</div>
+</div>
+<!-- CARD B: Theme & Visual Sliders Card -->
+<div class="p-2.5 rounded-lg border border-purple-500/20 flex flex-col gap-2.5 card-specular" style="background: rgba(20, 22, 34, 0.65);">
+<div class="flex items-center justify-between border-b border-purple-500/10 pb-1.5">
+<div class="flex flex-col">
+<span class="text-[11px] font-bold text-slate-100 flex items-center gap-1.5">
+<svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+              HUD Appearance &amp; Theme Sliders
+            </span>
+<span class="text-[8px] text-slate-400 font-mono pl-5">Real-time shader and glassmorphism parameters</span>
+</div>
+<span class="text-[8px] font-mono text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30">VIBRANT CYBER</span>
+</div>
+<!-- Slider 1: Accent Hue / Color Saturation -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<span class="text-[10px] text-slate-300 font-medium">Accent Hue / Color Saturation</span>
+<div class="bg-[#0b0c13]/90 border border-purple-400/40 px-2 py-0.5 rounded text-[10px] font-mono font-bold text-purple-200 tracking-wide flex items-center gap-1 shadow-inner">
+<span>Electric Violet (275°)</span>
+<span class="text-[8.5px] text-purple-400/70">/ 275</span>
+</div>
+</div>
+<div class="relative w-full h-2.5 bg-[#0a0b12] rounded-full border border-purple-500/25 flex items-center px-0.5 cursor-pointer">
+<div class="h-1 bg-gradient-to-r from-violet-600 via-purple-500 to-fuchsia-400 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.7)]" style="width: 76%;"></div>
+<div class="absolute w-3 h-3 bg-white rounded-full border-2 border-purple-500 shadow-[0_0_10px_rgba(216,180,254,1)] -ml-1.5 cursor-grab transition-transform active:scale-125" style="left: 76%;"></div>
+</div>
+<div class="flex justify-between text-[7.5px] text-slate-400 font-mono">
+<span>0° (RED)</span>
+<span class="text-purple-300 font-semibold">275° VIOLET</span>
+<span>360° (MAGENTA)</span>
+</div>
+</div>
+<!-- Sliders Grid: HUD Transparency & UI Scale -->
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+<!-- Slider 2: HUD Background Transparency / Glass Blur -->
+<div class="flex flex-col gap-1 bg-[#131522]/60 p-2 rounded-md border border-purple-500/15">
+<div class="flex items-center justify-between">
+<span class="text-[9.5px] text-slate-300 font-medium">Glass Opacity / Blur</span>
+<span class="text-[9.5px] font-mono font-bold text-purple-200">85% Opacity</span>
+</div>
+<div class="relative w-full h-2 bg-[#0a0b12] rounded-full border border-purple-500/25 flex items-center px-0.5 cursor-pointer">
+<div class="h-1 bg-gradient-to-r from-purple-700 to-purple-400 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.6)]" style="width: 85%;"></div>
+<div class="absolute w-2.5 h-2.5 bg-white rounded-full border border-purple-500 shadow-[0_0_8px_rgba(216,180,254,1)] -ml-1.25" style="left: 85%;"></div>
+</div>
+<div class="flex justify-between text-[7px] text-slate-400 font-mono">
+<span>30% TRANSLUCENT</span>
+<span>100% OPAQUE</span>
+</div>
+</div>
+<!-- Slider 3: UI Scale -->
+<div class="flex flex-col gap-1 bg-[#131522]/60 p-2 rounded-md border border-purple-500/15">
+<div class="flex items-center justify-between">
+<span class="text-[9.5px] text-slate-300 font-medium">HUD Scale Factor</span>
+<span class="text-[9.5px] font-mono font-bold text-purple-200">100% (Native 1x)</span>
+</div>
+<div class="relative w-full h-2 bg-[#0a0b12] rounded-full border border-purple-500/25 flex items-center px-0.5 cursor-pointer">
+<div class="h-1 bg-gradient-to-r from-purple-700 to-purple-400 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.6)]" style="width: 50%;"></div>
+<div class="absolute w-2.5 h-2.5 bg-white rounded-full border border-purple-500 shadow-[0_0_8px_rgba(216,180,254,1)] -ml-1.25" style="left: 50%;"></div>
+</div>
+<div class="flex justify-between text-[7px] text-slate-400 font-mono">
+<span>MIN: 75%</span>
+<span>MAX: 125%</span>
+</div>
+</div>
+</div>
+<!-- Toggles in Theme: Neon Bloom & Streamer Mode -->
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+<!-- Enable Neon Bloom & Drop Shadow Glow (ON) -->
+<div class="flex items-center justify-between py-1 px-2 rounded-md bg-[#131522]/80 border border-purple-500/15">
+<span class="text-[10px] font-medium text-slate-200">Neon Bloom &amp; Glow</span>
+<div class="w-7 h-3.5 rounded-full bg-purple-600 border border-purple-300 flex items-center justify-end px-0.5 cursor-pointer shadow-[0_0_8px_rgba(168,85,247,0.8)]">
+<div class="w-2.5 h-2.5 rounded-full bg-white shadow-sm"></div>
+</div>
+</div>
+<!-- Streamer Mode (OFF) -->
+<div class="flex items-center justify-between py-1 px-2 rounded-md bg-[#131522]/80 border border-purple-500/15">
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-medium text-slate-300">Streamer Mode</span>
+<span class="text-[7.5px] font-mono text-slate-400 bg-slate-800/40 px-1 rounded">Hide HUD</span>
+</div>
+<div class="w-7 h-3.5 rounded-full bg-[#0d0e15] border border-slate-700 flex items-center px-0.5 cursor-pointer transition">
+<div class="w-2.5 h-2.5 rounded-full bg-slate-500 shadow-sm"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD C: Profile & Config Persistence Card -->
+<div class="p-2.5 rounded-lg border border-purple-500/20 flex flex-col gap-2 card-specular" style="background: rgba(20, 22, 34, 0.65);">
+<div class="flex items-center justify-between border-b border-purple-500/10 pb-1.5">
+<div class="flex flex-col">
+<span class="text-[11px] font-bold text-slate-100 flex items-center gap-1.5">
+<svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              Config Profiles &amp; Auto-Execute
+            </span>
+<span class="text-[8px] text-slate-400 font-mono pl-5">Storage location: workspace/neko_hub/profiles/</span>
+</div>
+<!-- Auto-Save Toggle -->
+<div class="flex items-center gap-2">
+<span class="text-[9px] text-slate-300 font-mono">Auto-Save</span>
+<div class="w-6 h-3.5 rounded-full bg-purple-600 border border-purple-300 flex items-center justify-end px-0.5 cursor-pointer shadow-[0_0_8px_rgba(168,85,247,0.8)]">
+<div class="w-2.5 h-2.5 rounded-full bg-white"></div>
+</div>
+</div>
+</div>
+<!-- Active Config selector row -->
+<div class="flex items-center justify-between py-1.5 px-2.5 rounded-md bg-[#131522]/90 border border-purple-500/20">
+<div class="flex items-center gap-2">
+<span class="text-[9px] font-mono text-purple-400/80">PROFILE:</span>
+<span class="text-[10.5px] font-mono font-semibold text-white">Default_BloxFruit.json</span>
+<span class="text-[7.5px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-1 py-0.2 rounded">AUTO-LOAD</span>
+</div>
+<button class="flex items-center gap-1 text-[9.5px] font-mono text-purple-300 hover:text-white transition">
+<span>Select Profile</span>
+<svg class="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M9 18l6-6-6-6"></path></svg>
+</button>
+</div>
+<!-- Action Buttons: Save, Load, Reset -->
+<div class="grid grid-cols-3 gap-2">
+<button class="py-1.5 px-2 rounded-md bg-gradient-to-r from-purple-700 to-purple-600 hover:from-purple-600 hover:to-purple-500 border border-purple-400/40 text-[10px] font-semibold text-white shadow-[0_0_12px_rgba(168,85,247,0.4)] flex items-center justify-center gap-1.5 active:scale-95 transition">
+<svg class="w-3 h-3 text-purple-200" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+<span>Save Configuration</span>
+</button>
+<button class="py-1.5 px-2 rounded-md bg-[#181a29]/90 hover:bg-[#222438] border border-purple-500/25 hover:border-purple-400 text-[10px] font-medium text-slate-200 flex items-center justify-center gap-1.5 active:scale-95 transition">
+<svg class="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
+<span>Load Profile</span>
+</button>
+<button class="py-1.5 px-2 rounded-md bg-[#181a29]/90 hover:bg-rose-950/30 border border-purple-500/25 hover:border-rose-500/50 text-[10px] font-medium text-slate-300 hover:text-rose-300 flex items-center justify-center gap-1.5 active:scale-95 transition">
+<svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+<span>Reset Defaults</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Telemetry & Console Footer -->
+<div class="h-6 px-3 flex items-center justify-between text-[8.5px] font-mono border-t border-purple-500/20 shrink-0" style="background: rgba(10, 11, 18, 0.9);">
+<!-- Live Console Status Ticker with pulsating dot -->
+<div class="flex items-center gap-2 truncate">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)] animate-pulse shrink-0"></span>
+<span class="text-slate-300 truncate">
+        ACTIVE: <strong class="text-white font-medium">Settings Synced</strong> • File: <span class="text-purple-300 font-medium">Default_BloxFruit.json [Saved]</span>
+</span>
+</div>
+<!-- Telemetry Readouts in Clean Monospace -->
+<div class="flex items-center gap-2 shrink-0 text-slate-400">
+<span>FPS: <strong class="text-emerald-400 font-bold">60.0</strong></span>
+<span class="text-purple-500/40">|</span>
+<span>PING: <strong class="text-slate-200">38ms</strong></span>
+<span class="text-purple-500/40">|</span>
+<span>MEM: <strong class="text-slate-200">382 MB</strong></span>
+<span class="text-purple-500/40">|</span>
+<span class="text-purple-300 font-semibold">HOOKS: 04</span>
+</div>
+</div>
+</div>
+<!-- Simulated Mobile Touch Controls (Bottom Edge for Roblox Ergonomics) -->
+<div class="absolute bottom-1 left-10 right-10 flex items-center justify-between pointer-events-none z-10 text-[9px] font-mono text-slate-400">
+<div class="flex items-center gap-1.5 bg-[#0e0f17]/90 backdrop-blur-sm px-2.5 py-0.5 rounded-md border border-purple-500/20 shadow-sm">
+<span class="w-2 h-2 rounded-full border border-purple-400/60 flex items-center justify-center text-[7px] text-purple-300">⌂</span>
+<span>Tap outside to unfocus hub</span>
+</div>
+<div class="bg-[#0e0f17]/90 backdrop-blur-sm px-2.5 py-0.5 rounded-md border border-purple-500/20 shadow-sm">
+<span class="text-purple-300">Roblox Mobile</span> • Landscape HUD Mode
+  </div>
+</div>
+</body></html>

@@ -31,7 +31,7 @@ for tab in ("Main", "Farm", "Player", "Teleport", "Settings"):
     require(f'"{tab}"' in CONFIG, f"production UI is missing the {tab} tab")
 
 for token in (
-    "Background = Color3.fromRGB(17, 19, 25)",
+    "Background = Color3.fromRGB(12, 14, 19)",
     "Header = Color3.fromRGB(21, 25, 34)",
     "TabBar = Color3.fromRGB(13, 16, 22)",
     "Control = Color3.fromRGB(22, 26, 36)",
@@ -83,7 +83,7 @@ require(
     "the restore button should stay fully visible and resized windows should retain a reachable header",
 )
 
-require("RowHeight = 40" in CONFIG, "production control rows should stay compact")
+require("RowHeight = 42" in CONFIG, "production control rows should keep a comfortable tap height")
 group_builder_start = UI_MODULE.index("function UI:_CreateControlGroup")
 group_builder_end = UI_MODULE.index("\nfunction UI:_RenderTab", group_builder_start)
 group_builder = UI_MODULE[group_builder_start:group_builder_end]
@@ -94,26 +94,32 @@ control_builder_start = UI_MODULE.index("function UI:_AddControl")
 control_builder_end = UI_MODULE.index("\nfunction UI:_CreateControlGroup", control_builder_start)
 control_builder = UI_MODULE[control_builder_start:control_builder_end]
 require(
-    "SectionHeaderHeight = 46" in CONFIG
+    "SectionHeaderHeight = 42" in CONFIG
     and 'Name = cardName .. "_Card"' in group_builder
     and 'Name = "SectionTitle"' in group_builder
-    and 'Name = "SectionAccentRule"' in group_builder
+    and 'Name = "SectionHeaderBand"' in group_builder
+    and 'Name = "SectionIconDot"' in group_builder
+    and 'Name = "SectionDivider"' in group_builder
     and "group.Stroke = create(\"UIStroke\"" in group_builder
     and 'Name = "ActionIndicator"' in control_builder
     and 'create("UIListLayout"' in render_tab
     and 'if control.Kind == "sectionHeader" then' in render_tab
     and 'self:_AddControl(control, group.ControlsFrame)' in render_tab
-    and "BackgroundTransparency = 1" in control_builder
+    and "BackgroundTransparency = 0.18" in control_builder
+    and "create(\"UIStroke\"" in control_builder
     and "Name = \"GroupArrow\"" in control_builder,
-    "controls should share framed section cards, with flat child rows and working collapsible skill keys",
+    "section cards should use a clear blue-accent header with surfaced controls and working skill-key collapse",
 )
 require("MobileWidth = 0.86" in CONFIG
         and "ExpandedWidth = 0.98" in CONFIG
         and "MaxSize = Vector2.new(920, 740)" in CONFIG
         and "SidebarMaxWidth = 224" in CONFIG,
         "landscape panel sizing should match the reference footprint")
-require("landscape and 370 or 320" in UI_MODULE,
-        "landscape panel should retain the larger reference-height footprint")
+require("MinSize = Vector2.new(280, 320)" in CONFIG
+        and "local availableHeight = math.max(1, viewport.Y - verticalInset)" in UI_MODULE
+        and "math.min(landscape and 420 or 740, availableHeight)" in UI_MODULE
+        and "group.ControlsFrame.AbsoluteSize.X >= 620" in UI_MODULE,
+        "small and medium sizes should keep a usable minimum while respecting viewport height and responsive columns")
 require("SidebarNavInsetTop = 4" in CONFIG
         and "local top = layout.SidebarNavInsetTop" in UI_MODULE
         and "local navTop = layout.SidebarNavInsetTop" in UI_MODULE
@@ -167,16 +173,29 @@ require('TabSubsections = {' in CONFIG
         and 'self.NavScroll.CanvasSize = UDim2.new(' in UI_MODULE,
         "Settings sidebar children must reflow the following tabs instead of overlaying them")
 require('UiSize = "Large"' in CONFIG
-        and "Small = 0.82" in CONFIG
-        and "Medium = 0.91" in CONFIG
+        and "Small = 0.88" in CONFIG
+        and "Medium = 0.94" in CONFIG
         and "Large = 1" in CONFIG
+        and "UiSizeFootprints" in CONFIG
+        and "MinUsableWidth = 328" in CONFIG
         and "self.RootScale = create(\"UIScale\"" in UI_MODULE
-        and "self.RootScale.Scale = sizeScale" in UI_MODULE,
-        "UI size options must scale the complete shell")
+        and "self.RootScale.Scale = 1" in size_method
+        and "self.RootScale.Scale = sizeScale" not in size_method
+        and "math.min(viewport.X * widthScale * footprint, maxWidth)" in size_method,
+        "UI size options should resize the window footprint without shrinking text or touch targets")
+require(
+    "ScrollBottomPadding = 28" in CONFIG
+    and "local contentTop = self.Content and self.Content.Position.Y.Offset or 0" in UI_MODULE
+    and "local bottomPadding = layout.ScrollBottomPadding or 28" in UI_MODULE
+    and "self.ContentLayout.AbsoluteContentSize.Y" in UI_MODULE
+    and "contentTop + self.ContentLayout.AbsoluteContentSize.Y" in UI_MODULE,
+    "page scrolling should leave a clear bottom margin after the final card",
+)
 require("function State:SetUiSize(size)" in STATE
         and "uiSize = self._values.uiSize" in STATE
         and "uiSize = self._defaults.UiSize" in STATE
         and 'actionId == "settings.uiSize.select"' in MANAGER
+        and "layout.UiSizeFootprints" in MANAGER
         and "self.State:SetUiSize(payload)" in MANAGER,
         "UI size selection must update state and reset to its default")
 require("Compact = false" in CONFIG,
@@ -211,8 +230,15 @@ require("local anchor = entry.Row or entry.Button" in UI_MODULE
         and "DropdownArrowWidth + 2" in UI_MODULE
         and "TextXAlignment = Enum.TextXAlignment.Left" in UI_MODULE
         and "function UI:_SetDropdownOpenVisual(entry, isOpen)" in UI_MODULE
-        and "DropdownWidthRatio = 0.42" in CONFIG,
+        and "DropdownWidthRatio = 0.5" in CONFIG,
         "dropdowns must open below their full-width selector row, show the current value in a clear field, and keep the arrow separate")
+require(
+    "ToggleValueWidth = 68" in CONFIG
+    and 'Name = "SwitchTrack"' in UI_MODULE
+    and 'Name = "SwitchThumb"' in UI_MODULE
+    and "entry.Track.BackgroundColor3 = enabled and theme.Accent or theme.TabBar" in UI_MODULE,
+    "toggle controls should show a readable state beside a compact switch",
+)
 require('Name = "SectionHeader"' not in SCRIPT
         and 'Name = "Detail"' not in SCRIPT
         and "Temporary UI test row" not in SCRIPT,

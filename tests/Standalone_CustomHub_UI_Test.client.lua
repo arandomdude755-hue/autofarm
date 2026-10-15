@@ -42,7 +42,7 @@ if orphanedGui then
 end
 
 local Theme = {
-    Background = Color3.fromRGB(17, 19, 25),
+    Background = Color3.fromRGB(12, 14, 19),
     Header = Color3.fromRGB(21, 25, 34),
     TabBar = Color3.fromRGB(13, 16, 22),
     Panel = Color3.fromRGB(18, 21, 29),
