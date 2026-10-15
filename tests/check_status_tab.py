@@ -160,9 +160,9 @@ require(
     and "ELITE_TARGET_NAMES" in FEATURE
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' not in FEATURE
-    and "function readTikiEyes(statusFeature, map)" in FEATURE
-    and "if found < 4 then" in FEATURE
-    and "previous.islandModel == islandModel" in FEATURE
+    and "function readTikiEyes(map)" in FEATURE
+    and "if found == 0 then" in FEATURE
+    and 'return value .. " (Partial)"' in FEATURE
     and 'return "Not loaded"' in FEATURE
     and 'Eye" .. tostring(index)' in FEATURE
     and "Third Sea only" in FEATURE

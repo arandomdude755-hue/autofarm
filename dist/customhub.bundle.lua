@@ -5707,11 +5707,10 @@ local function readMoonStatus(statusFeature)
         .. formatMoonEstimate(hoursRemaining * rate)
 end
 
-local function readTikiEyes(statusFeature, map)
+local function readTikiEyes(map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        statusFeature._tikiEyeSnapshot = nil
         return "Not loaded"
     end
     local cleared = 0
@@ -5726,18 +5725,13 @@ local function readTikiEyes(statusFeature, map)
             end
         end
     end
-    if found < 4 then
-        local previous = statusFeature._tikiEyeSnapshot
-        if previous and previous.islandModel == islandModel then
-            return previous.value
-        end
+    if found == 0 then
         return "Not loaded"
     end
     local value = tostring(cleared) .. " / 4 cleared"
-    statusFeature._tikiEyeSnapshot = {
-        islandModel = islandModel,
-        value = value,
-    }
+    if found < 4 then
+        return value .. " (Partial)"
+    end
     return value
 end
 
@@ -5827,7 +5821,7 @@ local function readWorldEventValues(context, statusFeature)
         frozenDimension = thirdSea
                 and readEventPresence(frozenDimension)
             or "Third Sea only",
-        tikiEyes = thirdSea and readTikiEyes(statusFeature, map) or "Third Sea only",
+        tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
     }
 end
 
@@ -6668,7 +6662,6 @@ function StatusFeature:Initialize(context)
     self._moonClockSample = nil
     self._moonSecondsPerGameHour = nil
     self._moonRateUpdatedAt = nil
-    self._tikiEyeSnapshot = nil
     self.RemoteEventStatus = {
         leviathanSpy = "Waiting for status check",
         cakePrinceMobs = "Waiting for status check",
@@ -6733,7 +6726,6 @@ function StatusFeature:Cleanup()
     self._moonClockSample = nil
     self._moonSecondsPerGameHour = nil
     self._moonRateUpdatedAt = nil
-    self._tikiEyeSnapshot = nil
     self.RemoteEventStatus = nil
     self.Context = nil
 end
