@@ -523,6 +523,9 @@ function Compatibility:HasUnlockedTitle(titleName)
             if activeFrame and activeFrame:IsA("GuiObject") then
                 activeFrame.Visible = false
             end
+            if titlesMenu and titlesMenu:IsA("LayerCollector") then
+                titlesMenu.Enabled = false
+            end
         end)
     end
     local function watchFrame(activeFrame)
@@ -554,6 +557,18 @@ function Compatibility:HasUnlockedTitle(titleName)
             if frame then
                 watchFrame(frame)
             end
+            if titlesMenu and titlesMenu:IsA("LayerCollector") then
+                local enabledConnection = titlesMenu:GetPropertyChangedSignal("Enabled"):Connect(
+                    function()
+                        pcall(function()
+                            if openedForProbe and titlesMenu.Enabled then
+                                titlesMenu.Enabled = false
+                            end
+                        end)
+                    end
+                )
+                table.insert(visibilityConnections, enabledConnection)
+            end
             local descendantConnection
             if titlesMenu then
                 descendantConnection = titlesMenu.DescendantAdded:Connect(function(instance)
@@ -565,13 +580,14 @@ function Compatibility:HasUnlockedTitle(titleName)
                     end
                 end)
             end
+            openedForProbe = true
             local fired, fireError = pcall(function()
                 openEvent:Fire()
             end)
             if fired then
-                openedForProbe = true
                 suppressProbeMenu()
             else
+                openedForProbe = false
                 reason = "TitlesMenu.Open failed: " .. tostring(fireError)
             end
             if descendantConnection then
@@ -608,7 +624,15 @@ function Compatibility:HasUnlockedTitle(titleName)
         reason = "title menu probe failed: " .. tostring(probeState)
     end
 
+    for _, connection in ipairs(visibilityConnections) do
+        pcall(function()
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end)
+    end
     if openedForProbe then
+        openedForProbe = false
         pcall(function()
             local _, activeFrame = getMenuParts()
             if activeFrame and activeFrame:IsA("GuiObject") then
@@ -616,13 +640,6 @@ function Compatibility:HasUnlockedTitle(titleName)
             end
             if titlesMenu and originalEnabled ~= nil then
                 titlesMenu.Enabled = originalEnabled
-            end
-        end)
-    end
-    for _, connection in ipairs(visibilityConnections) do
-        pcall(function()
-            if connection and connection.Connected then
-                connection:Disconnect()
             end
         end)
     end

@@ -5,9 +5,9 @@ local MINIMUM_DISTANCE_SAVED = 1500
 local MAX_ROUTE_HOPS = 4
 local FAILED_ROUTE_COOLDOWN = 30
 local FAILED_APPROACH_COOLDOWN = 8
-local GATEWAY_ACTIVATION_TIMEOUT = 8
+local GATEWAY_ACTIVATION_TIMEOUT = 5
 local GATEWAY_TOUCH_LOAD_TIMEOUT = 2
-local REMOTE_RETRY_INTERVAL = 0.3
+local REMOTE_RETRY_INTERVAL = 0.5
 
 local SEA_LABELS = {
     [1] = "First Sea",
@@ -390,7 +390,13 @@ function MapGatewayService:HasPendingTitleChecks()
     return false
 end
 
-function MapGatewayService:FindPlan(destination, currentPosition, destinationLabel)
+function MapGatewayService:FindPlan(
+    destination,
+    currentPosition,
+    destinationLabel,
+    excludedRoutes
+)
+    excludedRoutes = type(excludedRoutes) == "table" and excludedRoutes or {}
     self.LastDiagnostic = {
         At = os.clock(),
         DestinationLabel = destinationLabel,
@@ -440,7 +446,13 @@ function MapGatewayService:FindPlan(destination, currentPosition, destinationLab
     end
 
     local directDistance = distance(currentPosition, destination)
-    local plannedCost, plan = findBest(currentPosition, MAX_ROUTE_HOPS, {})
+    local excluded = {}
+    for routeName, isExcluded in pairs(excludedRoutes) do
+        if isExcluded then
+            excluded[routeName] = true
+        end
+    end
+    local plannedCost, plan = findBest(currentPosition, MAX_ROUTE_HOPS, excluded)
     diagnostic.DirectDistance = directDistance
     diagnostic.PlannedDistance = plannedCost
     diagnostic.DistanceSaved = directDistance - plannedCost

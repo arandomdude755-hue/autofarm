@@ -205,6 +205,10 @@ require(
     and "openEvent:Fire()" in title_access
     and "TITLE_MENU_PROBE_TIMEOUT = 0.35" in COMPATIBILITY
     and "activeFrame.Visible = false" in title_access
+    and "titlesMenu.Enabled = false" in title_access
+    and 'GetPropertyChangedSignal("Enabled")' in title_access
+    and title_access.index("for _, connection in ipairs(visibilityConnections)")
+        < title_access.index("titlesMenu.Enabled = originalEnabled")
     and "TITLE_STATE_CACHE_TTL = 30" in COMPATIBILITY
     and "TITLE_STATE_UNKNOWN_CACHE_TTL = 1" in COMPATIBILITY
     and "InvokeServer" not in title_access
@@ -295,11 +299,21 @@ require(
     "gateway diagnostics must distinguish planning, approach, activation, and arrival failures",
 )
 require(
-    "local GATEWAY_ACTIVATION_TIMEOUT = 8" in GATEWAYS
-    and "local REMOTE_RETRY_INTERVAL = 0.3" in GATEWAYS
+    "local GATEWAY_ACTIVATION_TIMEOUT = 5" in GATEWAYS
+    and "local REMOTE_RETRY_INTERVAL = 0.5" in GATEWAYS
     and "remoteCallCount += 1" in GATEWAYS
     and "and os.clock() - lastRemoteCallAt >= REMOTE_RETRY_INTERVAL" in GATEWAYS,
-    "requestEntrance must retry at the Vxeze cadence until arrival or the bounded timeout",
+    "requestEntrance retries must be bounded to reduce waits and repeated calls",
+)
+require(
+    "local MAX_GATEWAY_ATTEMPTS = 4" in FEATURE
+    and "local attemptedRoutes = {}" in FEATURE
+    and "self.GatewayService.FindPlan" in FEATURE
+    and "currentRoot.Position,\n            request.Label,\n            attemptedRoutes" in FEATURE
+    and "request.RoutePlan = nil" in FEATURE
+    and "checking another route" in FEATURE
+    and "self:_RunDirectTravel(request, character, false)" in FEATURE,
+    "multi-hop travel must replan from each confirmed gateway arrival or failure and avoid repeating legs",
 )
 farm_navigation = FEATURE[
     FEATURE.index("function TeleportFeature:MoveFarmTo("):
@@ -313,6 +327,8 @@ require(
     "function TeleportFeature:MoveFarmTo(destination, options)" in farm_navigation
     and "self.GatewayService.FindPlan" in farm_navigation
     and "RoutePlan = routePlan" in farm_navigation
+    and "RouteStartPosition = root.Position" in farm_navigation
+    and "RoutePlanDestination = destination.Position" in farm_navigation
     and "task.spawn(function()" in farm_navigation
     and "pcall(self._RunTravel, self, request, character)" in farm_navigation
     and "teleportFeature:MoveFarmTo(destination" in farm_move

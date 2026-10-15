@@ -15,6 +15,7 @@ local TeleportFeature = {
 local MAX_STALL_RETRIES = 2
 local STALL_RETRY_DELAY = 1.1
 local MAX_TRAVEL_TIMEOUT = 150
+local MAX_GATEWAY_ATTEMPTS = 4
 local TITLE_ACCESS_RECHECK_WINDOW = 1
 local NPC_DIAGNOSTIC_TARGETS = {
     { Label = "Titles Specialist", Names = { "Titles Specialist" } },
@@ -384,34 +385,57 @@ end
 
 function TeleportFeature:_RunTravel(request, character)
     local compatibility = self.Context.Compatibility
-    local _, _, root = compatibility:GetCharacterParts()
-    local plan = request.RoutePlan or {}
-    if not request.RoutePlan and root and self.GatewayService then
+    local attemptedRoutes = {}
+    local gatewayAttempts = 0
+    local gatewayFailed = false
+
+    local function findPlanFromCurrentPosition()
+        if not self.GatewayService then
+            return {}
+        end
+        local _, _, currentRoot = compatibility:GetCharacterParts()
+        if not currentRoot then
+            return {}
+        end
+
+        if not request.RoutePlanConsumed
+            and type(request.RoutePlan) == "table"
+            and #request.RoutePlan > 0
+            and typeof(request.RoutePlanDestination) == "Vector3"
+            and typeof(request.RouteStartPosition) == "Vector3"
+            and (request.RoutePlanDestination - request.Destination.Position).Magnitude <= 200
+            and (request.RouteStartPosition - currentRoot.Position).Magnitude <= 200
+        then
+            request.RoutePlanConsumed = true
+            return request.RoutePlan
+        end
+        request.RoutePlanConsumed = true
+
         local planOk, resolvedPlan = pcall(
             self.GatewayService.FindPlan,
             self.GatewayService,
             request.Destination.Position,
-            root.Position,
-            request.Label
+            currentRoot.Position,
+            request.Label,
+            attemptedRoutes
         )
-        if planOk and type(resolvedPlan) == "table" then
-            plan = resolvedPlan
-        elseif not planOk then
+        if not planOk or type(resolvedPlan) ~= "table" then
             self.GatewayService:RecordTravelPhase(
                 "gateway planning failed; using normal travel",
                 nil,
                 { Failure = resolvedPlan }
             )
+            return {}
         end
-        if planOk and type(resolvedPlan) == "table"
-            and #resolvedPlan == 0
+
+        if #resolvedPlan == 0
             and self.GatewayService:HasPendingTitleChecks()
         then
             local deadline = os.clock() + TITLE_ACCESS_RECHECK_WINDOW
             while os.clock() < deadline do
                 task.wait(0.1)
                 if not self:_IsTravelCurrent(request, character) then
-                    return
+                    return {}
                 end
                 local _, _, retryRoot = compatibility:GetCharacterParts()
                 if not retryRoot then
@@ -422,7 +446,8 @@ function TeleportFeature:_RunTravel(request, character)
                     self.GatewayService,
                     request.Destination.Position,
                     retryRoot.Position,
-                    request.Label
+                    request.Label,
+                    attemptedRoutes
                 )
                 if not planOk or type(resolvedPlan) ~= "table"
                     or #resolvedPlan > 0
@@ -431,31 +456,31 @@ function TeleportFeature:_RunTravel(request, character)
                     break
                 end
             end
-            if planOk and type(resolvedPlan) == "table" then
-                plan = resolvedPlan
+            if not planOk or type(resolvedPlan) ~= "table" then
+                return {}
             end
         end
-    end
-    if #plan > 0 then
-        local routeNames = {}
-        for _, route in ipairs(plan) do
-            table.insert(routeNames, route.Name)
-        end
-        self:_SetStatus(
-            "Using map gateway route: " .. table.concat(routeNames, " → ") .. ".",
-            "info"
-        )
-    elseif self.GatewayService then
-        self.GatewayService:RecordTravelPhase(
-            "using normal travel: no qualifying map gateway route"
-        )
+        return resolvedPlan
     end
 
-    local gatewayFailed = false
-    for _, route in ipairs(plan) do
+    -- Take one leg at a time. A second leg planned before teleporting can be
+    -- stale by the time the first transition finishes or fails.
+    while gatewayAttempts < MAX_GATEWAY_ATTEMPTS do
         if not self:_IsTravelCurrent(request, character) then
             return
         end
+        local plan = findPlanFromCurrentPosition()
+        local route = plan[1]
+        if not route then
+            break
+        end
+        if attemptedRoutes[route.Name] then
+            break
+        end
+        attemptedRoutes[route.Name] = true
+        gatewayAttempts += 1
+
+        self:_SetStatus("Using map gateway: " .. route.Name .. ".", "info")
         local _, _, approachRoot = compatibility:GetCharacterParts()
         self.GatewayService:RecordTravelPhase("approaching gateway stand", route, {
             PositionBeforeApproach = approachRoot and approachRoot.Position or nil,
@@ -476,7 +501,7 @@ function TeleportFeature:_RunTravel(request, character)
             self.GatewayService:MarkApproachFailed(route, movementError)
             local _, _, failedRoot = compatibility:GetCharacterParts()
             self.GatewayService:RecordTravelPhase(
-                "could not reach gateway stand; falling back to normal travel",
+                "could not reach gateway stand; trying another gateway",
                 route,
                 {
                     PositionAfterApproach = failedRoot and failedRoot.Position or nil,
@@ -484,11 +509,12 @@ function TeleportFeature:_RunTravel(request, character)
                 }
             )
             self:_SetStatus(
-                "Could not reach " .. route.Name .. "; continuing by normal travel.",
+                "Could not reach " .. route.Name .. "; checking another route.",
                 "warning"
             )
             gatewayFailed = true
-            break
+            request.RoutePlan = nil
+            continue
         end
 
         local _, _, gatewayRoot = compatibility:GetCharacterParts()
@@ -508,32 +534,47 @@ function TeleportFeature:_RunTravel(request, character)
             end
             self.GatewayService:MarkFailed(route, gatewayError)
             self.GatewayService:RecordTravelPhase(
-                "gateway activation failed; falling back to normal travel",
+                "gateway activation failed; trying another gateway",
                 route,
                 { Failure = gatewayError }
             )
             self:_SetStatus(
-                route.Name .. " did not confirm arrival; continuing by normal travel.",
+                route.Name .. " did not confirm arrival; checking another route.",
                 "warning"
             )
             gatewayFailed = true
             if gatewayError then
                 request.LastGatewayError = tostring(gatewayError)
             end
-            break
+            request.RoutePlan = nil
+            continue
         end
+        request.RoutePlan = nil
         self.GatewayService:RecordTravelPhase(
             "gateway arrival confirmed; continuing to destination",
             route
         )
         self:_SetStatus(
-            route.Name .. " arrival confirmed; continuing to " .. request.Label .. ".",
+            route.Name .. " arrival confirmed; checking the next leg.",
             "info"
         )
     end
 
     if self:_IsTravelCurrent(request, character) then
-        self:_RunDirectTravel(request, character, gatewayFailed)
+        if gatewayAttempts >= MAX_GATEWAY_ATTEMPTS then
+            self.GatewayService:RecordTravelPhase(
+                "gateway attempt limit reached; continuing by normal travel",
+                nil,
+                { GatewayAttempts = gatewayAttempts }
+            )
+        elseif gatewayFailed then
+            self.GatewayService:RecordTravelPhase(
+                "no more usable gateway routes; continuing by normal travel",
+                nil,
+                { GatewayAttempts = gatewayAttempts }
+            )
+        end
+        self:_RunDirectTravel(request, character, false)
     end
 end
 
@@ -918,6 +959,8 @@ function TeleportFeature:MoveFarmTo(destination, options)
         Label = options.Label or "Farm target",
         Destination = destination,
         RoutePlan = routePlan,
+        RouteStartPosition = root.Position,
+        RoutePlanDestination = destination.Position,
         IsCurrent = isCurrent,
         Speed = tonumber(options.Speed) or 190,
         Threshold = tonumber(options.Threshold) or 8,
