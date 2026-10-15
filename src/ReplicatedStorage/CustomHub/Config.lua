@@ -497,12 +497,15 @@ local Config = {
         "Farm",
         "Player",
         "Teleport",
-        "StatusServer",
+        "Status",
         "Settings",
     },
     TabSubsections = {
-        Settings = {
+        Status = {
             { Label = "Event Status", Page = "EventStatus" },
+            { Label = "Server Status", Page = "StatusServer" },
+        },
+        Settings = {
             { Label = "Main settings", Page = "Settings" },
             { Label = "Farm settings", Page = "FarmSettings" },
         },

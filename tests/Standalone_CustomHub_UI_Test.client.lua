@@ -61,7 +61,7 @@ local Theme = {
     MonoFont = Enum.Font.Code,
 }
 
-local Tabs = { "Main", "Farm", "Player", "Teleport", "StatusServer", "Settings" }
+local Tabs = { "Main", "Farm", "Player", "Teleport", "Status", "Settings" }
 local Pages = {
     Main = {
         Controls = {
@@ -99,6 +99,20 @@ local Pages = {
                 Label = "Travel status",
                 Action = "teleport.status",
                 Badge = "INFO",
+            },
+        },
+    },
+    Status = {
+        Controls = {
+            {
+                Kind = "button",
+                Label = "Event Status",
+                Action = "status.events",
+            },
+            {
+                Kind = "button",
+                Label = "Server Status",
+                Action = "status.server",
             },
         },
     },

@@ -313,16 +313,24 @@ local ELITE_TARGET_NAMES = {
     "Diablo",
 }
 
-local function readEliteHunterStatus(workspace)
-    local enemies = findChild(workspace, "Enemies")
-    if not enemies then
-        return "Unavailable (Enemies folder not loaded)"
+local function isThirdSea(compatibility)
+    local method = compatibility and compatibility.IsThirdSea
+    if type(method) ~= "function" then
+        return false
+    end
+    local ok, value = pcall(method, compatibility)
+    return ok and value == true
+end
+
+local function findAliveElite(container)
+    if not container then
+        return nil
     end
     local childrenOk, children = pcall(function()
-        return enemies:GetChildren()
+        return container:GetChildren()
     end)
     if not childrenOk or type(children) ~= "table" then
-        return "Unavailable"
+        return nil
     end
     for _, enemy in ipairs(children) do
         if enemy:IsA("Model") and table.find(ELITE_TARGET_NAMES, enemy.Name) then
@@ -331,9 +339,31 @@ local function readEliteHunterStatus(workspace)
                 and humanoid
                 and humanoid.Health > 0
             then
-                return "Active: " .. enemy.Name
+                return enemy
             end
         end
+    end
+    return nil
+end
+
+local function readEliteHunterStatus(workspace, replicatedStorage, compatibility)
+    if not isThirdSea(compatibility) then
+        return "Third Sea only"
+    end
+    local enemies = findChild(workspace, "Enemies")
+    local liveElite = findAliveElite(enemies)
+    if liveElite then
+        return "Spawned: " .. liveElite.Name
+    end
+
+    -- Vxeze also checks ReplicatedStorage; report this separately so a template
+    -- is not mistaken for a live Elite Hunter spawn.
+    local storedElite = findAliveElite(replicatedStorage)
+    if storedElite then
+        return "Template loaded: " .. storedElite.Name .. " (spawn not confirmed)"
+    end
+    if not enemies then
+        return "Unavailable (Enemies folder not loaded)"
     end
     return "No active target loaded"
 end
@@ -341,9 +371,11 @@ end
 local function readWorldEventValues(context, statusFeature)
     local compatibility = context and context.Compatibility
     local workspace = compatibility and compatibility.Workspace
+    local replicatedStorage = compatibility and compatibility.ReplicatedStorage
     local map = findChild(workspace, "Map")
     local worldOrigin = findChild(workspace, "_WorldOrigin")
     local locations = findChild(worldOrigin, "Locations")
+    local thirdSea = isThirdSea(compatibility)
     local serverElapsed = readServerElapsed(workspace)
     local mirage = findChild(map, "MysticIsland")
     local prehistoric = findChild(map, "PrehistoricIsland")
@@ -360,11 +392,11 @@ local function readWorldEventValues(context, statusFeature)
         serverAge = serverElapsed and formatServerAge(serverElapsed) or "Unavailable",
         legendaryItemTimer = readLegendaryItemEstimate(workspace),
         moon = readMoonStatus(statusFeature),
-        eliteHunter = readEliteHunterStatus(workspace),
-        mirageIsland = presence(mirage, not map),
-        prehistoricIsland = presence(prehistoric, not map),
-        frozenDimension = presence(frozenDimension, not locations),
-        tikiEyes = readTikiEyes(map),
+        eliteHunter = readEliteHunterStatus(workspace, replicatedStorage, compatibility),
+        mirageIsland = thirdSea and presence(mirage, not map) or "Third Sea only",
+        prehistoricIsland = thirdSea and presence(prehistoric, not map) or "Third Sea only",
+        frozenDimension = thirdSea and presence(frozenDimension, not locations) or "Third Sea only",
+        tikiEyes = thirdSea and readTikiEyes(map) or "Third Sea only",
     }
 end
 
@@ -377,15 +409,6 @@ local function readRemoteFunction(context)
         return remote
     end
     return nil
-end
-
-local function isThirdSea(compatibility)
-    local method = compatibility and compatibility.IsThirdSea
-    if type(method) ~= "function" then
-        return false
-    end
-    local ok, value = pcall(method, compatibility)
-    return ok and value == true
 end
 
 local function readLeviathanSpyStatus(context, remote)
@@ -403,11 +426,11 @@ local function readLeviathanSpyStatus(context, remote)
     end
     local status = tonumber(result)
     if status == 5 then
-        return "Ready to find Leviathan"
+        return "Ready to hunt"
     elseif status == -1 or status == nil then
-        return "Spy status unknown"
+        return "Unknown"
     end
-    return "Visit the Spy for Leviathan info"
+    return "Buy the hint from the Spy"
 end
 
 local function readCakePrinceMobs(context, remote)
@@ -424,26 +447,27 @@ local function readCakePrinceMobs(context, remote)
         return "Unavailable (server check failed)"
     end
     if type(result) == "number" then
-        return tostring(math.max(0, math.floor(result))) .. " mobs remaining"
+        return tostring(math.max(0, math.floor(result))) .. " enemies left"
     end
     if type(result) ~= "string" or result == "" then
-        return "Unavailable"
+        return "Unknown"
     end
 
-    local normalized = string.lower(result)
-    if string.find(normalized, "open the portal now", 1, true) then
+    local plainText = result:gsub("<[^>]+>", "")
+    local normalized = string.lower(plainText)
+    if string.find(normalized, "open the portal", 1, true) then
         return "Portal ready"
     elseif string.find(normalized, "already spawned", 1, true)
         or string.find(normalized, "cake prince has spawned", 1, true)
     then
         return "Cake Prince spawned"
     end
-    local count = result:match("(%d+)%s*[Mm]obs?")
-        or result:match("(%d+)")
+    local count = plainText:match("(%d+)%s*[Ee]nemies?")
+        or plainText:match("(%d+)")
     if count then
-        return tostring(count) .. " mobs remaining"
+        return tostring(count) .. " enemies left"
     end
-    return result:sub(1, 90)
+    return "Unknown"
 end
 
 local function readRemoteEventValues(context)

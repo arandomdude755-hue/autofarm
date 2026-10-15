@@ -7,6 +7,11 @@ STATE = (ROOT / "src/ReplicatedStorage/CustomHub/State.lua").read_text()
 UI = (ROOT / "src/ReplicatedStorage/CustomHub/UI.lua").read_text()
 FEATURE = (ROOT / "src/ReplicatedStorage/CustomHub/Features/StatusFeature.lua").read_text()
 MANAGER = (ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua").read_text()
+STANDALONE_UI_TEST = (ROOT / "tests/Standalone_CustomHub_UI_Test.client.lua").read_text()
+TOP_LEVEL_TABS = CONFIG.split("    Tabs = {", 1)[1].split("    TabSubsections =", 1)[0]
+SUBSECTIONS = CONFIG.split("    TabSubsections = {", 1)[1].split("    CollapsibleDefaults", 1)[0]
+STATUS_SUBSECTIONS = SUBSECTIONS.split("        Status = {", 1)[1].split("        Settings = {", 1)[0]
+SETTINGS_SUBSECTIONS = SUBSECTIONS.split("        Settings = {", 1)[1]
 QUEST_SERVICE = (
     ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/QuestService.lua"
 ).read_text()
@@ -19,14 +24,22 @@ def require(condition, message):
 
 
 require(
-    '"StatusServer"' in CONFIG
+    '"Status",' in TOP_LEVEL_TABS
+    and '"StatusServer"' not in TOP_LEVEL_TABS
     and 'Title = "Server Status"' in CONFIG
     and 'tabName == "StatusServer" and "Server Status"' in UI
-    and 'Settings = {\n            { Label = "Event Status", Page = "EventStatus" }' in CONFIG
+    and STATUS_SUBSECTIONS.index('Label = "Event Status"')
+        < STATUS_SUBSECTIONS.index('Label = "Server Status"')
+    and 'Page = "EventStatus"' in STATUS_SUBSECTIONS
+    and 'Page = "StatusServer"' in STATUS_SUBSECTIONS
+    and 'Label = "Main settings", Page = "Settings"' in SETTINGS_SUBSECTIONS
+    and "Event Status" not in SETTINGS_SUBSECTIONS
     and 'EventStatus = {\n            Title = "Event Status"' in CONFIG
     and 'Action = "status.refresh"' in CONFIG
-    and 'Action = "status.copy"' in CONFIG,
-    "Server Status remains top-level and Event Status is the Settings default subpage",
+    and 'Action = "status.copy"' in CONFIG
+    and 'local Tabs = { "Main", "Farm", "Player", "Teleport", "Status", "Settings" }' in STANDALONE_UI_TEST
+    and 'Status = {\n        Controls = {' in STANDALONE_UI_TEST,
+    "Status is a top-level tab with Event Status first and Server Status second",
 )
 require(
     'Kind = "statusValue"' in CONFIG
@@ -87,8 +100,11 @@ require(
     and 'local function formatMoonEstimate(realSeconds)' in FEATURE
     and '"game clock "' not in FEATURE
     and '" (estimate)"' in FEATURE
-    and "ELITE_TARGET_NAMES" in FEATURE,
-    "Event Status estimates moon timing from measured real clock speed and omits raid countdowns",
+    and "ELITE_TARGET_NAMES" in FEATURE
+    and "Template loaded: " in FEATURE
+    and "Third Sea only" in FEATURE
+    and 'gsub("<[^>]+>", "")' in FEATURE,
+    "Event Status uses calibrated moon timing and Vxeze-style event checks without raid countdowns",
 )
 require(
     "function StatusFeature:_ReadValues()" in FEATURE
@@ -98,6 +114,10 @@ require(
     and 'InvokeServer("InfoLeviathan", "1")' in FEATURE
     and 'InvokeServer("CakePrinceSpawner", true)' in FEATURE
     and 'InvokeServer("CakePrinceSpawner")' not in FEATURE
+    and '"Ready to hunt"' in FEATURE
+    and '"Buy the hint from the Spy"' in FEATURE
+    and "enemies left" in FEATURE
+    and 'string.find(normalized, "open the portal", 1, true)' in FEATURE
     and "StatusFeature" in MANAGER,
     "event status uses only the references' read-only remote queries and never triggers Cake Prince",
 )
