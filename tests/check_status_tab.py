@@ -78,13 +78,13 @@ require(
             "leviathanSpy",
             "cakePrinceMobs",
             "eliteHunter",
-            "seaEventSignal",
             "mirageIsland",
             "prehistoricIsland",
             "frozenDimension",
             "tikiEyes",
         )
     )
+    and "seaEventSignal" not in CONFIG
     and "raidTimer" not in CONFIG
     and "prehistoricTimer" not in CONFIG
     and '"Health"' not in CONFIG
@@ -95,8 +95,10 @@ require(
     and "workspace:GetServerTimeNow()" in FEATURE
     and "tick() - 25200" in FEATURE
     and "local function readLegendaryItemStatus(context, workspace, elapsed)" in FEATURE
-    and '"No held Chalice/Fist or active summon observed; next four-hour boundary in "' in FEATURE
-    and '" (origin unknown)"' in FEATURE
+    and '"Next: "' in FEATURE
+    and '" .. shortName .. " held"' in FEATURE
+    and '"; summon active"' in FEATURE
+    and '"No held Chalice/Fist or active summon observed; next four-hour boundary in "' not in FEATURE
     and "Fist of Darkness" in FEATURE
     and "acquisition source=unknown" in FEATURE
     and "appendClockDiagnostics(lines, workspace)" in FEATURE
@@ -117,10 +119,14 @@ require(
     and 'findChild(locations, "Frozen Dimension")' in FEATURE
     and 'getIfCurrentRealmHasTagAsync' in FEATURE
     and '"HasMirageIsland"' in FEATURE
-    and '"HasSeaEvents"' in FEATURE
     and 'local function readEventPresence(localModel, worldMarker, realmFlag)' in FEATURE
-    and 'local function readSeaEventRealmSignal(realmFlag)' in FEATURE
-    and '"Unknown (no reliable signal)"' in FEATURE
+    and 'return "Spawned"' in FEATURE
+    and 'return "Not spawned"' in FEATURE
+    and 'formatCompactDuration(untilNextCycle)' in FEATURE
+    and '"; summon active"' in FEATURE
+    and '" .. shortName .. " held"' in FEATURE
+    and '"Next: "' in FEATURE
+    and '" · Calculating"' in FEATURE
     and 'Tiki Outpost location entry is a travel-location marker; it does not prove eye-event state.' in FEATURE
     and "function updateMoonClockRate(statusFeature, clockTime)" in FEATURE
     and "elapsed >= 8" in FEATURE
@@ -131,12 +137,12 @@ require(
     and 'local function formatMoonEstimate(realSeconds)' in FEATURE
     and '"game clock "' not in FEATURE
     and '" | no timing estimate"' not in FEATURE
-    and '" (estimate)"' in FEATURE
+    and "real time (estimate)" in FEATURE
     and "ELITE_TARGET_NAMES" in FEATURE
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' in FEATURE
     and "function readTikiEyes(map)" in FEATURE
-    and 'return "Eye progress unavailable (island not loaded)"' in FEATURE
+    and 'return "Not loaded"' in FEATURE
     and '" not visible"' in FEATURE
     and 'Eye" .. tostring(index)' in FEATURE
     and "Third Sea only" in FEATURE

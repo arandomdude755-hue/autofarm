@@ -747,7 +747,6 @@ local Config = {
                 { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
                 { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
                 { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },
-                { Kind = "statusValue", Key = "seaEventSignal", Label = "Sea event signal" },
                 { Kind = "statusValue", Key = "mirageIsland", Label = "Mirage Island" },
                 { Kind = "statusValue", Key = "prehistoricIsland", Label = "Prehistoric Island" },
                 { Kind = "statusValue", Key = "frozenDimension", Label = "Frozen Dimension" },

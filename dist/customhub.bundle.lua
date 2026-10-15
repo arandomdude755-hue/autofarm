@@ -776,7 +776,6 @@ local Config = {
                 { Kind = "statusValue", Key = "leviathanSpy", Label = "Leviathan Spy" },
                 { Kind = "statusValue", Key = "cakePrinceMobs", Label = "Cake Prince mobs" },
                 { Kind = "statusValue", Key = "eliteHunter", Label = "Elite Hunter" },
-                { Kind = "statusValue", Key = "seaEventSignal", Label = "Sea event signal" },
                 { Kind = "statusValue", Key = "mirageIsland", Label = "Mirage Island" },
                 { Kind = "statusValue", Key = "prehistoricIsland", Label = "Prehistoric Island" },
                 { Kind = "statusValue", Key = "frozenDimension", Label = "Frozen Dimension" },
@@ -5053,6 +5052,18 @@ local function formatDuration(totalSeconds)
     return string.format("%02d:%02d:%02d", hours, minutes, remainder)
 end
 
+local function formatCompactDuration(totalSeconds)
+    local seconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor(seconds % 3600 / 60)
+    if hours > 0 then
+        return string.format("%dh %02dm", hours, minutes)
+    elseif minutes > 0 then
+        return tostring(minutes) .. "m"
+    end
+    return tostring(seconds % 60) .. "s"
+end
+
 local function formatServerAge(totalSeconds)
     local seconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
     local hours = math.floor(seconds / 3600)
@@ -5215,28 +5226,31 @@ end
 
 local function readLegendaryItemStatus(context, workspace, elapsed)
     local bossName = findActiveLegendaryBoss(workspace)
-    if bossName then
-        return "Active summon: " .. tostring(bossName)
-    end
-
     local playersService = context and context.Compatibility
         and context.Compatibility.Players
-    local heldItem, holderName = findHeldLegendaryItem(playersService)
-    if heldItem then
-        return "Held: " .. heldItem .. " by " .. tostring(holderName)
-            .. " (origin unknown)"
+    local heldItem = findHeldLegendaryItem(playersService)
+    local timerText
+    if elapsed then
+        local cycleSeconds = 4 * 60 * 60
+        local untilNextCycle = cycleSeconds - (elapsed % cycleSeconds)
+        timerText = "~" .. formatCompactDuration(untilNextCycle)
     end
 
-    if not elapsed then
-        local _, reason = readServerElapsed(workspace)
-        return "Unknown (" .. tostring(reason) .. ")"
+    if bossName then
+        return timerText
+                and ("Next: " .. timerText .. "; summon active")
+            or "Summon active"
+    elseif heldItem then
+        local shortName = heldItem == "God's Chalice" and "Chalice"
+            or heldItem == "Fist of Darkness" and "Fist"
+            or heldItem
+        return timerText
+                and ("Next: " .. timerText .. "; " .. shortName .. " held")
+            or ("Held " .. shortName)
+    elseif timerText then
+        return "Next: " .. timerText
     end
-
-    local cycleSeconds = 4 * 60 * 60
-    local untilNextCycle = cycleSeconds - (elapsed % cycleSeconds)
-    return "No held Chalice/Fist or active summon observed; next four-hour boundary in "
-        .. formatDuration(untilNextCycle)
-        .. " (estimate)"
+    return "Timer unavailable"
 end
 
 local function formatNumber(value)
@@ -5389,8 +5403,9 @@ local function readMoonStatus(statusFeature)
     end
 
     local clockTime = tonumber(readProperty(lighting, "ClockTime"))
+    local displayPhase = phaseText:gsub(" %(next night is Full Moon%)", "")
     if not clockTime then
-        return phaseText .. " | timing unavailable"
+        return displayPhase .. " · Calculating"
     end
 
     if phaseText == "Blue Moon" then
@@ -5408,21 +5423,30 @@ local function readMoonStatus(statusFeature)
         return "Full Moon | Fake Moon (daytime)"
     end
     if not label or not hoursRemaining then
-        return phaseText .. " | timing unavailable"
+        return displayPhase .. " · Calculating"
     end
 
     local rate = updateMoonClockRate(statusFeature, clockTime)
     if not rate then
-        return label .. " calibrating game-clock speed"
+        return displayPhase .. " · Calculating"
     end
-    return label .. " " .. formatMoonEstimate(hoursRemaining * rate)
+    local forecastLabel = label
+    if label == "Next Full Moon in" then
+        forecastLabel = "Full Moon in"
+    elseif label == "Full Moon ends in" then
+        forecastLabel = "Ends in"
+    elseif label == "Full Moon starts in" then
+        forecastLabel = "Starts in"
+    end
+    return displayPhase .. " · " .. forecastLabel .. " "
+        .. formatMoonEstimate(hoursRemaining * rate)
 end
 
 local function readTikiEyes(map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        return "Eye progress unavailable (island not loaded)"
+        return "Not loaded"
     end
     local cleared = 0
     local found = 0
@@ -5437,7 +5461,7 @@ local function readTikiEyes(map)
         end
     end
     if found == 0 then
-        return "Eye progress unavailable (eyes not visible)"
+        return "Not loaded"
     elseif found < 4 then
         return tostring(cleared)
             .. " cleared; "
@@ -5507,24 +5531,13 @@ end
 
 local function readEventPresence(localModel, worldMarker, realmFlag)
     if localModel then
-        return "Detected"
+        return "Spawned"
     elseif worldMarker then
-        return "Detected"
+        return "Spawned"
     elseif realmFlag == true then
-        return "Detected"
-    elseif realmFlag == false then
-        return "Not detected"
+        return "Spawned"
     end
-    return "Unknown (no reliable signal)"
-end
-
-local function readSeaEventRealmSignal(realmFlag)
-    if realmFlag == true then
-        return "Active sea event; type unknown"
-    elseif realmFlag == false then
-        return "No active sea event reported"
-    end
-    return "Unknown"
+    return "Not spawned"
 end
 
 local function readWorldEventValues(context, statusFeature, remoteEvents)
@@ -5549,7 +5562,6 @@ local function readWorldEventValues(context, statusFeature, remoteEvents)
         legendaryItemTimer = readLegendaryItemStatus(context, workspace, serverElapsed),
         moon = readMoonStatus(statusFeature),
         eliteHunter = readEliteHunterStatus(workspace, replicatedStorage, compatibility),
-        seaEventSignal = readSeaEventRealmSignal(remoteEvents and remoteEvents.seaEventsRealmTag),
         mirageIsland = thirdSea
                 and readEventPresence(mirage, mirageLocation, remoteEvents.mirageRealmTag)
             or "Third Sea only",
@@ -5909,13 +5921,6 @@ local function appendIslandDiagnostics(lines, context, remoteEvents)
     )
     table.insert(
         lines,
-        "Realm tag HasSeaEvents: "
-            .. (type(remoteEvents.seaEventsRealmTag) == "boolean"
-                and tostring(remoteEvents.seaEventsRealmTag)
-                or "unknown (" .. tostring(remoteEvents.seaEventsRealmTagReason or "not checked") .. ")")
-    )
-    table.insert(
-        lines,
         "Tiki Outpost location entry is a travel-location marker; it does not prove eye-event state."
     )
 
@@ -6149,7 +6154,6 @@ local function readRealmEventTags(context)
     if not realmScript then
         return {
             mirageRealmTagReason = "ReplicatedStorage.Util.Realm is not loaded",
-            seaEventsRealmTagReason = "ReplicatedStorage.Util.Realm is not loaded",
         }
     end
 
@@ -6157,21 +6161,18 @@ local function readRealmEventTags(context)
     if not requireOk or type(realm) ~= "table" then
         return {
             mirageRealmTagReason = "Realm module could not be read",
-            seaEventsRealmTagReason = "Realm module could not be read",
         }
     end
     local readTag = realm.getIfCurrentRealmHasTagAsync
     if type(readTag) ~= "function" then
         return {
             mirageRealmTagReason = "Realm tag check is unavailable",
-            seaEventsRealmTagReason = "Realm tag check is unavailable",
         }
     end
 
     local tags = {}
     local definitions = {
         { Key = "mirageRealmTag", ReasonKey = "mirageRealmTagReason", Tag = "HasMirageIsland" },
-        { Key = "seaEventsRealmTag", ReasonKey = "seaEventsRealmTagReason", Tag = "HasSeaEvents" },
     }
     for _, definition in ipairs(definitions) do
         local callOk, value = pcall(readTag, definition.Tag)
@@ -6194,8 +6195,6 @@ local function readRemoteEventValues(context)
         cakePrinceMobs = readCakePrinceMobs(context, remote),
         mirageRealmTag = realmTags.mirageRealmTag,
         mirageRealmTagReason = realmTags.mirageRealmTagReason,
-        seaEventsRealmTag = realmTags.seaEventsRealmTag,
-        seaEventsRealmTagReason = realmTags.seaEventsRealmTagReason,
     }
 end
 
@@ -6321,13 +6320,11 @@ function StatusFeature:_ReadValues()
         leviathanSpy = remoteEvents.leviathanSpy or "Waiting for status check",
         cakePrinceMobs = remoteEvents.cakePrinceMobs or "Waiting for status check",
         eliteHunter = worldEvents.eliteHunter,
-        seaEventSignal = worldEvents.seaEventSignal,
         mirageIsland = worldEvents.mirageIsland,
         prehistoricIsland = worldEvents.prehistoricIsland,
         frozenDimension = worldEvents.frozenDimension,
         tikiEyes = worldEvents.tikiEyes,
         mirageRealmTag = remoteEvents.mirageRealmTag,
-        seaEventsRealmTag = remoteEvents.seaEventsRealmTag,
         players = playerCount .. " / " .. maxPlayers,
         placeId = placeId,
         jobId = shortJobId,
@@ -6362,14 +6359,6 @@ function StatusFeature:_BuildReport(values)
         "Prehistoric Island: " .. values.prehistoricIsland,
         "Frozen Dimension: " .. values.frozenDimension,
         "Tiki eyes: " .. values.tikiEyes,
-        "Mirage Realm tag: "
-            .. (type(values.mirageRealmTag) == "boolean"
-                and tostring(values.mirageRealmTag)
-                or "Unknown"),
-        "Sea Events Realm tag: "
-            .. (type(values.seaEventsRealmTag) == "boolean"
-                and tostring(values.seaEventsRealmTag)
-                or "Unknown"),
         "Players: " .. values.players,
         "Place ID: " .. values.placeId,
         "Server Job ID: " .. values.fullJobId,
@@ -6423,7 +6412,6 @@ function StatusFeature:Initialize(context)
         leviathanSpy = "Waiting for status check",
         cakePrinceMobs = "Waiting for status check",
         mirageRealmTagReason = "not checked",
-        seaEventsRealmTagReason = "not checked",
     }
     context.State:SetStatusValues(self:_ReadValues())
     task.spawn(function()
