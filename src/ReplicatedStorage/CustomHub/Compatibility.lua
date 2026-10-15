@@ -10,7 +10,7 @@ Compatibility.__index = Compatibility
 
 local TITLE_MENU_PROBE_TIMEOUT = 0.35
 local TITLE_MENU_PROBE_INTERVAL = 0.05
-local TITLE_MENU_CLOSE_GUARD_DURATION = 0.8
+local TITLE_MENU_CLOSE_GUARD_DURATION = 1.5
 local TITLE_LOCKED_CONFIRMATION_DELAY = 0.25
 local TITLE_STATE_CACHE_TTL = 5
 local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
@@ -518,10 +518,32 @@ function Compatibility:HasUnlockedTitle(titleName)
     local frameConnections = {}
     local probeConnections = {}
     local watchedFrames = {}
-    local function suppressProbeMenu()
+    local probeFinished = false
+    local lastCloseActivationAt = -math.huge
+    local function activateMenuClose(activeFrame)
+        if os.clock() - lastCloseActivationAt < 0.2 then
+            return
+        end
+        lastCloseActivationAt = os.clock()
+        pcall(function()
+            if not activeFrame then
+                local _, currentFrame = getMenuParts()
+                activeFrame = currentFrame
+            end
+            local titleBar = activeFrame and activeFrame:FindFirstChild("title", true)
+            local closeButton = titleBar and titleBar:FindFirstChild("close", true)
+            if closeButton and closeButton:IsA("GuiButton") then
+                closeButton:Activate()
+            end
+        end)
+    end
+    local function suppressProbeMenu(activateClose)
         pcall(function()
             local _, activeFrame = getMenuParts()
             if activeFrame and activeFrame:IsA("GuiObject") then
+                if activateClose and activeFrame.Visible then
+                    activateMenuClose(activeFrame)
+                end
                 activeFrame.Visible = false
             end
         end)
@@ -535,6 +557,9 @@ function Compatibility:HasUnlockedTitle(titleName)
             return activeFrame:GetPropertyChangedSignal("Visible"):Connect(function()
                 pcall(function()
                     if openedForProbe and activeFrame.Visible then
+                        if probeFinished then
+                            activateMenuClose(activeFrame)
+                        end
                         activeFrame.Visible = false
                     end
                 end)
@@ -633,6 +658,8 @@ function Compatibility:HasUnlockedTitle(titleName)
         end)
     end
     if openedForProbe then
+        probeFinished = true
+        activateMenuClose(frame)
         suppressProbeMenu()
         pcall(function()
             if titlesMenu and originalEnabled ~= nil then
@@ -642,7 +669,7 @@ function Compatibility:HasUnlockedTitle(titleName)
         task.spawn(function()
             local deadline = os.clock() + TITLE_MENU_CLOSE_GUARD_DURATION
             repeat
-                suppressProbeMenu()
+                suppressProbeMenu(true)
                 if titlesMenu and originalEnabled ~= nil then
                     pcall(function()
                         if titlesMenu.Enabled ~= originalEnabled then

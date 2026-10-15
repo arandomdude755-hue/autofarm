@@ -205,7 +205,8 @@ require(
     and "openEvent:Fire()" in title_access
     and "TITLE_MENU_PROBE_TIMEOUT = 0.35" in COMPATIBILITY
     and "activeFrame.Visible = false" in title_access
-    and "TITLE_MENU_CLOSE_GUARD_DURATION = 0.8" in COMPATIBILITY
+    and "closeButton:Activate()" in title_access
+    and "TITLE_MENU_CLOSE_GUARD_DURATION = 1.5" in COMPATIBILITY
     and "TITLE_LOCKED_CONFIRMATION_DELAY = 0.25" in COMPATIBILITY
     and "suppressProbeMenu()" in title_access
     and "titleTextLower" in title_access
