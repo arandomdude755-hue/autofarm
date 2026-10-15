@@ -9,3 +9,4 @@
 - [Status tab data](status-tab-data.md) — reuse validated quest state, prefer local event signals, and label uncertain timer calculations as estimates.
 - [Movement stall evidence](movement-stall-evidence.md) — a clear ray rules out nearby geometry only; compare commanded-position error before concluding why movement stopped.
 - [Fruit M1 knockback recovery](fruit-m1-knockback-recovery.md) — the movement-hold attempt slowed Fruit M1 without stopping launches; don't reapply unchanged.
+- [Stack Farming priority rules](stack-farming-priority.md) — Stack jobs interrupt Main Farming in observed spawn order, can run standalone, and should use one shared worker.

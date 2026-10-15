@@ -2,6 +2,7 @@ local QuestService = require(script.Parent.Farm.QuestService)
 local EnemyService = require(script.Parent.Farm.EnemyService)
 local MovementService = require(script.Parent.Farm.MovementService)
 local CombatService = require(script.Parent.Farm.CombatService)
+local StackTaskQueue = require(script.Parent.Farm.StackTaskQueue)
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
@@ -34,12 +35,18 @@ local TIKI_LOAD_ITEM_RETRY_INTERVAL = 3
 local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
+local STACK_TASK_LOAD_TIMEOUT = 8
 
 local MainFarm = {
     Running = false,
+    MainFarmEnabled = false,
     Session = 0,
     AutoBusoGeneration = 0,
     Context = nil,
+    StackTaskQueue = nil,
+    ActiveStackTask = nil,
+    StackTaskStartedAt = 0,
+    StackInterruptedFarm = false,
 }
 
 local function diagnosticScalar(value)
@@ -192,6 +199,214 @@ end
 
 function MainFarm:_IsCurrent(session)
     return self.Running and self.Session == session
+end
+
+function MainFarm:_HasEnabledStackTasks()
+    return self.StackTaskQueue ~= nil and self.StackTaskQueue:HasEnabledTasks()
+end
+
+function MainFarm:_GetStackTaskLabel(entry)
+    if entry and entry.Kind == "CakePrince" then
+        return "Cake Prince"
+    elseif entry and entry.Kind == "Fruit" then
+        return entry.Instance and entry.Instance.Name or "spawned fruit"
+    end
+    return "stack task"
+end
+
+function MainFarm:_BeginStackTask(entry)
+    self.ActiveStackTask = entry
+    self.StackTaskStartedAt = os.clock()
+    self.StackInterruptedFarm = self.MainFarmEnabled == true
+
+    self:_ClearTarget()
+    if self.MovementService then
+        self.MovementService:Cancel()
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature.CancelFarmTravel then
+        teleportFeature:CancelFarmTravel()
+    end
+    if self.CombatService then
+        self.CombatService:Cancel()
+    end
+    self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+    self.FarmSkillActive = false
+    self.FarmSkillTarget = nil
+    self.FarmSkillPreparing = nil
+    self.FarmSkillIgnoredTools = {}
+    self.FarmGunToolSettleUntil = 0
+    self.GunKnockbackHold = nil
+    self:_ResetSpawnSearch(nil)
+
+    if self.TikiPuzzleActive then
+        self.TikiPuzzleActive = false
+        self.TikiPuzzleRestorePending = true
+    end
+
+    self:_SetStatus(
+        "Stack task started: " .. self:_GetStackTaskLabel(entry),
+        "success"
+    )
+end
+
+function MainFarm:_FinishStackTask(entry, reason, markCompleted)
+    if self.StackTaskQueue then
+        self.StackTaskQueue:Complete(entry, markCompleted)
+    end
+    self.ActiveStackTask = nil
+    self.StackTaskStartedAt = 0
+    self.StackInterruptedFarm = false
+    self:_ClearTarget()
+    if self.MovementService then
+        self.MovementService:Cancel()
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature.CancelFarmTravel then
+        teleportFeature:CancelFarmTravel()
+    end
+    if self.CombatService then
+        self.CombatService:Cancel()
+    end
+    self.FarmSkillGeneration = (self.FarmSkillGeneration or 0) + 1
+    self.FarmSkillActive = false
+    self.FarmSkillTarget = nil
+    self.FarmSkillPreparing = nil
+    self.GunKnockbackHold = nil
+
+    if self.MainFarmEnabled then
+        self:_SetStatus(
+            "Stack task complete: " .. self:_GetStackTaskLabel(entry)
+                .. "; resuming Main Farming",
+            "success"
+        )
+    else
+        self:_SetStatus(
+            "Stack task complete: " .. self:_GetStackTaskLabel(entry),
+            "success"
+        )
+    end
+    if reason then
+        self:_SetStatus(reason, "warning")
+    end
+end
+
+function MainFarm:_StepStackTasks(session)
+    local queue = self.StackTaskQueue
+    if not queue or not queue:HasEnabledTasks() then
+        return false
+    end
+
+    local entry = self.ActiveStackTask
+    if entry and not queue:IsEnabled(entry) then
+        self:_FinishStackTask(entry, "Stack task turned off", false)
+        return true
+    end
+    if not entry then
+        entry = queue:PopNext()
+        if entry then
+            self:_BeginStackTask(entry)
+        end
+    end
+
+    if not entry then
+        if self.MainFarmEnabled then
+            return false
+        end
+        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
+        return true
+    end
+
+    local compatibility = self.Context and self.Context.Compatibility
+    local character, humanoid, root
+    if compatibility then
+        character, humanoid, root = compatibility:GetCharacterParts()
+    end
+    if not character or not humanoid or not root then
+        if self.MovementService then
+            self.MovementService:Cancel()
+        end
+        self:_SetStatus("Stack Farming is waiting for your character", "warning")
+        return true
+    end
+
+    if self.TikiPuzzleRestorePending then
+        self:_HoldPosition(session)
+        self:_RestoreTikiFarmWeapon()
+        self:_SetStatus("Stack Farming is preparing your farming weapon", "info")
+        return true
+    end
+
+    local target = entry.Instance
+    local workspaceService = compatibility.Workspace
+    if not target or not target.Parent then
+        self:_FinishStackTask(entry)
+        return true
+    end
+
+    if entry.Kind == "CakePrince" then
+        if not workspaceService or not target:IsDescendantOf(workspaceService) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+        if not self.EnemyService:IsAlive(target) then
+            if os.clock() - (self.StackTaskStartedAt or os.clock()) < STACK_TASK_LOAD_TIMEOUT then
+                self:_HoldPosition(session)
+                self:_SetStatus("Waiting for Cake Prince to load", "info")
+            else
+                self:_FinishStackTask(entry, "Cake Prince did not become available")
+            end
+            return true
+        end
+
+        self:_EngageModeTarget(target, true, root, session, "stack")
+        if not self.EnemyService:IsAlive(target) then
+            self:_FinishStackTask(entry)
+        end
+        return true
+    elseif entry.Kind == "Fruit" then
+        if not workspaceService or not target:IsDescendantOf(workspaceService) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+        local handle = target:FindFirstChild("Handle")
+        if not handle or not handle:IsA("BasePart") then
+            if os.clock() - (self.StackTaskStartedAt or os.clock()) < STACK_TASK_LOAD_TIMEOUT then
+                self:_HoldPosition(session)
+                self:_SetStatus("Waiting for the spawned fruit to load", "info")
+            else
+                self:_FinishStackTask(entry, "Spawned fruit could not be reached")
+            end
+            return true
+        end
+
+        local distance = (root.Position - handle.Position).Magnitude
+        local moved, moveResult = self:_MoveTo(
+            handle.CFrame,
+            session,
+            2.5,
+            true,
+            "spawned fruit"
+        )
+        if not moved then
+            self:_SetStatus("Waiting to travel to spawned fruit: " .. tostring(moveResult), "warning")
+        elseif distance <= 8 then
+            self:_SetStatus("At spawned fruit; waiting for pickup", "info")
+        else
+            entry.NearbySince = nil
+            self:_SetStatus("Traveling to spawned fruit", "info")
+        end
+        if distance <= 8 then
+            entry.NearbySince = entry.NearbySince or os.clock()
+            if os.clock() - entry.NearbySince >= 20 then
+                self:_SetStatus("Fruit pickup is taking longer than expected; retrying", "warning")
+            end
+        end
+        return true
+    end
+
+    self:_FinishStackTask(entry, "Unsupported stack task; continuing the queue")
+    return true
 end
 
 function MainFarm:_LogQuestDataSnapshot(phase, questState, force, readerEvidence)
@@ -801,7 +1016,7 @@ function MainFarm:_EndQuestDiagnosticWait(reason, now)
     self.QuestDiagnosticReport = nil
 end
 
-function MainFarm:_MoveTo(destination, session, threshold, keepSession)
+function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
     if not self.MovementService then
         return false
     end
@@ -811,7 +1026,7 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession)
             Speed = 190,
             Threshold = threshold,
             KeepSession = keepSession == true,
-            Label = "farm target",
+            Label = label or "farm target",
             IsCurrent = function()
                 return self:_IsCurrent(session)
             end,
@@ -3408,10 +3623,28 @@ end
 
 function MainFarm:_Run(session)
     while self:_IsCurrent(session) do
-        local ok, err = pcall(self._Step, self, session)
+        local ok, err = pcall(function()
+            if self:_StepStackTasks(session) then
+                return
+            end
+            if self.MainFarmEnabled then
+                self:_Step(session)
+            else
+                if self.MovementService then
+                    self.MovementService:Cancel()
+                end
+                self:_SetStatus("Stack Farming is idle; waiting for an enabled task", "info")
+            end
+        end)
         if not ok then
             if self.MovementService then
                 self.MovementService:Cancel()
+            end
+            if self.ActiveStackTask then
+                local teleportFeature = self.Context and self.Context.TeleportFeature
+                if teleportFeature and teleportFeature.CancelFarmTravel then
+                    teleportFeature:CancelFarmTravel()
+                end
             end
             self.QuestDialogueRecovery = nil
             if self.EnemyService then
@@ -3423,7 +3656,11 @@ function MainFarm:_Run(session)
             self.DoubleQuestFallbackName = nil
             self.DoubleQuestScanTarget = nil
             self.NextDoubleQuestScanAt = 0
-            self:_SetStatus("Main Farm step error: " .. tostring(err), "error")
+            self:_SetStatus(
+                (self.ActiveStackTask and "Stack Farming step error: " or "Main Farm step error: ")
+                    .. tostring(err),
+                "error"
+            )
         end
         task.wait(FARM_STEP_INTERVAL)
     end
@@ -3508,7 +3745,36 @@ function MainFarm:Initialize(context)
     self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
     self.Context = context
     self.Running = false
+    self.MainFarmEnabled = false
     self.Session += 1
+    self.ActiveStackTask = nil
+    self.StackTaskStartedAt = 0
+    self.StackInterruptedFarm = false
+    if self.StackTaskQueue then
+        self.StackTaskQueue:Cleanup()
+    end
+    self.StackTaskQueue = StackTaskQueue.new(
+        context.Compatibility and context.Compatibility.Workspace
+    )
+    local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
+    if not stackQueueReady then
+        self.StackTaskQueue:Cleanup()
+        self.StackTaskQueue = nil
+        self:_SetStatus(
+            "Stack Farming unavailable: " .. tostring(stackQueueError),
+            "warning"
+        )
+    else
+        local stackSettings = context.Config and context.Config.StackFarmSettings or {}
+        self.StackTaskQueue:SetEnabled(
+            "CakePrince",
+            stackSettings.AutoAttackCakePrince == true
+        )
+        self.StackTaskQueue:SetEnabled(
+            "Fruit",
+            stackSettings.TeleportToFruit == true
+        )
+    end
     self.Character = nil
     self.Target = nil
     self.TargetName = nil
@@ -3625,41 +3891,20 @@ function MainFarm:Initialize(context)
     return true
 end
 
-function MainFarm:Start()
+function MainFarm:_StartWorker()
     if self.Running then
         return true
     end
-    local teleportFeature = self.Context and self.Context.TeleportFeature
-    if teleportFeature and teleportFeature:IsTraveling() then
-        self.Context.State:SetStatus(
-            "Auto Farm unavailable while travel is active.",
-            "error",
-            "Turn off Travel to Island or Travel to NPC before starting Auto Farm."
-        )
-        return false, "Manual travel is active"
-    end
-    local farmSettings = self.Context and self.Context.Config and self.Context.Config.FarmSettings
-    if farmSettings
-        and farmSettings.FarmMaterialsEnabled ~= true
-        and (type(farmSettings.FarmMode) ~= "string" or farmSettings.FarmMode == "")
-    then
-        self.Context.State:SetStatus(
-            "Choose a farm method before starting Auto Farm.",
-            "warning",
-            "Choose a farm method before turning on Start Farm."
-        )
-        return false, "Farm method must be selected"
-    end
     local ready, setupError = self:_EnsureBaseServices()
     if not ready then
-        self:_SetStatus("Main Farm unavailable: " .. tostring(setupError), "error")
+        self:_SetStatus("Farm tasks unavailable: " .. tostring(setupError), "error")
         return false, setupError
     end
 
     self.Session += 1
     local collisionReady, collisionError = self.MovementService:SetFarmCollisionSuppression(true)
     if not collisionReady then
-        self:_SetStatus("Main Farm collision setup failed: " .. tostring(collisionError), "error")
+        self:_SetStatus("Farm task collision setup failed: " .. tostring(collisionError), "error")
         return false, collisionError
     end
     self.Running = true
@@ -3691,13 +3936,49 @@ function MainFarm:Start()
     self.NextDoubleQuestScanAt = 0
     self:_ResetSpawnSearch(nil)
     local session = self.Session
-    self.Context.State:SetFeatureEnabled("farm.main", true)
-    self:_SetStatus("Main Farm enabled; reading available quest state", "success")
     task.spawn(self._Run, self, session)
     return true
 end
 
-function MainFarm:Stop()
+function MainFarm:Start()
+    if self.MainFarmEnabled then
+        return true
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature:IsTraveling() then
+        self.Context.State:SetStatus(
+            "Auto Farm unavailable while travel is active.",
+            "error",
+            "Turn off Travel to Island or Travel to NPC before starting Auto Farm."
+        )
+        return false, "Manual travel is active"
+    end
+    local farmSettings = self.Context and self.Context.Config and self.Context.Config.FarmSettings
+    if farmSettings
+        and farmSettings.FarmMaterialsEnabled ~= true
+        and (type(farmSettings.FarmMode) ~= "string" or farmSettings.FarmMode == "")
+    then
+        self.Context.State:SetStatus(
+            "Choose a farm method before starting Auto Farm.",
+            "warning",
+            "Choose a farm method before turning on Start Farm."
+        )
+        return false, "Farm method must be selected"
+    end
+    local workerReady, workerError = self:_StartWorker()
+    if not workerReady then
+        return false, workerError
+    end
+    self.MainFarmEnabled = true
+    self.Context.State:SetFeatureEnabled("farm.main", true)
+    self:_SetStatus("Main Farm enabled; reading available quest state", "success")
+    return true
+end
+
+function MainFarm:_StopWorker()
+    if self.ActiveStackTask then
+        self:_FinishStackTask(self.ActiveStackTask)
+    end
     self.Session += 1
     self.Running = false
     self:_EndQuestDiagnosticWait("stopped_before_confirmation", os.clock())
@@ -3762,11 +4043,115 @@ function MainFarm:Stop()
     if self.Context and self.Context.State then
         self.Context.State:SetFeatureEnabled("farm.main", false)
     end
+    return true
+end
+
+function MainFarm:Stop()
+    self.MainFarmEnabled = false
+    if self.Context and self.Context.State then
+        self.Context.State:SetFeatureEnabled("farm.main", false)
+    end
+
+    if self:_HasEnabledStackTasks() then
+        if not self.ActiveStackTask then
+            self:_ClearTarget()
+            if self.MovementService then
+                self.MovementService:Cancel()
+            end
+            local teleportFeature = self.Context and self.Context.TeleportFeature
+            if teleportFeature and teleportFeature.CancelFarmTravel then
+                teleportFeature:CancelFarmTravel()
+            end
+            if self.CombatService then
+                self.CombatService:Cancel()
+            end
+            self:_ResetSpawnSearch(nil)
+        end
+        self:_SetStatus("Main Farming is off; Stack Farming will continue", "info")
+        return true
+    end
+
+    return self:_StopWorker()
+end
+
+function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
+    local stackSettings = self.Context
+        and self.Context.Config
+        and self.Context.Config.StackFarmSettings
+    if not stackSettings or type(payload) ~= "boolean" then
+        self:_SetStatus("Stack Farming setting is unavailable or invalid", "error")
+        return false
+    end
+    if not self.StackTaskQueue then
+        self:_SetStatus(
+            "Stack Farming is unavailable because spawn detection could not start",
+            "error",
+            "Stack Farming could not start. Close and reopen the hub, then try again."
+        )
+        return false
+    end
+    if stackSettings[settingKey] == payload then
+        return true
+    end
+
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if payload and teleportFeature and teleportFeature:IsTraveling() then
+        self:_SetStatus(
+            "Stack Farming unavailable while Travel is active",
+            "error",
+            "Turn off Travel to Island or Travel to NPC before starting Stack Farming."
+        )
+        return false
+    end
+
+    stackSettings[settingKey] = payload
+    local queueReady, queueError = self.StackTaskQueue:SetEnabled(kind, payload)
+    if not queueReady then
+        stackSettings[settingKey] = not payload
+        self:_SetStatus("Stack Farming setting error: " .. tostring(queueError), "error")
+        return false
+    end
+
+    if payload then
+        local workerReady, workerError = self:_StartWorker()
+        if not workerReady then
+            stackSettings[settingKey] = false
+            self.StackTaskQueue:SetEnabled(kind, false)
+            return false, workerError
+        end
+        self:_SetStatus("Stack task enabled: " .. label, "success")
+        return true
+    end
+
+    if self.ActiveStackTask and self.ActiveStackTask.Kind == kind then
+        self:_FinishStackTask(self.ActiveStackTask, "Stack task turned off", false)
+    end
+    if not self.MainFarmEnabled and not self:_HasEnabledStackTasks() then
+        self:_StopWorker()
+    else
+        self:_SetStatus("Stack task disabled: " .. label, "info")
+    end
+    return true
 end
 
 function MainFarm:Handle(actionId, payload)
     if actionId == "farm.status.copy" then
         return self:CopyStatusReport()
+    end
+    if actionId == "stack.cakePrince.enabled" then
+        return self:_SetStackTaskEnabled(
+            "CakePrince",
+            "AutoAttackCakePrince",
+            "Auto Attack Cake Prince",
+            payload
+        )
+    elseif actionId == "stack.fruit.enabled" then
+        return self:_SetStackTaskEnabled(
+            "Fruit",
+            "TeleportToFruit",
+            "Teleport To Fruit",
+            payload
+        )
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     if actionId == "farm.mastery.enabled" then
@@ -4126,13 +4511,31 @@ function MainFarm:Handle(actionId, payload)
         self:Start()
     else
         self:Stop()
-        self:_SetStatus("Main Farm stopped; movement and attack loop cancelled", "info")
+        if not self:_HasEnabledStackTasks() then
+            self:_SetStatus("Main Farming stopped; movement and attack loop cancelled", "info")
+        end
     end
     return true
 end
 
 function MainFarm:Cleanup()
-    self:Stop()
+    self.MainFarmEnabled = false
+    local stackSettings = self.Context
+        and self.Context.Config
+        and self.Context.Config.StackFarmSettings
+    if stackSettings then
+        stackSettings.AutoAttackCakePrince = false
+        stackSettings.TeleportToFruit = false
+    end
+    if self.StackTaskQueue then
+        self.StackTaskQueue:SetEnabled("CakePrince", false)
+        self.StackTaskQueue:SetEnabled("Fruit", false)
+    end
+    self:_StopWorker()
+    if self.StackTaskQueue then
+        self.StackTaskQueue:Cleanup()
+        self.StackTaskQueue = nil
+    end
     self.AutoBusoGeneration = (self.AutoBusoGeneration or 0) + 1
     if self.CharacterAddedConnection then
         self.CharacterAddedConnection:Disconnect()

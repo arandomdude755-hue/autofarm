@@ -146,12 +146,18 @@ require(
     'AttackNoAnimation = false' in config,
     "Attack No Animation default must follow BNN's unset/animated branch unless explicitly configured",
 )
-start_function = main_farm.index("function MainFarm:Start()")
-stop_function = main_farm.index("function MainFarm:Stop()", start_function)
-start_body = main_farm[start_function:stop_function]
-stop_body = main_farm[stop_function:main_farm.index("function MainFarm:Handle", stop_function)]
+worker_function = main_farm.index("function MainFarm:_StartWorker()")
+start_function = main_farm.index("function MainFarm:Start()", worker_function)
+stop_worker_function = main_farm.index("function MainFarm:_StopWorker()", start_function)
+start_body = main_farm[start_function:stop_worker_function]
+worker_body = main_farm[worker_function:start_function]
+stop_function = main_farm.index("function MainFarm:_StopWorker()", stop_worker_function)
+stop_body = main_farm[
+    stop_function:main_farm.index("function MainFarm:Stop()", stop_function)
+]
 require(
-    start_body.index("SetFarmCollisionSuppression(true)") < start_body.index("self.Running = true"),
+    worker_body.index("SetFarmCollisionSuppression(true)") < worker_body.index("self.Running = true")
+    and "self:_StartWorker()" in start_body,
     "Main Farm must establish collision maintenance before starting its worker",
 )
 require(

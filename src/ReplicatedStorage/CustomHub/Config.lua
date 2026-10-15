@@ -455,6 +455,10 @@ local Config = {
         -- An unset BNN setting follows its animated, CanAttack-validated branch.
         AttackNoAnimation = false,
     },
+    StackFarmSettings = {
+        AutoAttackCakePrince = false,
+        TeleportToFruit = false,
+    },
     Layout = {
         MobileWidth = 0.86,
         MobileHeight = 0.78,
@@ -563,6 +567,10 @@ local Config = {
         "Settings",
     },
     TabSubsections = {
+        Farm = {
+            { Label = "Main Farming", Page = "Farm" },
+            { Label = "Stack Farming", Page = "StackFarming" },
+        },
         Status = {
             { Label = "Event Status", Page = "EventStatus" },
             { Label = "Server Status", Page = "StatusServer" },
@@ -586,6 +594,7 @@ local Config = {
             },
         },
         Farm = {
+            Title = "Main Farming",
             Controls = {
                 {
                     Kind = "sectionHeader",
@@ -688,6 +697,33 @@ local Config = {
                     Label = "Farm Materials",
                     Action = "farm.material.enabled",
                     Setting = "FarmMaterialsEnabled",
+                },
+            },
+        },
+        StackFarming = {
+            Title = "Stack Farming",
+            Controls = {
+                {
+                    Kind = "sectionHeader",
+                    Label = "Bosses",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto Attack Cake Prince",
+                    Action = "stack.cakePrince.enabled",
+                    Setting = "AutoAttackCakePrince",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "World items",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Teleport To Fruit",
+                    Action = "stack.fruit.enabled",
+                    Setting = "TeleportToFruit",
+                    SettingsKey = "StackFarmSettings",
                 },
             },
         },

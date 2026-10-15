@@ -273,11 +273,15 @@ require("FarmMasteryDiagnostic" in mastery_report
         "the live Mastery report must explain preparation, current status, and CombatService GUI findings")
 require("self:Start()" in handle and "self:Stop()" in handle,
         "The Main Farm toggle must start and stop the existing MainFarm instance")
-start = function_body(MAIN_FARM, "function MainFarm:Start()", "\nfunction MainFarm:Stop")
-stop = function_body(MAIN_FARM, "function MainFarm:Stop()", "\nfunction MainFarm:Handle")
-require("if self.Running then" in start and "return true" in start,
-        "Repeated enable actions must not start duplicate MainFarm workers")
-require("task.spawn(self._Run, self, session)" in start,
+start = function_body(MAIN_FARM, "function MainFarm:Start()", "\nfunction MainFarm:_StopWorker")
+worker = function_body(MAIN_FARM, "function MainFarm:_StartWorker()", "\nfunction MainFarm:Start")
+stop = function_body(MAIN_FARM, "function MainFarm:_StopWorker()", "\nfunction MainFarm:Stop")
+stop_wrapper = function_body(MAIN_FARM, "function MainFarm:Stop()", "\nfunction MainFarm:_SetStackTaskEnabled")
+require("if self.MainFarmEnabled then" in start and "return true" in start,
+        "Repeated Main Farming enable actions must not duplicate the worker")
+require("if self.Running then" in worker and "return true" in worker,
+        "Stack and Main Farming must share one worker")
+require("task.spawn(self._Run, self, session)" in worker,
         "MainFarm must start its existing single worker")
 require("self.Running = false" in stop
         and "SetFarmCollisionSuppression(false)" in stop
@@ -285,6 +289,9 @@ require("self.Running = false" in stop
         "Stopping MainFarm must invalidate its worker and run existing cleanup")
 require('SetFeatureEnabled("farm.main", true)' in start,
         "MainFarm start must update the UI's enabled-state source")
+require("self:_HasEnabledStackTasks()" in stop_wrapper
+        and "Stack Farming will continue" in stop_wrapper,
+        "stopping Main Farming must leave enabled Stack Farming tasks running")
 require('actionId == "farm.mode.select"' in handle
         and 'farmSettings.FarmMode = selectedMode' in handle
         and 'actionId == "farm.auraDistance.set"' in handle

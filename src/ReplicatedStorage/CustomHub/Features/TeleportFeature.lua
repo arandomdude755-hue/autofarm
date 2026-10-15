@@ -1370,11 +1370,28 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local mainFarm = context and context.MainFarm
     if mainFarm and mainFarm.Running then
         self:_SetFeatureEnabled(actionId, false)
-        self:_SetStatus(
-            "Travel unavailable while farming is active.",
-            "error",
-            "Turn off Start Farm first. Travel and farming can't run together."
-        )
+        local stackSettings = context.Config and context.Config.StackFarmSettings or {}
+        local stackActive = stackSettings.AutoAttackCakePrince == true
+            or stackSettings.TeleportToFruit == true
+        if mainFarm.MainFarmEnabled then
+            self:_SetStatus(
+                "Travel unavailable while Main Farming is active.",
+                "error",
+                "Turn off Start Farm first. Travel and farming can't run together."
+            )
+        elseif stackActive then
+            self:_SetStatus(
+                "Travel unavailable while Stack Farming is active.",
+                "error",
+                "Turn off the active Stack Farming task before starting Travel."
+            )
+        else
+            self:_SetStatus(
+                "Travel unavailable while farming is active.",
+                "error",
+                "Stop the active farming task before starting Travel."
+            )
+        end
         return false, "Auto Farm is running"
     end
     if self.ActiveTravel then

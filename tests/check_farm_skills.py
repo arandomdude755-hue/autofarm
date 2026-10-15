@@ -44,7 +44,10 @@ require(
     "Farm skill controls must be opt-in, bounded by settings, and default selected keys consistently",
 )
 pages_start = CONFIG.index("    Pages = {")
-farm_page_start = CONFIG.index('        Farm = {\n            Controls = {', pages_start)
+farm_page_start = CONFIG.index(
+    '        Farm = {\n            Title = "Main Farming",\n            Controls = {',
+    pages_start,
+)
 farm_page_end = CONFIG.index("        Player = {", farm_page_start)
 farm_page = CONFIG[farm_page_start:farm_page_end]
 farm_settings_start = CONFIG.index(

@@ -73,6 +73,11 @@ MODULES = (
         },
     ),
     (
+        "CustomHub.Features.Farm.StackTaskQueue",
+        "src/ReplicatedStorage/CustomHub/Features/Farm/StackTaskQueue.lua",
+        {},
+    ),
+    (
         "CustomHub.Features.MainFarm",
         "src/ReplicatedStorage/CustomHub/Features/MainFarm.lua",
         {
@@ -80,6 +85,7 @@ MODULES = (
             "require(script.Parent.Farm.EnemyService)": '__bundleLoad("CustomHub.Features.Farm.EnemyService")',
             "require(script.Parent.Farm.MovementService)": '__bundleLoad("CustomHub.Features.Farm.MovementService")',
             "require(script.Parent.Farm.CombatService)": '__bundleLoad("CustomHub.Features.Farm.CombatService")',
+            "require(script.Parent.Farm.StackTaskQueue)": '__bundleLoad("CustomHub.Features.Farm.StackTaskQueue")',
         },
     ),
     (

@@ -22,7 +22,7 @@ def require(condition, message):
 
 
 request = FARM[FARM.index("function MainFarm:_RequestQuest"):FARM.index(
-    "function MainFarm:_Step"
+    "function MainFarm:_Step(session)"
 )]
 step = FARM[
     FARM.index("function MainFarm:_Step(session)"):

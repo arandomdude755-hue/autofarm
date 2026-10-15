@@ -448,7 +448,7 @@ require(
     and "task.spawn(function()" in farm_navigation
     and "pcall(self._RunTravel, self, request, character)" in farm_navigation
     and "teleportFeature:MoveFarmTo(destination" in farm_move
-    and "Label = \"farm target\"" in farm_move
+    and 'Label = label or "farm target"' in farm_move
     and "self.ActiveFarmTravel == request" in FEATURE
     and "self:CancelFarmTravel(true)" in FEATURE,
     "all MainFarm travel must reuse the same distance planner, route executor, and cancellation handling as travel-tab routes",

@@ -27,6 +27,7 @@ SOURCE_FILES = (
     "src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua",
     "src/ReplicatedStorage/CustomHub/Features/Farm/SkillAimRedirect.lua",
     "src/ReplicatedStorage/CustomHub/Features/Farm/CombatService.lua",
+    "src/ReplicatedStorage/CustomHub/Features/Farm/StackTaskQueue.lua",
     "src/ReplicatedStorage/CustomHub/Features/MainFarm.lua",
     "src/ReplicatedStorage/CustomHub/init.lua",
 )
@@ -46,6 +47,7 @@ MODULE_IDS = {
     "CustomHub.Features.Farm.MovementService",
     "CustomHub.Features.Farm.SkillAimRedirect",
     "CustomHub.Features.Farm.CombatService",
+    "CustomHub.Features.Farm.StackTaskQueue",
     "CustomHub.Features.MainFarm",
     "CustomHub",
 }
