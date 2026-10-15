@@ -596,7 +596,7 @@ local Config = {
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Auto quest for modes",
+                    Label = "Auto quest Cake/Bones/Tyrant",
                     Action = "farm.autoModeQuest",
                     Setting = "AutoModeQuest",
                 },

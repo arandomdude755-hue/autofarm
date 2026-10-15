@@ -625,7 +625,7 @@ local Config = {
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Auto quest for modes",
+                    Label = "Auto quest Cake/Bones/Tyrant",
                     Action = "farm.autoModeQuest",
                     Setting = "AutoModeQuest",
                 },
@@ -13477,8 +13477,10 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
             return false, "Fruit M1 request failed: " .. tostring(fruitIssued)
         end
         if fruitIssued then
-            local cooldown = requiredTool and self:_GetToolCooldown(tool)
-            if cooldown then
+            if requiredTool then
+                -- Keep Mastery fruit M1 bounded even when the fruit does not
+                -- expose a readable cooldown value.
+                local cooldown = self:_GetToolCooldown(tool) or 0.25
                 self.NextFruitM1At[tool] = now + cooldown
             end
             return true, fruitResult
@@ -14914,6 +14916,8 @@ function MainFarm:_TryStartFarmSkill(
     )
     local masteryGunM1Result
     local masteryGunM1Error
+    local masteryFruitM1Result
+    local masteryFruitM1Error
     local function tryMasteryGunM1()
         if masteryCategory ~= "Gun" or not self.CombatService then
             return
@@ -14951,6 +14955,49 @@ function MainFarm:_TryStartFarmSkill(
             self.LastMasteryGunM1Tool = nil
             self.LastMasteryGunM1Result = "Waiting for the selected Gun to equip"
             self.LastMasteryGunM1At = os.clock()
+        end
+    end
+    local function tryMasteryFruitM1()
+        if masteryCategory ~= "Blox Fruit" or not self.CombatService then
+            return
+        end
+        -- Resolve only the selected hotbar fruit, never stored inventory.
+        local fruitTool = self.CombatService:FindSkillWeapon("Blox Fruit", true)
+        if not fruitTool then
+            return
+        end
+        local equippedFruit = self.CombatService:FindEquippedWeapon("Blox Fruit")
+        if equippedFruit ~= fruitTool then
+            local equipped, equipResult = self.CombatService:EquipTool(fruitTool)
+            if not equipped then
+                masteryFruitM1Error = tostring(equipResult)
+                return
+            end
+            equippedFruit = self.CombatService:FindEquippedWeapon("Blox Fruit")
+        end
+        if equippedFruit ~= fruitTool then
+            return
+        end
+
+        local callOk, inputSent, inputResult = pcall(
+            self.CombatService.AttackM1,
+            self.CombatService,
+            target,
+            70,
+            "Blox Fruit",
+            false,
+            equippedFruit
+        )
+        if not callOk then
+            masteryFruitM1Error = "Fruit M1 execution failed: " .. tostring(inputSent)
+        elseif inputSent then
+            masteryFruitM1Result = inputResult
+        elseif inputResult ~= "Blox Fruit M1 is cooling down"
+            and inputResult ~= "Selected mastery weapon is no longer equipped"
+            and inputResult ~= "Selected fruit tool has no supported M1 remote"
+            and inputResult ~= "Target is outside ClickM1 range"
+        then
+            masteryFruitM1Error = inputResult
         end
     end
     if self.FarmSkillActive then
@@ -15048,6 +15095,18 @@ function MainFarm:_TryStartFarmSkill(
                 )
                 return true
             end
+        elseif masteryCategory == "Blox Fruit" then
+            tryMasteryFruitM1()
+            if masteryFruitM1Result then
+                self:_SetStatus(masteryFruitM1Result, "info")
+                return true
+            elseif masteryFruitM1Error then
+                self:_SetStatus(
+                    "Mastery Fruit M1 unavailable: " .. tostring(masteryFruitM1Error),
+                    "warning"
+                )
+                return true
+            end
         end
         local preparation = self.FarmSkillPreparing
         if not preparation
@@ -15093,7 +15152,11 @@ function MainFarm:_TryStartFarmSkill(
     self.FarmSkillPreparing = nil
     if not skill then
         if masteryCategory then
-            tryMasteryGunM1()
+            if masteryCategory == "Gun" then
+                tryMasteryGunM1()
+            elseif masteryCategory == "Blox Fruit" then
+                tryMasteryFruitM1()
+            end
             if masteryGunM1Result then
                 self:_SetStatus(masteryGunM1Result, "info")
             elseif masteryGunM1Error then
@@ -15101,6 +15164,14 @@ function MainFarm:_TryStartFarmSkill(
                     "Mastery Gun M1 unavailable: " .. tostring(masteryGunM1Error),
                     "warning"
                 )
+            elseif masteryFruitM1Result then
+                self:_SetStatus(masteryFruitM1Result, "info")
+            elseif masteryFruitM1Error then
+                self:_SetStatus(
+                    "Mastery Fruit M1 unavailable: " .. tostring(masteryFruitM1Error),
+                    "warning"
+                )
+                return true
             elseif skillError == "All selected skill keys are on cooldown" then
                 self:_SetStatus("Mastery waiting: selected skills cooling down", "info")
             elseif skillError == "No selected skill keys are enabled" then
@@ -17341,7 +17412,7 @@ function MainFarm:Handle(actionId, payload)
         end
         farmSettings.AutoModeQuest = payload
         self:_SetStatus(
-            "Auto quest for modes " .. (payload and "enabled" or "disabled"),
+            "Auto quest Cake/Bones/Tyrant " .. (payload and "enabled" or "disabled"),
             "success"
         )
         return true

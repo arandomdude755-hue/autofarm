@@ -1154,8 +1154,10 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
             return false, "Fruit M1 request failed: " .. tostring(fruitIssued)
         end
         if fruitIssued then
-            local cooldown = requiredTool and self:_GetToolCooldown(tool)
-            if cooldown then
+            if requiredTool then
+                -- Keep Mastery fruit M1 bounded even when the fruit does not
+                -- expose a readable cooldown value.
+                local cooldown = self:_GetToolCooldown(tool) or 0.25
                 self.NextFruitM1At[tool] = now + cooldown
             end
             return true, fruitResult

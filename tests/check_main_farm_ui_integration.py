@@ -42,7 +42,7 @@ require('Label = "Farm method"' in farm_config
         and 'Label = "Farm Materials"' in farm_config
         and 'Action = "farm.material.enabled"' in farm_config,
         "Farm Materials must be a separate priority toggle, not a Farm method")
-require('Label = "Auto quest for modes"' in farm_config
+require('Label = "Auto quest Cake/Bones/Tyrant"' in farm_config
         and 'Action = "farm.autoModeQuest"' in farm_config
         and 'Setting = "AutoModeQuest"' in farm_config
         and "AutoModeQuest = false" in CONFIG

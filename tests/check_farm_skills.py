@@ -286,10 +286,11 @@ require(
     and "requiredTool" in mastery_attack_m1
     and "NextFruitM1At[tool]" in mastery_attack_m1
     and "self:_GetToolCooldown(tool)" in mastery_attack_m1
+    and "self:_GetToolCooldown(tool) or 0.25" in mastery_attack_m1
     and "pcall(" in mastery_attack_m1
     and "self:FindWeapon(" not in mastery_attack_m1
     and "self:EquipTool(" not in mastery_attack_m1,
-    "Fruit Mastery M1 must use the pinned equipped fruit and its available cooldown data",
+    "Fruit Mastery M1 must use the pinned equipped fruit and a bounded per-tool cooldown",
 )
 gun_shoot_lookup = function_body(
     COMPATIBILITY,
@@ -524,10 +525,20 @@ require(
     "_TryMasteryM1Fallback" not in MAIN_FARM
     and "LastMasteryM1Result" not in MAIN_FARM
     and "local function tryMasteryGunM1()" in MAIN_FARM
+    and "local function tryMasteryFruitM1()" in MAIN_FARM
     and 'if masteryCategory ~= "Gun" or not self.CombatService then' in MAIN_FARM
     and 'self.CombatService:FindEquippedWeapon("Gun")' in MAIN_FARM
     and "self.CombatService:AttackGunM1(target, equippedGun)" in MAIN_FARM,
     "Gun Mastery keeps M1 as a separate fallback around the shared skill path",
+)
+require(
+    'FindSkillWeapon("Blox Fruit", true)' in MAIN_FARM
+    and "self.CombatService:EquipTool(fruitTool)" in MAIN_FARM
+    and 'FindEquippedWeapon("Blox Fruit")' in MAIN_FARM
+    and 'self.CombatService.AttackM1' in MAIN_FARM
+    and '"Blox Fruit",\n            false,\n            equippedFruit' in MAIN_FARM
+    and 'inputResult ~= "Selected fruit tool has no supported M1 remote"' in MAIN_FARM,
+    "Fruit Mastery M1 must use only the selected hotbar fruit and tolerate unsupported M1 tools",
 )
 
 farm_skill = function_body(
@@ -606,7 +617,7 @@ require(
     and "Mastery skill input failed:" in farm_skill
     and '"Using Mastery "' not in farm_skill
     and "return true\n        end\n        if skillError" in mastery_no_skill_branch
-    and "AttackM1(" not in farm_skill
+    and "tryMasteryFruitM1()" in farm_skill
     and "masteryCategory" in farm_skill
     and "masteryTool" not in farm_skill
     and "self.CombatService:EquipWeapon(masteryCategory)" not in farm_skill
@@ -662,8 +673,10 @@ mastery_timeout = farm_skill.split(
 require(
     "skillError" in preparing_branch
     and 'if masteryCategory == "Gun" then\n            tryMasteryGunM1()' in preparing_branch
+    and 'elseif masteryCategory == "Blox Fruit" then\n            tryMasteryFruitM1()' in preparing_branch
     and "if masteryGunM1Error then" in preparing_branch
     and '"Mastery Gun M1 unavailable: " .. tostring(masteryGunM1Error)' in preparing_branch
+    and '"Mastery Fruit M1 unavailable: " .. tostring(masteryFruitM1Error)' in preparing_branch
     and "self.FarmSkillPreparing = nil" in normal_timeout
     and "self.FarmSkillPreparing = nil" not in mastery_timeout
     and "Mastery waiting: " in farm_skill

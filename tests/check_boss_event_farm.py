@@ -48,7 +48,7 @@ require(
 require(
     "AutoModeQuest = false" in CONFIG
     and "IgnoreCakePrince = false" in CONFIG
-    and 'Label = "Auto quest for modes"' in CONFIG
+    and 'Label = "Auto quest Cake/Bones/Tyrant"' in CONFIG
     and 'Setting = "AutoModeQuest"' in CONFIG,
     "Mode quest acceptance must be an opt-in setting",
 )

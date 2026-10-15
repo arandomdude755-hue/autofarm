@@ -37,6 +37,12 @@ Use Vxeze's reference-style Gun M1 approach: locate the game's gun-shoot functio
 
 **How to apply:** resolve mastery weapons only from live Character/Player.Backpack Tool instances; never query stored inventory. Prefer an equipped tool, otherwise use the one matching hotbar tool, including Skull Guitar. Keep the shared skill flow unchanged. Use the target-directed client gun handler only when a matching Gun is already equipped, restore its original target lookup immediately after firing, honor reload/cooldown state, and keep Gun M1 independently throttled from skills. Do not use direct TAP/Validator2/ShootGunEvent remote firing as a fallback.
 
+For Blox Fruit Mastery, keep selected skills first and use the existing BNN/Vxeze-style fruit M1 sender only as fallback when no selected skill is ready or the skill UI is still preparing. Resolve and equip only the current hotbar fruit; do not search stored inventory. Apply a per-tool cooldown with a conservative fallback when the tool exposes no readable cooldown. Fruits without the expected M1 remote shape should simply skip the M1 fallback.
+
+**Why:** the user requested fruit M1 after Gun M1, with the understanding that only some fruits support it. The references route fruit M1 through tool-specific `LeftClickRemote` or `RemoteFunction`/`RemoteEvent` TAP behavior; skills must remain the primary Mastery action.
+
+**How to apply:** reuse `CombatService:AttackM1` with the equipped selected fruit and its existing remote-shape handling. Call it only under Mastery's health threshold, after skill lookup yields no ready skill, and throttle per tool without slowing ordinary farm M1.
+
 Farm Materials must stay in the player's current sea. If a selected material is only mapped to another sea, hold position and explain where it is available; do not travel automatically.
 
 **Why:** the user chose manual sea changes for material farming.
