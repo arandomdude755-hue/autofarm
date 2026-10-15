@@ -94,10 +94,24 @@ require(
     and "workspace:GetServerTimeNow()" in FEATURE
     and "tick() - 25200" in FEATURE
     and "local function readLegendaryItemStatus(context, workspace, elapsed)" in FEATURE
-    and '"Chest window active; next cycle in "' in FEATURE
-    and 'itemName .. " held by "' in FEATURE
+    and '"No held Chalice/Fist or active summon observed; next four-hour boundary in "' in FEATURE
+    and '" (origin unknown)"' in FEATURE
     and "Fist of Darkness" in FEATURE
-    and "Used: " in FEATURE
+    and "acquisition source=unknown" in FEATURE
+    and "appendClockDiagnostics(lines, workspace)" in FEATURE
+    and "Server-clock next 4-hour boundary" in FEATURE
+    and "BNN-clock next 4-hour boundary" in FEATURE
+    and "appendLegendaryItemDiagnostics(lines, context, workspace)" in FEATURE
+    and "appendIslandDiagnostics(lines, context)" in FEATURE
+    and "appendUnparentedIslandDiagnostics(lines, compatibility)" in FEATURE
+    and "appendNamedDescendantMatches(lines, map, \"Workspace.Map\")" in FEATURE
+    and "World-origin location names (up to " in FEATURE
+    and "collectHeldLegendaryItems(playersService, 1)" in FEATURE
+    and '"Mirage Island", MapName = "MysticIsland"' in FEATURE
+    and '"Prehistoric Island", MapName = "PrehistoricIsland"' in FEATURE
+    and '"Frozen Dimension", MapName = "Frozen Dimension"' in FEATURE
+    and '"Tiki Outpost", MapName = "TikiOutpost"' in FEATURE
+    and "local scanLimit = math.min(#instances, 5000)" in FEATURE
     and "function updateMoonClockRate(statusFeature, clockTime)" in FEATURE
     and "elapsed >= 8" in FEATURE
     and "local function moonForecast(phaseText, clockTime, phaseNumber)" in FEATURE
@@ -122,7 +136,11 @@ require(
 require(
     "function StatusFeature:_ReadValues()" in FEATURE
     and "function StatusFeature:_BuildReport(values)" in FEATURE
+    and FEATURE.split("function StatusFeature:_ReadValues()", 1)[1].split(
+        "function StatusFeature:_BuildReport(values)", 1
+    )[0].find("GetUnparentedInstances") == -1
     and 'values.fullJobId' in FEATURE
+    and "===== [StatusReport] REPORT END =====" in FEATURE
     and 'context.State:SetStatusValues(self:_ReadValues())' in FEATURE
     and 'InvokeServer("InfoLeviathan", "1")' in FEATURE
     and 'InvokeServer("CakePrinceSpawner", true)' in FEATURE

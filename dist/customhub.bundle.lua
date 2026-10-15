@@ -5038,7 +5038,10 @@ local function readProperty(instance, name)
     local ok, value = pcall(function()
         return instance[name]
     end)
-    return ok and value or nil
+    if ok then
+        return value
+    end
+    return nil
 end
 
 local function formatDuration(totalSeconds)
@@ -5065,6 +5068,7 @@ local function getOldestLocationTime(workspace)
     end
 
     local oldestTimeIn
+    local oldestLocation
     local childrenOk, children = pcall(function()
         return locations:GetChildren()
     end)
@@ -5079,9 +5083,10 @@ local function getOldestLocationTime(workspace)
         value = tonumber(value)
         if value and (not oldestTimeIn or value < oldestTimeIn) then
             oldestTimeIn = value
+            oldestLocation = location
         end
     end
-    return oldestTimeIn
+    return oldestTimeIn, oldestLocation
 end
 
 local function readServerElapsed(workspace)
@@ -5154,15 +5159,16 @@ local function findActiveLegendaryBoss(workspace)
     return nil
 end
 
-local function findHeldLegendaryItem(playersService)
+local function collectHeldLegendaryItems(playersService, maxItems)
+    local foundItems = {}
     if not playersService then
-        return nil
+        return foundItems
     end
     local playersOk, players = pcall(function()
         return playersService:GetPlayers()
     end)
     if not playersOk or type(players) ~= "table" then
-        return nil
+        return foundItems
     end
 
     for _, player in ipairs(players) do
@@ -5181,10 +5187,27 @@ local function findHeldLegendaryItem(playersService)
                     local displayName = readProperty(player, "DisplayName")
                         or readProperty(player, "Name")
                         or "player"
-                    return itemName .. " held by " .. tostring(displayName)
+                    local containerName = container == character and "Character" or "Backpack"
+                    table.insert(foundItems, {
+                        Item = itemName,
+                        Holder = tostring(displayName),
+                        Container = containerName,
+                    })
+                    if maxItems and #foundItems >= maxItems then
+                        return foundItems
+                    end
                 end
             end
         end
+    end
+    return foundItems
+end
+
+local function findHeldLegendaryItem(playersService)
+    local foundItems = collectHeldLegendaryItems(playersService, 1)
+    local first = foundItems[1]
+    if first then
+        return first.Item, first.Holder, first.Container
     end
     return nil
 end
@@ -5192,14 +5215,15 @@ end
 local function readLegendaryItemStatus(context, workspace, elapsed)
     local bossName = findActiveLegendaryBoss(workspace)
     if bossName then
-        return "Used: " .. tostring(bossName) .. " active"
+        return "Active summon: " .. tostring(bossName)
     end
 
     local playersService = context and context.Compatibility
         and context.Compatibility.Players
-    local heldItem = findHeldLegendaryItem(playersService)
+    local heldItem, holderName = findHeldLegendaryItem(playersService)
     if heldItem then
-        return heldItem
+        return "Held: " .. heldItem .. " by " .. tostring(holderName)
+            .. " (origin unknown)"
     end
 
     if not elapsed then
@@ -5209,12 +5233,7 @@ local function readLegendaryItemStatus(context, workspace, elapsed)
 
     local cycleSeconds = 4 * 60 * 60
     local untilNextCycle = cycleSeconds - (elapsed % cycleSeconds)
-    if elapsed < cycleSeconds then
-        return "No item detected; chest window in "
-            .. formatDuration(untilNextCycle)
-            .. " (estimate)"
-    end
-    return "Chest window active; next cycle in "
+    return "No held Chalice/Fist or active summon observed; next four-hour boundary in "
         .. formatDuration(untilNextCycle)
         .. " (estimate)"
 end
@@ -5503,6 +5522,495 @@ local function readWorldEventValues(context, statusFeature)
     }
 end
 
+local function safeFullName(instance)
+    if not instance then
+        return "missing"
+    end
+    local ok, name = pcall(function()
+        return instance:GetFullName()
+    end)
+    return ok and tostring(name) or tostring(readProperty(instance, "Name") or "unknown")
+end
+
+local function readAttribute(instance, attributeName)
+    if not instance then
+        return nil
+    end
+    local ok, value = pcall(function()
+        return instance:GetAttribute(attributeName)
+    end)
+    if ok then
+        return value
+    end
+    return nil
+end
+
+local function rawNumber(value)
+    local number = tonumber(value)
+    return number and string.format("%.3f", number) or "unavailable"
+end
+
+local function stateText(value)
+    if value == true then
+        return "true"
+    elseif value == false then
+        return "false"
+    end
+    return "unavailable"
+end
+
+local function formatCycleRemaining(elapsed)
+    local seconds = tonumber(elapsed)
+    if not seconds or seconds < 0 then
+        return "invalid"
+    end
+    local cycleSeconds = 4 * 60 * 60
+    return formatDuration(cycleSeconds - (seconds % cycleSeconds))
+end
+
+local function appendClockDiagnostics(lines, workspace)
+    table.insert(lines, "")
+    table.insert(lines, "===== [Clock / Legendary Item Evidence] =====")
+    local timeIn, oldestLocation = getOldestLocationTime(workspace)
+    local worldOrigin = findChild(workspace, "_WorldOrigin")
+    local locations = findChild(worldOrigin, "Locations")
+    local timeInCount = 0
+    local listedTimeIn = 0
+    local childrenOk, children = pcall(function()
+        return locations and locations:GetChildren()
+    end)
+    if childrenOk and type(children) == "table" then
+        for _, location in ipairs(children) do
+            local markerTime = tonumber(readAttribute(location, "TimeIn"))
+            if markerTime then
+                timeInCount += 1
+                if listedTimeIn < 16 then
+                    listedTimeIn += 1
+                    table.insert(
+                        lines,
+                        "TimeIn marker: "
+                            .. tostring(readProperty(location, "Name") or "unknown")
+                            .. "; value="
+                            .. rawNumber(markerTime)
+                    )
+                end
+            end
+        end
+    end
+
+    local serverClockOk, serverNow = pcall(function()
+        return workspace:GetServerTimeNow()
+    end)
+    if not serverClockOk then
+        serverNow = nil
+    end
+    local correctedTickOk, correctedTick = pcall(function()
+        return tick() - 25200
+    end)
+    if not correctedTickOk then
+        correctedTick = nil
+    end
+    local serverElapsed = timeIn and serverNow and (serverNow - timeIn) or nil
+    local bnnElapsed = timeIn and correctedTick and (correctedTick - timeIn) or nil
+    local serverElapsedValid = serverElapsed
+        and serverElapsed >= 0
+        and serverElapsed <= 30 * 24 * 60 * 60
+    local bnnElapsedValid = bnnElapsed
+        and bnnElapsed >= 0
+        and bnnElapsed <= 30 * 24 * 60 * 60
+    local selectedClock = serverElapsedValid
+            and "Workspace:GetServerTimeNow()"
+        or bnnElapsedValid
+            and "tick() - 25200"
+        or "none (clock mismatch)"
+
+    table.insert(
+        lines,
+        "Oldest TimeIn marker: "
+            .. safeFullName(oldestLocation)
+            .. "; TimeIn="
+            .. rawNumber(timeIn)
+            .. "; total markers="
+            .. tostring(timeInCount)
+    )
+    table.insert(lines, "GetServerTimeNow: " .. rawNumber(serverNow))
+    table.insert(lines, "tick() - 25200: " .. rawNumber(correctedTick))
+    table.insert(lines, "Selected elapsed-time clock: " .. selectedClock)
+    table.insert(lines, "Server-clock elapsed seconds: " .. rawNumber(serverElapsed))
+    table.insert(lines, "BNN-clock elapsed seconds: " .. rawNumber(bnnElapsed))
+    table.insert(
+        lines,
+        "Server-clock next 4-hour boundary: "
+            .. (serverElapsedValid and formatCycleRemaining(serverElapsed) or "unavailable")
+    )
+    table.insert(
+        lines,
+        "BNN-clock next 4-hour boundary: "
+            .. (bnnElapsedValid and formatCycleRemaining(bnnElapsed) or "unavailable")
+    )
+    table.insert(
+        lines,
+        "Workspace.DistributedGameTime: "
+            .. rawNumber(readProperty(workspace, "DistributedGameTime"))
+    )
+    if timeInCount > listedTimeIn then
+        table.insert(lines, "TimeIn marker list truncated after " .. tostring(listedTimeIn))
+    end
+end
+
+local function appendLegendaryItemDiagnostics(lines, context, workspace)
+    local compatibility = context and context.Compatibility
+    local playersService = compatibility and compatibility.Players
+    local heldItems = collectHeldLegendaryItems(playersService)
+    local activeBoss = findActiveLegendaryBoss(workspace)
+
+    table.insert(lines, "")
+    table.insert(lines, "===== [Legendary Item Observation] =====")
+    if activeBoss then
+        table.insert(lines, "Live summon observed in Workspace.Enemies: " .. tostring(activeBoss))
+    else
+        table.insert(lines, "Live summon observed in Workspace.Enemies: none")
+    end
+    if #heldItems == 0 then
+        table.insert(
+            lines,
+            "Held Chalice/Fist scan: none found in visible player Character/Backpack containers"
+        )
+    else
+        for _, item in ipairs(heldItems) do
+            table.insert(
+                lines,
+                "Held item observed: "
+                    .. item.Item
+                    .. "; holder="
+                    .. item.Holder
+                    .. "; container="
+                    .. item.Container
+                    .. "; acquisition source=unknown"
+            )
+        end
+    end
+    table.insert(
+        lines,
+        "Possession does not establish chest origin; it may come from a chest, Elite Hunter, or another source."
+    )
+    table.insert(
+        lines,
+        "The four-hour countdown is a TimeIn-based estimate; it is not evidence that an item is absent or available."
+    )
+end
+
+local function instancePresence(instance)
+    if not instance then
+        return "not present in this client view"
+    end
+    return "present; class="
+        .. tostring(readProperty(instance, "ClassName") or "unknown")
+        .. "; path="
+        .. safeFullName(instance)
+end
+
+local function appendNamedDescendantMatches(lines, root, label)
+    if not root then
+        table.insert(lines, label .. " name scan: root unavailable")
+        return
+    end
+    local descendantsOk, descendants = pcall(function()
+        return root:GetDescendants()
+    end)
+    if not descendantsOk or type(descendants) ~= "table" then
+        table.insert(lines, label .. " name scan: failed")
+        return
+    end
+
+    local scanLimit = math.min(#descendants, 5000)
+    local matches = 0
+    local listed = 0
+    local needles = {
+        "tiki",
+        "eye",
+        "prehistoric",
+        "mystic",
+        "mirage",
+        "frozen",
+        "island",
+    }
+    for index = 1, scanLimit do
+        local instance = descendants[index]
+        local lowerName = string.lower(tostring(readProperty(instance, "Name") or ""))
+        local matched = false
+        for _, needle in ipairs(needles) do
+            if string.find(lowerName, needle, 1, true) then
+                matched = true
+                break
+            end
+        end
+        if matched then
+            matches += 1
+            if listed < 24 then
+                listed += 1
+                table.insert(
+                    lines,
+                    label
+                        .. " matching node: "
+                        .. tostring(readProperty(instance, "Name") or "unknown")
+                        .. "; class="
+                        .. tostring(readProperty(instance, "ClassName") or "unknown")
+                        .. "; path="
+                        .. safeFullName(instance)
+                )
+            end
+        end
+    end
+    table.insert(
+        lines,
+        label
+            .. " descendants scanned="
+            .. tostring(scanLimit)
+            .. "/"
+            .. tostring(#descendants)
+            .. "; relevant name matches="
+            .. tostring(matches)
+            .. (matches > listed and " (list capped at " .. tostring(listed) .. ")" or "")
+    )
+end
+
+local function appendIslandDiagnostics(lines, context)
+    local compatibility = context and context.Compatibility
+    local workspace = compatibility and compatibility.Workspace
+    local map = findChild(workspace, "Map")
+    local worldOrigin = findChild(workspace, "_WorldOrigin")
+    local locations = findChild(worldOrigin, "Locations")
+    local playerGui
+    if compatibility and type(compatibility.GetPlayerGui) == "function" then
+        local guiOk, gui = pcall(compatibility.GetPlayerGui, compatibility)
+        if guiOk then
+            playerGui = gui
+        end
+    end
+    local mainGui = findChild(playerGui, "Main")
+    local topHud = findChild(mainGui, "TopHUDList")
+
+    table.insert(lines, "")
+    table.insert(lines, "===== [Island / Event Detection Evidence] =====")
+    table.insert(lines, "Workspace.Map: " .. instancePresence(map))
+    table.insert(lines, "Workspace._WorldOrigin.Locations: " .. instancePresence(locations))
+    appendNamedDescendantMatches(lines, map, "Workspace.Map")
+
+    local locationsOk, locationChildren = pcall(function()
+        return locations and locations:GetChildren()
+    end)
+    if locationsOk and type(locationChildren) == "table" then
+        local listLimit = math.min(#locationChildren, 60)
+        table.insert(
+            lines,
+            "World-origin location names (up to "
+                .. tostring(listLimit)
+                .. " of "
+                .. tostring(#locationChildren)
+                .. "):"
+        )
+        for index = 1, listLimit do
+            local location = locationChildren[index]
+            table.insert(
+                lines,
+                "Location: "
+                    .. tostring(readProperty(location, "Name") or "unknown")
+                    .. "; TimeIn="
+                    .. rawNumber(readAttribute(location, "TimeIn"))
+                    .. "; CFrame attribute="
+                    .. (readAttribute(location, "CFrame") ~= nil and "present" or "absent")
+            )
+        end
+        if #locationChildren > listLimit then
+            table.insert(lines, "Location-name list truncated after " .. tostring(listLimit))
+        end
+    else
+        table.insert(lines, "World-origin location names: unavailable")
+    end
+
+    local islandChecks = {
+        { Label = "Tiki Outpost", MapName = "TikiOutpost", LocationNames = { "Tiki Outpost", "Tiki" } },
+        { Label = "Prehistoric Island", MapName = "PrehistoricIsland", LocationNames = { "Prehistoric Island" } },
+        { Label = "Mirage Island", MapName = "MysticIsland", LocationNames = { "Mirage Island", "Mystic Island" } },
+        { Label = "Frozen Dimension", MapName = "Frozen Dimension", LocationNames = { "Frozen Dimension" } },
+    }
+
+    for _, check in ipairs(islandChecks) do
+        local mapInstance = findChild(map, check.MapName)
+        table.insert(
+            lines,
+            check.Label .. " Workspace.Map marker: " .. instancePresence(mapInstance)
+        )
+        for _, locationName in ipairs(check.LocationNames) do
+            local location = findChild(locations, locationName)
+            if location then
+                table.insert(
+                    lines,
+                    check.Label
+                        .. " world-origin marker: "
+                        .. safeFullName(location)
+                        .. "; TimeIn="
+                        .. rawNumber(readAttribute(location, "TimeIn"))
+                        .. "; CFrame attribute="
+                        .. (readAttribute(location, "CFrame") ~= nil and "present" or "absent")
+                )
+            end
+        end
+    end
+
+    local tiki = findChild(map, "TikiOutpost")
+    local islandModel = findChild(tiki, "IslandModel", true)
+    table.insert(lines, "Tiki IslandModel: " .. instancePresence(islandModel))
+    for index = 1, 4 do
+        local eye = findChild(islandModel, "Eye" .. tostring(index), true)
+        table.insert(
+            lines,
+            "Tiki Eye"
+                .. tostring(index)
+                .. ": "
+                .. (eye
+                        and ("present; Transparency=" .. rawNumber(readProperty(eye, "Transparency"))
+                            .. "; path=" .. safeFullName(eye))
+                    or "not present in this client view")
+        )
+    end
+
+    local prehistoricTimer = findChild(topHud, "PrehistoricRaidTimer")
+    local raidTimer = findChild(topHud, "RaidTimer")
+    table.insert(
+        lines,
+        "PlayerGui.Main.TopHUDList.PrehistoricRaidTimer.Visible: "
+            .. stateText(readProperty(prehistoricTimer, "Visible"))
+    )
+    table.insert(
+        lines,
+        "PlayerGui.Main.TopHUDList.RaidTimer.Visible: "
+            .. stateText(readProperty(raidTimer, "Visible"))
+    )
+
+    local player = compatibility and compatibility.Player
+    table.insert(
+        lines,
+        "LocalPlayer CurrentLocation: " .. tostring(readAttribute(player, "CurrentLocation") or "unavailable")
+    )
+    table.insert(
+        lines,
+        "LocalPlayer LastSpawnPoint: "
+            .. tostring(getChildValue(findChild(player, "Data"), "LastSpawnPoint") or "unavailable")
+    )
+
+    local guiDescendantsOk, guiDescendants = pcall(function()
+        return topHud and topHud:GetDescendants()
+    end)
+    local guiTimersListed = 0
+    if guiDescendantsOk and type(guiDescendants) == "table" then
+        for _, node in ipairs(guiDescendants) do
+            if guiTimersListed >= 20 then
+                break
+            end
+            local nodeName = string.lower(tostring(readProperty(node, "Name") or ""))
+            local visible = readProperty(node, "Visible")
+            if visible ~= nil
+                and (string.find(nodeName, "tiki", 1, true)
+                    or string.find(nodeName, "prehistoric", 1, true)
+                    or string.find(nodeName, "mirage", 1, true)
+                    or string.find(nodeName, "frozen", 1, true)
+                    or string.find(nodeName, "island", 1, true))
+            then
+                guiTimersListed += 1
+                table.insert(
+                    lines,
+                    "Event HUD element: "
+                        .. tostring(readProperty(node, "Name"))
+                        .. "; Visible="
+                        .. tostring(visible)
+                        .. "; path="
+                        .. safeFullName(node)
+                )
+            end
+        end
+    end
+    if guiTimersListed == 0 then
+        table.insert(lines, "Event HUD elements: no matching visible controls found")
+    end
+end
+
+local function appendUnparentedIslandDiagnostics(lines, compatibility)
+    table.insert(lines, "")
+    table.insert(lines, "===== [Unparented Instance Check — Manual Report Only] =====")
+    local getter = compatibility and compatibility.GetUnparentedInstances
+    if type(getter) ~= "function" then
+        table.insert(lines, "Unparented-instance API: unavailable")
+        return
+    end
+    local ok, instances = pcall(getter, compatibility)
+    if not ok or type(instances) ~= "table" then
+        table.insert(lines, "Unparented-instance API: unavailable or failed")
+        return
+    end
+
+    local scanLimit = math.min(#instances, 5000)
+    local matchCount = 0
+    local listed = 0
+    local summaryIndex = #lines + 1
+    table.insert(lines, "Unparented instances scanned: pending")
+    local needles = {
+        "tiki",
+        "prehistoric",
+        "mystic",
+        "mirage",
+        "frozen",
+        "eye1",
+        "eye2",
+        "eye3",
+        "eye4",
+    }
+    for index = 1, scanLimit do
+        local instance = instances[index]
+        local name = string.lower(tostring(readProperty(instance, "Name") or ""))
+        local matched = false
+        for _, needle in ipairs(needles) do
+            if string.find(name, needle, 1, true) then
+                matched = true
+                break
+            end
+        end
+        if matched then
+            matchCount += 1
+            if listed < 20 then
+                listed += 1
+                table.insert(
+                    lines,
+                    "Unparented match: "
+                        .. tostring(readProperty(instance, "Name") or "unknown")
+                        .. "; class="
+                        .. tostring(readProperty(instance, "ClassName") or "unknown")
+                )
+            end
+        end
+    end
+    lines[summaryIndex] =
+        "Unparented instances scanned: "
+        .. tostring(scanLimit)
+        .. " / "
+        .. tostring(#instances)
+        .. "; relevant name matches="
+        .. tostring(matchCount)
+    if #instances > scanLimit then
+        table.insert(
+            lines,
+            summaryIndex + 1,
+            "Unparented-instance scan was capped at " .. tostring(scanLimit)
+        )
+    end
+    if listed == 0 then
+        table.insert(lines, "No matching unparented island/eye names found")
+    elseif matchCount > listed then
+        table.insert(lines, "Unparented match list truncated after " .. tostring(listed))
+    end
+end
+
 local function readRemoteFunction(context)
     local compatibility = context and context.Compatibility
     local replicatedStorage = compatibility and compatibility.ReplicatedStorage
@@ -5744,8 +6252,14 @@ function StatusFeature:_BuildReport(values)
         "Players: " .. values.players,
         "Place ID: " .. values.placeId,
         "Server Job ID: " .. values.fullJobId,
-        "===== [StatusReport] REPORT END =====",
     }
+    local compatibility = self.Context and self.Context.Compatibility
+    local workspace = compatibility and compatibility.Workspace
+    appendClockDiagnostics(lines, workspace)
+    appendLegendaryItemDiagnostics(lines, self.Context, workspace)
+    appendIslandDiagnostics(lines, self.Context)
+    appendUnparentedIslandDiagnostics(lines, compatibility)
+    table.insert(lines, "===== [StatusReport] REPORT END =====")
     return table.concat(lines, "\n")
 end
 
