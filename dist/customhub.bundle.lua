@@ -1025,9 +1025,10 @@ local CollectionService = game:GetService("CollectionService")
 local Compatibility = {}
 Compatibility.__index = Compatibility
 
-local TITLE_MENU_PROBE_TIMEOUT = 0.5
+local TITLE_MENU_PROBE_TIMEOUT = 0.35
 local TITLE_MENU_PROBE_INTERVAL = 0.05
 local TITLE_STATE_CACHE_TTL = 30
+local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
 
 function Compatibility.new()
     return setmetatable({
@@ -1429,7 +1430,11 @@ function Compatibility:HasUnlockedTitle(titleName)
             Value = state,
             Reason = reason,
             At = now,
-            ExpiresAt = state and math.huge or now + TITLE_STATE_CACHE_TTL,
+            ExpiresAt = state == true
+                    and math.huge
+                or state == false
+                    and now + TITLE_STATE_CACHE_TTL
+                or now + TITLE_STATE_UNKNOWN_CACHE_TTL,
         }
         return state, reason
     end
@@ -1567,7 +1572,11 @@ function Compatibility:HasUnlockedTitle(titleName)
         Value = state,
         Reason = reason,
         At = now,
-        ExpiresAt = state == true and math.huge or now + TITLE_STATE_CACHE_TTL,
+        ExpiresAt = state == true
+                and math.huge
+            or state == false
+                and now + TITLE_STATE_CACHE_TTL
+            or now + TITLE_STATE_UNKNOWN_CACHE_TTL,
     }
     return state, reason
 end
@@ -5393,18 +5402,13 @@ local function readTikiEyes(map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        return "Not spawned"
+        -- BNN keeps this status at zero when the island model is unloaded.
+        return "0 / 4 cleared"
     end
     local cleared = 0
     for index = 1, 4 do
         local eye = findChild(islandModel, "Eye" .. tostring(index), true)
-        if not eye then
-            return "Not spawned"
-        end
         local transparency = tonumber(readProperty(eye, "Transparency"))
-        if transparency == nil then
-            return "Unavailable"
-        end
         if transparency == 1 then
             cleared += 1
         end
@@ -6077,7 +6081,7 @@ function MapGatewayService:_ResolveTouchTarget(route)
     return hitbox, nil
 end
 
-function MapGatewayService:_GetAvailableRoutes(seaIndex)
+function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destination)
     local compatibility = self.Compatibility
     local now = os.clock()
     local routes = {}
@@ -6086,6 +6090,41 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
     if diagnostic then
         diagnostic.Candidates = candidates
     end
+
+    local function estimateTitleRouteCost(source)
+        if typeof(source.Stand) ~= "Vector3"
+            or typeof(source.Destination) ~= "Vector3"
+        then
+            return math.huge
+        end
+        local bestApproach = distance(currentPosition, source.Stand)
+        for _, feeder in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
+            if feeder.Name ~= source.Name
+                and not feeder.RequiresTitle
+                and typeof(feeder.Stand) == "Vector3"
+                and typeof(feeder.Destination) == "Vector3"
+            then
+                local feederAvailable = true
+                if feeder.Requires then
+                    local checkOk, owned = pcall(
+                        compatibility.HasOwnedInventoryItem,
+                        compatibility,
+                        feeder.Requires
+                    )
+                    feederAvailable = checkOk and owned == true
+                end
+                if feederAvailable then
+                    bestApproach = math.min(
+                        bestApproach,
+                        distance(currentPosition, feeder.Stand)
+                            + distance(feeder.Destination, source.Stand)
+                    )
+                end
+            end
+        end
+        return bestApproach + distance(source.Destination, destination)
+    end
+
     for _, source in ipairs(ROUTES_BY_SEA[seaIndex] or {}) do
         local candidate = {
             Name = source.Name,
@@ -6111,26 +6150,37 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
                 if available then
                     candidate.AccessBy = source.Requires
                 elseif source.RequiresTitle then
-                    local titleCheckOk, titleOwned, titleError = pcall(
-                        compatibility.HasUnlockedTitle,
-                        compatibility,
-                        source.RequiresTitle
-                    )
-                    if titleCheckOk and type(titleOwned) == "boolean" then
-                        candidate.TitleRequirementOwned = titleOwned
-                    end
-                    if titleCheckOk and titleOwned == true then
-                        available = true
-                        candidate.AccessBy = source.RequiresTitle
+                    local titleRouteCost = estimateTitleRouteCost(source)
+                    local directCost = distance(currentPosition, destination)
+                    if directCost - titleRouteCost >= MINIMUM_DISTANCE_SAVED then
+                        local titleCheckOk, titleOwned, titleError = pcall(
+                            compatibility.HasUnlockedTitle,
+                            compatibility,
+                            source.RequiresTitle
+                        )
+                        if titleCheckOk and type(titleOwned) == "boolean" then
+                            candidate.TitleRequirementOwned = titleOwned
+                        end
+                        candidate.TitleCheckPending =
+                            titleCheckOk and titleOwned == nil
+                        if titleCheckOk and titleOwned == true then
+                            available = true
+                            candidate.AccessBy = source.RequiresTitle
+                        else
+                            local itemReason = checkOk
+                                    and (inventoryError or "required item not found in inventory")
+                                or ("inventory check failed: " .. formatScalar(owned))
+                            local titleReason = titleCheckOk
+                                    and (titleError
+                                        or (titleOwned == false
+                                            and "title is locked"
+                                            or "title state is unknown"))
+                                or ("title check failed: " .. formatScalar(titleOwned))
+                            candidate.Reason = itemReason .. "; " .. titleReason
+                        end
                     else
-                        local itemReason = checkOk
-                                and (inventoryError or "required item not found in inventory")
-                            or ("inventory check failed: " .. formatScalar(owned))
-                        local titleReason = titleCheckOk
-                                and (titleError
-                                    or (titleOwned == false and "title is locked" or "title state is unknown"))
-                            or ("title check failed: " .. formatScalar(titleOwned))
-                        candidate.Reason = itemReason .. "; " .. titleReason
+                        candidate.Reason =
+                            "required item not found; title lookup skipped because this gateway is not shorter"
                     end
                 else
                     candidate.Reason = checkOk
@@ -6178,6 +6228,15 @@ function MapGatewayService:_GetAvailableRoutes(seaIndex)
     return routes
 end
 
+function MapGatewayService:HasPendingTitleChecks()
+    for _, candidate in ipairs(self.LastDiagnostic and self.LastDiagnostic.Candidates or {}) do
+        if candidate.TitleCheckPending then
+            return true
+        end
+    end
+    return false
+end
+
 function MapGatewayService:FindPlan(destination, currentPosition, destinationLabel)
     self.LastDiagnostic = {
         At = os.clock(),
@@ -6200,7 +6259,7 @@ function MapGatewayService:FindPlan(destination, currentPosition, destinationLab
     end
     diagnostic.Sea = SEA_LABELS[seaIndex]
 
-    local routes = self:_GetAvailableRoutes(seaIndex)
+    local routes = self:_GetAvailableRoutes(seaIndex, currentPosition, destination)
     local function findBest(position, remainingHops, used)
         local bestCost = distance(position, destination)
         local bestPath = {}
@@ -6235,7 +6294,9 @@ function MapGatewayService:FindPlan(destination, currentPosition, destinationLab
     diagnostic.MinimumDistanceSaved = MINIMUM_DISTANCE_SAVED
     if #plan == 0 or directDistance - plannedCost < MINIMUM_DISTANCE_SAVED then
         diagnostic.Phase = "direct travel: no qualifying gateway route"
-        diagnostic.Reason = #plan == 0
+        diagnostic.Reason = self:HasPendingTitleChecks()
+                and "Title access is still being checked"
+            or #plan == 0
                 and "No available route produced a shorter path"
             or "Best gateway route saves less than the required distance"
         return {}, nil
@@ -6552,6 +6613,7 @@ function MapGatewayService:BuildDiagnosticReport()
                 .. (candidate.FallbackTitle
                     and ("; fallback_title=" .. tostring(candidate.FallbackTitle))
                     or "")
+                .. (candidate.TitleCheckPending and "; title_pending=true" or "")
                 .. (candidate.FallbackTitle
                     and (
                         "; title_owned="
@@ -6677,6 +6739,7 @@ local TeleportFeature = {
 local MAX_STALL_RETRIES = 2
 local STALL_RETRY_DELAY = 1.1
 local MAX_TRAVEL_TIMEOUT = 150
+local TITLE_ACCESS_RECHECK_WINDOW = 1
 
 local function disconnect(connection)
     if connection then
@@ -7037,6 +7100,38 @@ function TeleportFeature:_RunTravel(request, character)
                 nil,
                 { Failure = resolvedPlan }
             )
+        end
+        if planOk and type(resolvedPlan) == "table"
+            and #resolvedPlan == 0
+            and self.GatewayService:HasPendingTitleChecks()
+        then
+            local deadline = os.clock() + TITLE_ACCESS_RECHECK_WINDOW
+            while os.clock() < deadline do
+                task.wait(0.1)
+                if not self:_IsTravelCurrent(request, character) then
+                    return
+                end
+                local _, _, retryRoot = compatibility:GetCharacterParts()
+                if not retryRoot then
+                    break
+                end
+                planOk, resolvedPlan = pcall(
+                    self.GatewayService.FindPlan,
+                    self.GatewayService,
+                    request.Destination.Position,
+                    retryRoot.Position,
+                    request.Label
+                )
+                if not planOk or type(resolvedPlan) ~= "table"
+                    or #resolvedPlan > 0
+                    or not self.GatewayService:HasPendingTitleChecks()
+                then
+                    break
+                end
+            end
+            if planOk and type(resolvedPlan) == "table" then
+                plan = resolvedPlan
+            end
         end
     end
     if #plan > 0 then

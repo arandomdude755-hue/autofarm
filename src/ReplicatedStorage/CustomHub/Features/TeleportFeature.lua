@@ -15,6 +15,7 @@ local TeleportFeature = {
 local MAX_STALL_RETRIES = 2
 local STALL_RETRY_DELAY = 1.1
 local MAX_TRAVEL_TIMEOUT = 150
+local TITLE_ACCESS_RECHECK_WINDOW = 1
 
 local function disconnect(connection)
     if connection then
@@ -375,6 +376,38 @@ function TeleportFeature:_RunTravel(request, character)
                 nil,
                 { Failure = resolvedPlan }
             )
+        end
+        if planOk and type(resolvedPlan) == "table"
+            and #resolvedPlan == 0
+            and self.GatewayService:HasPendingTitleChecks()
+        then
+            local deadline = os.clock() + TITLE_ACCESS_RECHECK_WINDOW
+            while os.clock() < deadline do
+                task.wait(0.1)
+                if not self:_IsTravelCurrent(request, character) then
+                    return
+                end
+                local _, _, retryRoot = compatibility:GetCharacterParts()
+                if not retryRoot then
+                    break
+                end
+                planOk, resolvedPlan = pcall(
+                    self.GatewayService.FindPlan,
+                    self.GatewayService,
+                    request.Destination.Position,
+                    retryRoot.Position,
+                    request.Label
+                )
+                if not planOk or type(resolvedPlan) ~= "table"
+                    or #resolvedPlan > 0
+                    or not self.GatewayService:HasPendingTitleChecks()
+                then
+                    break
+                end
+            end
+            if planOk and type(resolvedPlan) == "table" then
+                plan = resolvedPlan
+            end
         end
     end
     if #plan > 0 then

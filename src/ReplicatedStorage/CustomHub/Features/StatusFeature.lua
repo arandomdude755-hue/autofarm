@@ -404,18 +404,13 @@ local function readTikiEyes(map)
     local tiki = findChild(map, "TikiOutpost")
     local islandModel = findChild(tiki, "IslandModel", true)
     if not islandModel then
-        return "Not spawned"
+        -- BNN keeps this status at zero when the island model is unloaded.
+        return "0 / 4 cleared"
     end
     local cleared = 0
     for index = 1, 4 do
         local eye = findChild(islandModel, "Eye" .. tostring(index), true)
-        if not eye then
-            return "Not spawned"
-        end
         local transparency = tonumber(readProperty(eye, "Transparency"))
-        if transparency == nil then
-            return "Unavailable"
-        end
         if transparency == 1 then
             cleared += 1
         end

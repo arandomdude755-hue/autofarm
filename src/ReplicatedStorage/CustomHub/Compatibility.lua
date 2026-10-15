@@ -8,9 +8,10 @@ local CollectionService = game:GetService("CollectionService")
 local Compatibility = {}
 Compatibility.__index = Compatibility
 
-local TITLE_MENU_PROBE_TIMEOUT = 0.5
+local TITLE_MENU_PROBE_TIMEOUT = 0.35
 local TITLE_MENU_PROBE_INTERVAL = 0.05
 local TITLE_STATE_CACHE_TTL = 30
+local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
 
 function Compatibility.new()
     return setmetatable({
@@ -412,7 +413,11 @@ function Compatibility:HasUnlockedTitle(titleName)
             Value = state,
             Reason = reason,
             At = now,
-            ExpiresAt = state and math.huge or now + TITLE_STATE_CACHE_TTL,
+            ExpiresAt = state == true
+                    and math.huge
+                or state == false
+                    and now + TITLE_STATE_CACHE_TTL
+                or now + TITLE_STATE_UNKNOWN_CACHE_TTL,
         }
         return state, reason
     end
@@ -550,7 +555,11 @@ function Compatibility:HasUnlockedTitle(titleName)
         Value = state,
         Reason = reason,
         At = now,
-        ExpiresAt = state == true and math.huge or now + TITLE_STATE_CACHE_TTL,
+        ExpiresAt = state == true
+                and math.huge
+            or state == false
+                and now + TITLE_STATE_CACHE_TTL
+            or now + TITLE_STATE_UNKNOWN_CACHE_TTL,
     }
     return state, reason
 end

@@ -112,6 +112,8 @@ require(
     and '"Not spawned"' in FEATURE
     and '"Not spawned (template loaded: "' in FEATURE
     and "function readTikiEyes(map)" in FEATURE
+    and 'return "0 / 4 cleared"' in FEATURE
+    and 'Eye" .. tostring(index)' in FEATURE
     and "return value and \"Spawned\" or \"Not spawned\"" in FEATURE
     and "Third Sea only" in FEATURE
     and 'gsub("<[^>]+>", "")' in FEATURE,

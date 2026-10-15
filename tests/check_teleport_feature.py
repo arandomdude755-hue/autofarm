@@ -140,7 +140,9 @@ title_access = COMPATIBILITY[
     COMPATIBILITY.index("\nfunction Compatibility:BuildTitleAccessDiagnosticReport()")
 ]
 route_access = GATEWAYS[
-    GATEWAYS.index("function MapGatewayService:_GetAvailableRoutes(seaIndex)"):
+    GATEWAYS.index(
+        "function MapGatewayService:_GetAvailableRoutes(seaIndex, currentPosition, destination)"
+    ):
     GATEWAYS.index("\nfunction MapGatewayService:FindPlan")
 ]
 require(
@@ -150,9 +152,10 @@ require(
     and 'FindFirstChild("lockedImage", true)' in title_access
     and 'FindFirstChild("Open")' in title_access
     and "openEvent:Fire()" in title_access
-    and "TITLE_MENU_PROBE_TIMEOUT = 0.5" in COMPATIBILITY
+    and "TITLE_MENU_PROBE_TIMEOUT = 0.35" in COMPATIBILITY
     and "activeFrame.Visible = false" in title_access
     and "TITLE_STATE_CACHE_TTL = 30" in COMPATIBILITY
+    and "TITLE_STATE_UNKNOWN_CACHE_TTL = 1" in COMPATIBILITY
     and "InvokeServer" not in title_access
     and "FireServer" not in title_access,
     "title access lookup must read the loaded TitlesMenu, hide/restore a bounded UI probe, cache results, and avoid unknown remotes",
@@ -163,6 +166,13 @@ require(
     and "source.RequiresTitle" in route_access
     and "candidate.TitleRequirementOwned" in route_access
     and "candidate.AccessBy" in route_access
+    and "directCost - titleRouteCost >= MINIMUM_DISTANCE_SAVED" in route_access
+    and "candidate.TitleCheckPending" in route_access
+    and "local function estimateTitleRouteCost(source)" in route_access
+    and "feeder.Name ~= source.Name" in route_access
+    and "function MapGatewayService:HasPendingTitleChecks()" in GATEWAYS
+    and "TITLE_ACCESS_RECHECK_WINDOW = 1" in FEATURE
+    and "self.GatewayService:HasPendingTitleChecks()" in FEATURE
     and "fallback_title=" in GATEWAYS
     and "title_owned=" in GATEWAYS,
     "Tiki gateway eligibility must check Feathered Visage first, then an unlocked-title fallback, with diagnostics",
