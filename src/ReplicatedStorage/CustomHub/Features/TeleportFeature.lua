@@ -369,38 +369,48 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
     return false, "Travel was cancelled"
 end
 
-function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
+function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry, destination, finishRequestOnArrival)
+    destination = destination or request.Destination
     local retries = 0
     while self:_IsTravelCurrent(request, character) do
         if waitBeforeRetry or retries > 0 then
             task.wait(STALL_RETRY_DELAY)
             waitBeforeRetry = false
             if not self:_IsTravelCurrent(request, character) then
-                return
+                return false, "Travel was interrupted"
             end
         end
 
-        local arrived, reason = self:_MoveAndWait(request, character, request.Destination)
+        local arrived, reason = self:_MoveAndWait(request, character, destination)
         if arrived then
             if self.GatewayService then
-                self.GatewayService:RecordTravelPhase("destination reached")
+                self.GatewayService:RecordTravelPhase(
+                    finishRequestOnArrival == false
+                        and "Submerged staging reached"
+                        or "destination reached"
+                )
             end
-            self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
-            return
+            if finishRequestOnArrival ~= false then
+                self:_FinishTravel(request, "Arrived at " .. request.Label .. ".", "success")
+            end
+            return true
         end
         if not self:_IsTravelCurrent(request, character) then
-            return
+            return false, reason
         end
 
         if reason == "Map transition completed; continue toward the destination" then
             request.RouteTransitionRetries = (request.RouteTransitionRetries or 0) + 1
             if request.RouteTransitionRetries > 2 then
+                if finishRequestOnArrival == false then
+                    return false, "Map gateway transitions did not reach staging"
+                end
                 self:_FinishTravel(
                     request,
                     "Map gateway transitions did not reach the selected destination.",
                     "warning"
                 )
-                return
+                return false, reason
             end
             self:_SetStatus(
                 "Map transition complete; continuing to " .. request.Label .. ".",
@@ -417,6 +427,9 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
                         { Failure = reason }
                     )
                 end
+                if finishRequestOnArrival == false then
+                    return false, reason
+                end
                 self:_FinishTravel(
                     request,
                     "Travel stalled after "
@@ -424,7 +437,7 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
                         .. " retries; copy the status report for movement details, then try again.",
                     "warning"
                 )
-                return
+                return false, reason
             end
             self:_SetStatus(
                 "Travel stalled; retrying ("
@@ -436,6 +449,46 @@ function TeleportFeature:_RunDirectTravel(request, character, waitBeforeRetry)
             )
         end
     end
+    return false, "Travel was cancelled"
+end
+
+function TeleportFeature:_RequestSubmergedTransport(request, character, route)
+    if not self:_IsTravelCurrent(request, character) then
+        return false, "Travel was interrupted"
+    end
+
+    local compatibility = self.Context.Compatibility
+    local requestOk, requestError = self.MovementService:RequestSpecialTravelRoute(
+        route,
+        function()
+            return self:_IsTravelCurrent(request, character)
+        end
+    )
+    if not requestOk then
+        return false, requestError or "Submarine Worker transport could not start"
+    end
+
+    local arrivalReference = route and route.ArrivalReference
+    local arrivalRadius = tonumber(route and route.ArrivalRadius) or 3000
+    if typeof(arrivalReference) ~= "Vector3" then
+        return false, "Submerged arrival reference is unavailable"
+    end
+
+    local deadline = os.clock() + 10
+    repeat
+        if not self:_IsTravelCurrent(request, character) then
+            return false, "Travel was interrupted"
+        end
+        local currentCharacter, _, currentRoot = compatibility:GetCharacterParts()
+        if currentCharacter ~= character or not currentRoot then
+            return false, "Character changed during Submerged transport"
+        end
+        if (currentRoot.Position - arrivalReference).Magnitude <= arrivalRadius then
+            return true
+        end
+        task.wait(0.1)
+    until os.clock() >= deadline
+    return false, "Submerged transport did not confirm arrival"
 end
 
 function TeleportFeature:_ApproachGatewayStand(request, character, route)
@@ -546,6 +599,7 @@ end
 
 function TeleportFeature:_RunTravel(request, character)
     local compatibility = self.Context.Compatibility
+    local gatewayDestination = request.GatewayDestination or request.Destination
     local attemptedRoutes = {}
     local visitedGatewayPositions = {}
     local gatewayAttempts = 0
@@ -565,7 +619,7 @@ function TeleportFeature:_RunTravel(request, character)
             and #request.RoutePlan > 0
             and typeof(request.RoutePlanDestination) == "Vector3"
             and typeof(request.RouteStartPosition) == "Vector3"
-            and (request.RoutePlanDestination - request.Destination.Position).Magnitude <= 200
+            and (request.RoutePlanDestination - gatewayDestination.Position).Magnitude <= 200
             and (request.RouteStartPosition - currentRoot.Position).Magnitude <= 200
         then
             request.RoutePlanConsumed = true
@@ -576,9 +630,9 @@ function TeleportFeature:_RunTravel(request, character)
         local planOk, resolvedPlan = pcall(
             self.GatewayService.FindPlan,
             self.GatewayService,
-            request.Destination.Position,
+            gatewayDestination.Position,
             currentRoot.Position,
-            request.Label,
+            request.GatewayPlanLabel or request.Label,
             attemptedRoutes,
             visitedGatewayPositions
         )
@@ -607,9 +661,9 @@ function TeleportFeature:_RunTravel(request, character)
                 planOk, resolvedPlan = pcall(
                     self.GatewayService.FindPlan,
                     self.GatewayService,
-                    request.Destination.Position,
+                    gatewayDestination.Position,
                     retryRoot.Position,
-                    request.Label,
+                    request.GatewayPlanLabel or request.Label,
                     attemptedRoutes,
                     visitedGatewayPositions
                 )
@@ -758,7 +812,52 @@ function TeleportFeature:_RunTravel(request, character)
                 { GatewayAttempts = gatewayAttempts }
             )
         end
-        self:_RunDirectTravel(request, character, false)
+        if request.SpecialTravelRoute
+            and request.SpecialTravelRoute.Name == "Submerged"
+        then
+            local stagingReached, stagingError = self:_RunDirectTravel(
+                request,
+                character,
+                false,
+                request.GatewayDestination,
+                false
+            )
+            if not stagingReached then
+                if self:_IsTravelCurrent(request, character) then
+                    self:_FinishTravel(
+                        request,
+                        "Could not reach Tiki staging for Submerged travel: "
+                            .. tostring(stagingError),
+                        "warning"
+                    )
+                end
+                return
+            end
+
+            self:_SetStatus("At Tiki; entering Submerged.", "info")
+            self.GatewayService:RecordTravelPhase(
+                "at Tiki staging; requesting Submerged transport"
+            )
+            local transported, transportError = self:_RequestSubmergedTransport(
+                request,
+                character,
+                request.SpecialTravelRoute
+            )
+            if not transported then
+                if self:_IsTravelCurrent(request, character) then
+                    self:_FinishTravel(
+                        request,
+                        "Could not enter Submerged: " .. tostring(transportError),
+                        "warning"
+                    )
+                end
+                return
+            end
+            self.GatewayService:RecordTravelPhase(
+                "Submerged arrival confirmed; continuing to destination"
+            )
+        end
+        self:_RunDirectTravel(request, character, false, request.Destination, true)
     end
 end
 
@@ -1016,7 +1115,13 @@ function TeleportFeature:_FinishTravel(request, message, kind)
         if self.MovementService then
             self.MovementService:Cancel()
         end
-        self:_SetStatus("Gateway route finished; farming will continue.", "info")
+        local statusMessage = "Gateway route finished; farming will continue."
+        local statusKind = "info"
+        if kind == "warning" or kind == "error" then
+            statusMessage = message or statusMessage
+            statusKind = kind
+        end
+        self:_SetStatus(statusMessage, statusKind)
         return
     end
     if self.ActiveTravel ~= request then
@@ -1103,7 +1208,23 @@ function TeleportFeature:MoveFarmTo(destination, options)
         self:CancelFarmTravel()
     end
 
-    local directDistance = (destination.Position - root.Position).Magnitude
+    local specialRoute = self.MovementService:GetSpecialTravelRoute(
+        destination,
+        root.Position
+    )
+    local gatewayDestination = destination
+    local specialTravelRoute
+    if specialRoute and specialRoute.Name == "Submerged" then
+        gatewayDestination = specialRoute.Stage
+        specialTravelRoute = specialRoute
+    end
+    local gatewayPlanLabel
+    if specialTravelRoute then
+        gatewayPlanLabel = "Tiki staging for Submerged"
+    else
+        gatewayPlanLabel = options.Label or "Farm target"
+    end
+    local directDistance = (gatewayDestination.Position - root.Position).Magnitude
     if directDistance <= 1500 then
         self.LastFarmGatewayPlanCheck = nil
         return false, "No long-distance gateway route needed"
@@ -1113,7 +1234,8 @@ function TeleportFeature:MoveFarmTo(destination, options)
     local cached = self.LastFarmGatewayPlanCheck
     if cached
         and now - cached.At < 0.75
-        and (cached.Destination - destination.Position).Magnitude <= 200
+        and cached.RouteDestination
+        and (cached.RouteDestination - gatewayDestination.Position).Magnitude <= 200
     then
         return false, cached.Error or "No qualifying gateway route"
     end
@@ -1121,14 +1243,15 @@ function TeleportFeature:MoveFarmTo(destination, options)
     local planOk, routePlan = pcall(
         self.GatewayService.FindPlan,
         self.GatewayService,
-        destination.Position,
+        gatewayDestination.Position,
         root.Position,
-        options.Label or "Farm target"
+        gatewayPlanLabel
     )
     if not planOk or type(routePlan) ~= "table" or #routePlan == 0 then
         self.LastFarmGatewayPlanCheck = {
             At = now,
             Destination = destination.Position,
+            RouteDestination = gatewayDestination.Position,
             Error = planOk and "No qualifying gateway route" or tostring(routePlan),
         }
         return false, self.LastFarmGatewayPlanCheck.Error
@@ -1142,9 +1265,12 @@ function TeleportFeature:MoveFarmTo(destination, options)
         StartedAt = now,
         Label = options.Label or "Farm target",
         Destination = destination,
+        GatewayDestination = gatewayDestination,
+        GatewayPlanLabel = gatewayPlanLabel,
+        SpecialTravelRoute = specialTravelRoute,
         RoutePlan = routePlan,
         RouteStartPosition = root.Position,
-        RoutePlanDestination = destination.Position,
+        RoutePlanDestination = gatewayDestination.Position,
         IsCurrent = isCurrent,
         Speed = tonumber(options.Speed) or 190,
         Threshold = tonumber(options.Threshold) or 8,

@@ -75,12 +75,33 @@ function MovementService:_GetRoute(destination, currentPosition)
     local destinationDistance = (destination.Position - SUBMERGED_REFERENCE).Magnitude
     local currentDistance = (currentPosition - SUBMERGED_REFERENCE).Magnitude
     if destinationDistance <= 3000 and currentDistance > 3000 then
-        return { Name = "Submerged", Stage = SUBMERGED_STAGING }
+        return {
+            Name = "Submerged",
+            Stage = SUBMERGED_STAGING,
+            ArrivalReference = SUBMERGED_REFERENCE,
+            ArrivalRadius = 3000,
+        }
     end
     if destinationDistance > 3000 and currentDistance <= 3000 then
         return { Name = "Tiki", Stage = TIKI_STAGING }
     end
     return nil
+end
+
+function MovementService:GetSpecialTravelRoute(destination, currentPosition)
+    return self:_GetRoute(destination, currentPosition)
+end
+
+function MovementService:RequestSpecialTravelRoute(route, isCurrent)
+    if type(route) ~= "table" or (route.Name ~= "Submerged" and route.Name ~= "Tiki") then
+        return false, "Unsupported special travel route"
+    end
+    if type(isCurrent) ~= "function" then
+        isCurrent = function()
+            return true
+        end
+    end
+    return self:_RequestRoute(route, isCurrent, self.RouteGeneration)
 end
 
 function MovementService:_RestoreCollision(active)

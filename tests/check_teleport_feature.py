@@ -158,7 +158,8 @@ require(
     "local MAX_STALL_RETRIES = 2" in FEATURE
     and "request.StallRetries = retries" in FEATURE
     and "task.wait(STALL_RETRY_DELAY)" in FEATURE
-    and "self:_MoveAndWait(request, character, request.Destination)" in FEATURE
+    and "destination = destination or request.Destination" in FEATURE
+    and "self:_MoveAndWait(request, character, destination)" in FEATURE
     and "Travel stalled after " in FEATURE,
     "manual travel must retry a transient movement stall a bounded number of times",
 )
@@ -372,12 +373,32 @@ require(
     and "local attemptedRoutes = {}" in FEATURE
     and "local visitedGatewayPositions = {}" in FEATURE
     and "self.GatewayService.FindPlan" in FEATURE
-    and "currentRoot.Position,\n            request.Label,\n            attemptedRoutes" in FEATURE
+    and "gatewayDestination.Position,\n            currentRoot.Position,\n            request.GatewayPlanLabel or request.Label,\n            attemptedRoutes" in FEATURE
     and "visitedGatewayPositions" in FEATURE
     and "request.RoutePlan = nil" in FEATURE
     and "checking another route" in FEATURE
-    and "self:_RunDirectTravel(request, character, false)" in FEATURE,
+    and "self:_RunDirectTravel(request, character, false, request.Destination, true)" in FEATURE,
     "multi-hop travel must replan from each confirmed gateway arrival or failure and avoid repeating legs",
+)
+movement_service = (
+    ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua"
+).read_text(encoding="utf-8")
+require(
+    "function MovementService:GetSpecialTravelRoute(destination, currentPosition)" in movement_service
+    and 'Name = "Submerged"' in movement_service
+    and "ArrivalReference = SUBMERGED_REFERENCE" in movement_service
+    and "function MovementService:RequestSpecialTravelRoute(route, isCurrent)" in movement_service
+    and 'FindFirstChild("RF/SubmarineWorkerSpeak")' in movement_service
+    and 'remote:InvokeServer("TravelToSubmergedIsland")' in movement_service
+    and '"SetLastSpawnPoint", "SubmergedIsland"' in movement_service
+    and "self.MovementService:GetSpecialTravelRoute(" in FEATURE
+    and "Tiki staging for Submerged" in FEATURE
+    and "RoutePlanDestination = gatewayDestination.Position" in FEATURE
+    and "gatewayDestination.Position,\n        root.Position,\n        gatewayPlanLabel" in FEATURE
+    and "self.MovementService:RequestSpecialTravelRoute(" in FEATURE
+    and "Submerged transport did not confirm arrival" in FEATURE
+    and "self:_RunDirectTravel(request, character, false, request.Destination, true)" in FEATURE,
+    "Submerged farm travel must plan map gateways to Tiki, use the Submarine Worker, confirm arrival, then continue to the target",
 )
 require(
     "ROUTE_LOCATION_REPEAT_DISTANCE = 500" in GATEWAYS
@@ -400,7 +421,7 @@ require(
     and "self.GatewayService.FindPlan" in farm_navigation
     and "RoutePlan = routePlan" in farm_navigation
     and "RouteStartPosition = root.Position" in farm_navigation
-    and "RoutePlanDestination = destination.Position" in farm_navigation
+    and "RoutePlanDestination = gatewayDestination.Position" in farm_navigation
     and "task.spawn(function()" in farm_navigation
     and "pcall(self._RunTravel, self, request, character)" in farm_navigation
     and "teleportFeature:MoveFarmTo(destination" in farm_move
