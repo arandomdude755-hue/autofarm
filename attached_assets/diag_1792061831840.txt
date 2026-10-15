@@ -1,0 +1,339 @@
+===== [StatusReport] REPORT BEGIN =====
+Sea: Third Sea
+Level: 2800
+Race: Ghoul
+Fragments: 44,749
+Money: $53,803,485
+Auto Farm: Off
+Farm Mastery: Off
+Farm Materials: Off
+Quest: Unknown
+Quest title: Unavailable
+Quest target: Unavailable
+Quest progress: Unavailable
+Quest reader: Quest service unavailable
+Quest dialogue: Unavailable
+Server age: 4h 34m 41s
+Chalice / Fist status: Held: God's Chalice by kylo140713 (origin unknown)
+Moon: Next Full Moon in ~2h 34m real time (estimate)
+Leviathan Spy: I DONT KNOW
+Cake Prince mobs: 284 enemies left
+Elite Hunter: Not spawned
+Mirage Island: Not spawned
+Prehistoric Island: Not spawned
+Frozen Dimension: Not spawned
+Tiki eyes: 0 / 4 cleared
+Players: 8 / 12
+Place ID: 100117331123089
+Server Job ID: 6f95542c-766c-47ec-8873-584a2fea809a
+
+===== [Clock / Legendary Item Evidence] =====
+TimeIn marker: Trial of the Machine; value=1792045142.911
+TimeIn marker: Trial of the King; value=1792045142.911
+TimeIn marker: Trial of Water; value=1792045142.911
+TimeIn marker: Sealed Cavern; value=1792045142.911
+TimeIn marker: Sealed Cavern; value=1792045142.911
+TimeIn marker: Sharkman Arena; value=1792045142.911
+TimeIn marker: Submerged Island; value=1792045142.911
+TimeIn marker: Trial of Flames; value=1792045142.911
+TimeIn marker: Hydra Island; value=1792045142.911
+TimeIn marker: Hell Dimension; value=1792045142.910
+TimeIn marker: Beautiful Pirate Domain; value=1792045142.910
+TimeIn marker: Mansion; value=1792045142.910
+TimeIn marker: l'Église de Prophétie; value=1792045142.911
+TimeIn marker: Port Town; value=1792045142.910
+TimeIn marker: Sea; value=1792045142.910
+TimeIn marker: Ancient Clock; value=1792045142.909
+Oldest TimeIn marker: Workspace._WorldOrigin.Locations.Ancient Clock; TimeIn=1792045142.909; total markers=34
+GetServerTimeNow: 1792061624.907
+tick() - 25200: 1792065132.659
+Selected elapsed-time clock: Workspace:GetServerTimeNow()
+Server-clock elapsed seconds: 16481.998
+BNN-clock elapsed seconds: 19989.750
+Server-clock next 4-hour boundary: 03:25:18
+BNN-clock next 4-hour boundary: 02:26:50
+Workspace.DistributedGameTime: 37.108
+TimeIn marker list truncated after 16
+
+===== [Legendary Item Observation] =====
+Live summon observed in Workspace.Enemies: none
+Held item observed: God's Chalice; holder=kylo140713; container=Character; acquisition source=unknown
+Possession does not establish chest origin; it may come from a chest, Elite Hunter, or another source.
+The four-hour countdown is a TimeIn-based estimate; it is not evidence that an item is absent or available.
+
+===== [Island / Event Detection Evidence] =====
+Workspace.Map: present; class=Folder; path=Workspace.Map
+Workspace._WorldOrigin.Locations: present; class=Model; path=Workspace._WorldOrigin.Locations
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.MiniSky.IslandModel
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.Turtle.IslandModel
+Workspace.Map matching node: IslandChunks; class=Model; path=Workspace.Map.Turtle.IslandModel.IslandChunks
+Workspace.Map matching node: bloxfruits_island2_Cylinder.103; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.bloxfruits_island2_Cylinder.103
+Workspace.Map matching node: bloxfruits_island2_Cylinder.104; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.bloxfruits_island2_Cylinder.104
+Workspace.Map matching node: snowisland_Cylinder.080; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.080
+Workspace.Map matching node: snowisland_Cylinder.084; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.084
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.083; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.083
+Workspace.Map matching node: snowisland_Cylinder.082; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.082
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.081
+Workspace.Map matching node: bloxfruits_island2_Cylinder.098; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.bloxfruits_island2_Cylinder.098
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.080; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.080
+Workspace.Map matching node: snowisland_Cylinder.084; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.084
+Workspace.Map matching node: snowisland_Cylinder.080; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.080
+Workspace.Map matching node: snowisland_Cylinder.084; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.084
+Workspace.Map matching node: snowisland_Cylinder.084; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.084
+Workspace.Map matching node: snowisland_Cylinder.080; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.080
+Workspace.Map matching node: snowisland_Cylinder.080; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.080
+Workspace.Map matching node: snowisland_Cylinder.084; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.A.Model.snowisland_Cylinder.084
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.C.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.074; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.C.snowisland_Cylinder.074
+Workspace.Map descendants scanned=5000/20063; relevant name matches=54 (list capped at 24)
+World-origin location names (up to 35 of 35):
+Location: Trial of the Machine; TimeIn=1792045142.911; CFrame attribute=present
+Location: Trial of the King; TimeIn=1792045142.911; CFrame attribute=present
+Location: Trial of Water; TimeIn=1792045142.911; CFrame attribute=present
+Location: Sealed Cavern; TimeIn=1792045142.911; CFrame attribute=present
+Location: Sealed Cavern; TimeIn=1792045142.911; CFrame attribute=present
+Location: Sharkman Arena; TimeIn=1792045142.911; CFrame attribute=present
+Location: Submerged Island; TimeIn=1792045142.911; CFrame attribute=present
+Location: Trial of Flames; TimeIn=1792045142.911; CFrame attribute=present
+Location: Hydra Island; TimeIn=1792045142.911; CFrame attribute=present
+Location: Hell Dimension; TimeIn=1792045142.910; CFrame attribute=present
+Location: Beautiful Pirate Domain; TimeIn=1792045142.910; CFrame attribute=present
+Location: Mansion; TimeIn=1792045142.910; CFrame attribute=present
+Location: l'Église de Prophétie; TimeIn=1792045142.911; CFrame attribute=present
+Location: Port Town; TimeIn=1792045142.910; CFrame attribute=present
+Location: Sea; TimeIn=1792045142.910; CFrame attribute=present
+Location: Ancient Clock; TimeIn=1792045142.909; CFrame attribute=present
+Location: Dragon Dojo; TimeIn=1792045142.910; CFrame attribute=present
+Location: Castle on the Sea; TimeIn=1792045142.910; CFrame attribute=present
+Location: Secret Temple; TimeIn=1792045142.910; CFrame attribute=present
+Location: Sea of Treats; TimeIn=1792045142.910; CFrame attribute=present
+Location: Sea of Treats; TimeIn=1792045142.910; CFrame attribute=present
+Location: Sea of Treats; TimeIn=1792045142.910; CFrame attribute=present
+Location: North Pole; TimeIn=1792045142.910; CFrame attribute=present
+Location: Heavenly Dimension; TimeIn=1792045142.910; CFrame attribute=present
+Location: Haunted Castle; TimeIn=1792045142.910; CFrame attribute=present
+Location: Tiki Outpost; TimeIn=1792045142.911; CFrame attribute=present
+Location: Trial of Carnage; TimeIn=1792045142.911; CFrame attribute=present
+Location: Trial of Speed; TimeIn=1792045142.911; CFrame attribute=present
+Location: Trial of Strength; TimeIn=1792045142.911; CFrame attribute=present
+Location: Great Tree; TimeIn=1792045142.910; CFrame attribute=present
+Location: Friendly Arena; TimeIn=1792045142.910; CFrame attribute=present
+Location: Floating Turtle; TimeIn=1792045142.910; CFrame attribute=present
+Location: Temple of Time; TimeIn=1792045142.911; CFrame attribute=present
+Location: Island 1; TimeIn=unavailable; CFrame attribute=absent
+Location: Sea Beast; TimeIn=1792061617.269; CFrame attribute=present
+Tiki Outpost Workspace.Map marker: not present in this client view
+Tiki Outpost world-origin marker: Workspace._WorldOrigin.Locations.Tiki Outpost; TimeIn=1792045142.911; CFrame attribute=present
+Prehistoric Island Workspace.Map marker: not present in this client view
+Mirage Island Workspace.Map marker: not present in this client view
+Frozen Dimension Workspace.Map marker: not present in this client view
+Tiki IslandModel: not present in this client view
+Tiki Eye1: not present in this client view
+Tiki Eye2: not present in this client view
+Tiki Eye3: not present in this client view
+Tiki Eye4: not present in this client view
+PlayerGui.Main.TopHUDList.PrehistoricRaidTimer.Visible: false
+PlayerGui.Main.TopHUDList.RaidTimer.Visible: false
+LocalPlayer CurrentLocation: Mansion
+LocalPlayer LastSpawnPoint: BigMansion
+Event HUD element: PrehistoricRaidTimer; Visible=false; path=Players.Zixuangamer755.PlayerGui.Main.TopHUDList.PrehistoricRaidTimer
+Event HUD element: PrehistoricRelicHealth; Visible=false; path=Players.Zixuangamer755.PlayerGui.Main.TopHUDList.PrehistoricRelicHealth
+
+===== [Unparented Instance Check — Manual Report Only] =====
+Unparented instances scanned: 5000 / 51382; relevant name matches=40
+Unparented-instance scan was capped at 5000
+Unparented match: Meshes/tikioptset1_Cube.002; class=MeshPart
+Unparented match: Meshes/tikioptset2_tikiopt.032; class=MeshPart
+Unparented match: Meshes/tikihouseprops_Cylinder; class=MeshPart
+Unparented match: Meshes/tikihousefix; class=MeshPart
+Unparented match: Meshes/tikioptset2_Cylinder.003; class=MeshPart
+Unparented match: Meshes/tikipoorhouses_Cube.001; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.024; class=MeshPart
+Unparented match: Meshes/tikihouseprops_Cube.019; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.025; class=MeshPart
+Unparented match: Meshes/tikicrystals_Cube.053; class=MeshPart
+Unparented match: Meshes/tikipoorhouses_Cube.001; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.024; class=MeshPart
+Unparented match: tikishelf; class=Model
+Unparented match: tikishelf; class=Model
+Unparented match: Meshes/tikibase_tikiopt.009; class=MeshPart
+Unparented match: Meshes/tikioptset2_tikiopt.034; class=MeshPart
+Unparented match: Meshes/tikioptset1_tikiopt.010; class=MeshPart
+Unparented match: Meshes/tikihouseprops_Cylinder; class=MeshPart
+Unparented match: Meshes/tikihouseprops_Cube.014; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.024; class=MeshPart
+Unparented match list truncated after 20
+===== [StatusReport] REPORT END =====
+
+
+===== [StatusReport] REPORT BEGIN =====
+Sea: Third Sea
+Level: 2800
+Race: Ghoul
+Fragments: 44,749
+Money: $53,803,485
+Auto Farm: Off
+Farm Mastery: Off
+Farm Materials: Off
+Quest: Unknown
+Quest title: Unavailable
+Quest target: Unavailable
+Quest progress: Unavailable
+Quest reader: Quest service unavailable
+Quest dialogue: Unavailable
+Server age: 29h 14m 22s
+Chalice / Fist status: No held Chalice/Fist or active summon observed; next four-hour boundary in 02:45:37 (estimate)
+Moon: Next Full Moon in calibrating game-clock speed
+Leviathan Spy: I DONT KNOW
+Cake Prince mobs: 478 enemies left
+Elite Hunter: Not spawned (template loaded: Diablo)
+Mirage Island: Not spawned
+Prehistoric Island: Not spawned
+Frozen Dimension: Not spawned
+Tiki eyes: 2 / 4 cleared
+Players: 8 / 12
+Place ID: 100117331123089
+Server Job ID: 989c9483-d9b0-4766-b4db-9148daf1f899
+
+===== [Clock / Legendary Item Evidence] =====
+TimeIn marker: Port Town; value=1791956292.259
+TimeIn marker: Sea; value=1791956292.259
+TimeIn marker: North Pole; value=1791956292.259
+TimeIn marker: Sea of Treats; value=1791956292.260
+TimeIn marker: Sea of Treats; value=1791956292.260
+TimeIn marker: Sea of Treats; value=1791956292.260
+TimeIn marker: Secret Temple; value=1791956292.260
+TimeIn marker: Temple of Time; value=1791956292.260
+TimeIn marker: Trial of Carnage; value=1791956292.260
+TimeIn marker: Trial of Speed; value=1791956292.260
+TimeIn marker: Trial of Strength; value=1791956292.260
+TimeIn marker: Trial of Water; value=1791956292.260
+TimeIn marker: Trial of the King; value=1791956292.260
+TimeIn marker: Trial of the Machine; value=1791956292.260
+TimeIn marker: l'Église de Prophétie; value=1791956292.260
+TimeIn marker: Tiki Outpost; value=1791956292.260
+Oldest TimeIn marker: Workspace._WorldOrigin.Locations.Ancient Clock; TimeIn=1791956292.259; total markers=33
+GetServerTimeNow: 1792061555.201
+tick() - 25200: 1792065062.945
+Selected elapsed-time clock: Workspace:GetServerTimeNow()
+Server-clock elapsed seconds: 105262.943
+BNN-clock elapsed seconds: 108770.687
+Server-clock next 4-hour boundary: 02:45:37
+BNN-clock next 4-hour boundary: 01:47:09
+Workspace.DistributedGameTime: 17.083
+TimeIn marker list truncated after 16
+
+===== [Legendary Item Observation] =====
+Live summon observed in Workspace.Enemies: none
+Held Chalice/Fist scan: none found in visible player Character/Backpack containers
+Possession does not establish chest origin; it may come from a chest, Elite Hunter, or another source.
+The four-hour countdown is a TimeIn-based estimate; it is not evidence that an item is absent or available.
+
+===== [Island / Event Detection Evidence] =====
+Workspace.Map: present; class=Folder; path=Workspace.Map
+Workspace._WorldOrigin.Locations: present; class=Model; path=Workspace._WorldOrigin.Locations
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.Haunted Castle.IslandModel
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.MiniSky.IslandModel
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.Port.IslandModel
+Workspace.Map matching node: Meshes/fishman_islands_Plane.003; class=MeshPart; path=Workspace.Map.Port.IslandModel.Meshes/fishman_islands_Plane.003
+Workspace.Map matching node: Meshes/snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Port.IslandModel.Meshes/snowisland_Cylinder.081
+Workspace.Map matching node: Meshes/snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Port.IslandModel.Meshes/snowisland_Cylinder.081
+Workspace.Map matching node: Meshes/snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Port.IslandModel.Meshes/snowisland_Cylinder.081
+Workspace.Map matching node: Meshes/fishman_islands_Plane.003; class=MeshPart; path=Workspace.Map.Port.IslandModel.Meshes/fishman_islands_Plane.003
+Workspace.Map matching node: TikiOutpost; class=Model; path=Workspace.Map.TikiOutpost
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.TikiOutpost.IslandModel
+Workspace.Map matching node: Eye1; class=Part; path=Workspace.Map.TikiOutpost.IslandModel.Eye1
+Workspace.Map matching node: Meshes/tikibasemesh_Plane.005; class=MeshPart; path=Workspace.Map.TikiOutpost.IslandModel.Model.Meshes/tikibasemesh_Plane.005
+Workspace.Map matching node: Meshes/tikibasemesh_Plane.002; class=MeshPart; path=Workspace.Map.TikiOutpost.IslandModel.Model.Meshes/tikibasemesh_Plane.002
+Workspace.Map matching node: Meshes/tikicrystals_Cube.053; class=MeshPart; path=Workspace.Map.TikiOutpost.IslandModel.Model.Meshes/tikicrystals_Cube.053
+Workspace.Map matching node: Eye2; class=Part; path=Workspace.Map.TikiOutpost.IslandModel.Eye2
+Workspace.Map matching node: tikiopt.048; class=MeshPart; path=Workspace.Map.TikiOutpost.subshopfloor.tikiopt.048
+Workspace.Map matching node: IslandModel; class=Model; path=Workspace.Map.Turtle.IslandModel
+Workspace.Map matching node: IslandChunks; class=Model; path=Workspace.Map.Turtle.IslandModel.IslandChunks
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.B.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.B.Model.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.B.Model.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.B.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.B.snowisland_Cylinder.081
+Workspace.Map matching node: snowisland_Cylinder.081; class=MeshPart; path=Workspace.Map.Turtle.IslandModel.IslandChunks.D.snowisland_Cylinder.081
+Workspace.Map descendants scanned=5000/21777; relevant name matches=30 (list capped at 24)
+World-origin location names (up to 34 of 34):
+Location: Port Town; TimeIn=1791956292.259; CFrame attribute=present
+Location: Sea; TimeIn=1791956292.259; CFrame attribute=present
+Location: North Pole; TimeIn=1791956292.259; CFrame attribute=present
+Location: Sea of Treats; TimeIn=1791956292.260; CFrame attribute=present
+Location: Sea of Treats; TimeIn=1791956292.260; CFrame attribute=present
+Location: Sea of Treats; TimeIn=1791956292.260; CFrame attribute=present
+Location: Secret Temple; TimeIn=1791956292.260; CFrame attribute=present
+Location: Temple of Time; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of Carnage; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of Speed; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of Strength; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of Water; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of the King; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of the Machine; TimeIn=1791956292.260; CFrame attribute=present
+Location: l'Église de Prophétie; TimeIn=1791956292.260; CFrame attribute=present
+Location: Tiki Outpost; TimeIn=1791956292.260; CFrame attribute=present
+Location: Hydra Island; TimeIn=1791956292.260; CFrame attribute=present
+Location: Trial of Flames; TimeIn=1791956292.261; CFrame attribute=present
+Location: Submerged Island; TimeIn=1791956292.261; CFrame attribute=present
+Location: Sharkman Arena; TimeIn=1791956292.261; CFrame attribute=present
+Location: Sealed Cavern; TimeIn=1791956292.261; CFrame attribute=present
+Location: Sealed Cavern; TimeIn=1791956292.261; CFrame attribute=present
+Location: Friendly Arena; TimeIn=1791956292.259; CFrame attribute=present
+Location: Floating Turtle; TimeIn=1791956292.259; CFrame attribute=present
+Location: Castle on the Sea; TimeIn=1791956292.259; CFrame attribute=present
+Location: Dragon Dojo; TimeIn=1791956292.259; CFrame attribute=present
+Location: Ancient Clock; TimeIn=1791956292.259; CFrame attribute=present
+Location: Heavenly Dimension; TimeIn=1791956292.259; CFrame attribute=present
+Location: Hell Dimension; TimeIn=1791956292.259; CFrame attribute=present
+Location: Great Tree; TimeIn=1791956292.259; CFrame attribute=present
+Location: Haunted Castle; TimeIn=1791956292.259; CFrame attribute=present
+Location: Mansion; TimeIn=1791956292.259; CFrame attribute=present
+Location: Beautiful Pirate Domain; TimeIn=1791956292.259; CFrame attribute=present
+Location: Island 1; TimeIn=unavailable; CFrame attribute=absent
+Tiki Outpost Workspace.Map marker: present; class=Model; path=Workspace.Map.TikiOutpost
+Tiki Outpost world-origin marker: Workspace._WorldOrigin.Locations.Tiki Outpost; TimeIn=1791956292.260; CFrame attribute=present
+Prehistoric Island Workspace.Map marker: not present in this client view
+Mirage Island Workspace.Map marker: not present in this client view
+Frozen Dimension Workspace.Map marker: not present in this client view
+Tiki IslandModel: present; class=Model; path=Workspace.Map.TikiOutpost.IslandModel
+Tiki Eye1: present; Transparency=1.000; path=Workspace.Map.TikiOutpost.IslandModel.Eye1
+Tiki Eye2: present; Transparency=1.000; path=Workspace.Map.TikiOutpost.IslandModel.Eye2
+Tiki Eye3: not present in this client view
+Tiki Eye4: not present in this client view
+PlayerGui.Main.TopHUDList.PrehistoricRaidTimer.Visible: false
+PlayerGui.Main.TopHUDList.RaidTimer.Visible: false
+LocalPlayer CurrentLocation: Dragon Dojo
+LocalPlayer LastSpawnPoint: Hydra1
+Event HUD element: PrehistoricRaidTimer; Visible=false; path=Players.Zixuangamer755.PlayerGui.Main.TopHUDList.PrehistoricRaidTimer
+Event HUD element: PrehistoricRelicHealth; Visible=false; path=Players.Zixuangamer755.PlayerGui.Main.TopHUDList.PrehistoricRelicHealth
+
+===== [Unparented Instance Check — Manual Report Only] =====
+Unparented instances scanned: 5000 / 51675; relevant name matches=54
+Unparented-instance scan was capped at 5000
+Unparented match: tikishelf; class=Model
+Unparented match: Meshes/tikioptset2_tikiopt.023; class=MeshPart
+Unparented match: Meshes/tikioptset2_tikiopt.039; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.024; class=MeshPart
+Unparented match: Meshes/tikicrystals_Cube.053; class=MeshPart
+Unparented match: Meshes/tikioptset1_Cube.002; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.025; class=MeshPart
+Unparented match: Meshes/tikioptset2_tikiopt.023; class=MeshPart
+Unparented match: Tikipoorhouse1; class=Model
+Unparented match: Tikipoorhouse1; class=Model
+Unparented match: Meshes/tikioptset2_tikiopt.027; class=MeshPart
+Unparented match: Meshes/tikihouseprops_Cube.015; class=MeshPart
+Unparented match: Meshes/tikioptset2_tikiopt.038; class=MeshPart
+Unparented match: tikishelf; class=Model
+Unparented match: Meshes/tikioptset1_Cube.002; class=MeshPart
+Unparented match: Meshes/tikiwindow_Cube.025; class=MeshPart
+Unparented match: Meshes/tikihouseprops_Cube.020; class=MeshPart
+Unparented match: Meshes/tikipoorhouses_Cube.001; class=MeshPart
+Unparented match: Meshes/tikibase_tikiopt.009; class=MeshPart
+Unparented match: Meshes/tikipoorhouses_Cube; class=MeshPart
+Unparented match list truncated after 20
+===== [StatusReport] REPORT END =====
