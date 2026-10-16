@@ -107,6 +107,13 @@ local function farmMaterialsForCurrentSea(compatibility)
     end
     return available
 end
+local function ownedBloxFruitOptions(compatibility)
+    if not compatibility or type(compatibility.GetOwnedBloxFruitOptions) ~= "function" then
+        return {}
+    end
+    local ok, options = pcall(compatibility.GetOwnedBloxFruitOptions, compatibility)
+    return ok and type(options) == "table" and options or {}
+end
 local travelIslandDestinations = {
     [1] = {
         { Name = "Start Island", Position = Vector3.new(1071, 16, 1427) },
@@ -407,6 +414,14 @@ local Config = {
     TravelSettings = {
         Island = nil,
         Npc = nil,
+        Sea = nil,
+    },
+    ProgressionSettings = {
+        AutoUnlockSea2 = false,
+        AutoUnlockSea3 = false,
+        TrevorFruit = nil,
+        ResumeMainFarmAfterSeaUnlock = false,
+        ResumeSea = nil,
     },
     TravelDestinations = travelIslandDestinations,
     IsTravelNpcPositionInCurrentSea = isTravelNpcPositionInCurrentSea,
@@ -586,6 +601,7 @@ local Config = {
         Farm = {
             { Label = "Main Farming", Page = "Farm" },
             { Label = "Stack Farming", Page = "StackFarming" },
+            { Label = "Farming Other", Page = "FarmOther" },
         },
         Status = {
             { Label = "Event Status", Page = "EventStatus" },
@@ -855,6 +871,51 @@ local Config = {
                 },
             },
         },
+        FarmOther = {
+            Title = "Farming Other",
+            Controls = {
+                {
+                    Kind = "sectionHeader",
+                    Label = "Sea progression",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto unlock Sea 2",
+                    Action = "progression.sea2.enabled",
+                    Setting = "AutoUnlockSea2",
+                    SettingsKey = "ProgressionSettings",
+                    RequiredSea = 1,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto unlock Sea 3",
+                    Action = "progression.sea3.enabled",
+                    Setting = "AutoUnlockSea3",
+                    SettingsKey = "ProgressionSettings",
+                    RequiredSea = 2,
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Fruit to offer Trevor",
+                    Action = "progression.trevor.fruit.select",
+                    Setting = "TrevorFruit",
+                    SettingsKey = "ProgressionSettings",
+                    OptionsProvider = ownedBloxFruitOptions,
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose stored fruit",
+                    EmptyOptionsLabel = "No eligible stored fruit available",
+                    Description = "Selecting a fruit does not use it.",
+                    RequiredSea = 2,
+                },
+                {
+                    Kind = "button",
+                    Label = "Offer selected fruit to Trevor (consumes it)",
+                    Action = "progression.trevor.offerFruit",
+                    RequiredSea = 2,
+                    Description = "Press to confirm spending the selected fruit.",
+                },
+            },
+        },
         Player = {
             Controls = {
                 {
@@ -913,6 +974,25 @@ local Config = {
                     Kind = "button",
                     Label = "Copy NPC availability report",
                     Action = "teleport.npc.report",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Sea travel",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Sea",
+                    Action = "teleport.sea.select",
+                    Setting = "Sea",
+                    SettingsKey = "TravelSettings",
+                    Options = { "First Sea", "Second Sea", "Third Sea" },
+                    AllowNoSelection = true,
+                    PlaceholderLabel = "Choose sea",
+                },
+                {
+                    Kind = "featureToggle",
+                    Label = "Travel to sea",
+                    Action = "teleport.sea",
                 },
             },
         },

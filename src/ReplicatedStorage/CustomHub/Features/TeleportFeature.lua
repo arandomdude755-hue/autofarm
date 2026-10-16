@@ -1585,6 +1585,122 @@ function TeleportFeature:_RetargetActiveIslandTravel()
     return self:_StartTravel(destination, island.Name, request.Action)
 end
 
+function TeleportFeature:_StartSeaTravel(destinationSea)
+    local destinationIndex = ({
+        ["First Sea"] = 1,
+        ["Second Sea"] = 2,
+        ["Third Sea"] = 3,
+    })[destinationSea]
+    if not destinationIndex then
+        self:_SetFeatureEnabled("teleport.sea", false)
+        self:_SetStatus("Choose a valid sea before starting travel", "warning")
+        return false
+    end
+    local currentIndex = currentSeaIndex(self.Context.Compatibility)
+    if currentIndex == destinationIndex then
+        self:_SetFeatureEnabled("teleport.sea", false)
+        self:_SetStatus("You are already in " .. destinationSea, "info")
+        return true
+    end
+    local mainFarm = self.Context.MainFarm
+    if mainFarm and mainFarm.MainFarmEnabled == true then
+        self:_SetFeatureEnabled("teleport.sea", false)
+        self:_SetStatus(
+            "Turn off Main Farming before changing seas",
+            "warning",
+            "Turn off Main Farming before traveling to another sea."
+        )
+        return false
+    end
+    if self.ActiveTravel then
+        self:_SetFeatureEnabled("teleport.sea", false)
+        self:_SetStatus(
+            "Finish or turn off the current travel before changing seas",
+            "warning"
+        )
+        return false
+    end
+
+    local coordinator = self.Context.TaskCoordinator
+    local lease
+    if coordinator then
+        local blocker
+        lease, blocker = coordinator:TryAcquire("ManualSeaTravel", "Sea travel", "Background")
+        if not lease then
+            self:_SetFeatureEnabled("teleport.sea", false)
+            self:_SetStatus(
+                "Sea travel is waiting for " ..
+                    tostring(blocker and blocker.Label or "the current task") .. " to finish",
+                "warning"
+            )
+            return false
+        end
+    end
+
+    local remoteNames = {
+        [1] = "TravelMain",
+        [2] = "TravelDressrosa",
+        [3] = "TravelZou",
+    }
+    local remoteName = remoteNames[destinationIndex]
+    local commF = self.Context.Compatibility:GetCommF()
+    if not commF then
+        if coordinator and lease then coordinator:Release(lease) end
+        self:_SetFeatureEnabled("teleport.sea", false)
+        self:_SetStatus("Sea travel is unavailable right now", "error")
+        return false
+    end
+
+    self.SeaTravelGeneration = (self.SeaTravelGeneration or 0) + 1
+    local generation = self.SeaTravelGeneration
+    self.ActiveSeaTravel = {
+        Generation = generation,
+        Destination = destinationSea,
+        Lease = lease,
+    }
+    self:_SetFeatureEnabled("teleport.sea", true)
+    self:_SetStatus("Requesting travel to " .. destinationSea, "info")
+
+    task.spawn(function()
+        local requestOk, requestResult = pcall(function()
+            return commF:InvokeServer(remoteName)
+        end)
+        if generation ~= self.SeaTravelGeneration then
+            return
+        end
+        if not requestOk then
+            self.ActiveSeaTravel = nil
+            if coordinator and lease then coordinator:Release(lease) end
+            self:_SetFeatureEnabled("teleport.sea", false)
+            self:_SetStatus("Sea travel request failed: " .. tostring(requestResult), "warning")
+            return
+        end
+
+        local deadline = os.clock() + 12
+        while generation == self.SeaTravelGeneration and os.clock() < deadline do
+            if currentSeaIndex(self.Context.Compatibility) == destinationIndex then
+                self.ActiveSeaTravel = nil
+                if coordinator and lease then coordinator:Release(lease) end
+                self:_SetFeatureEnabled("teleport.sea", false)
+                self:_SetStatus("Arrived in " .. destinationSea, "success")
+                return
+            end
+            task.wait(0.25)
+        end
+        if generation == self.SeaTravelGeneration then
+            self.ActiveSeaTravel = nil
+            if coordinator and lease then coordinator:Release(lease) end
+            self:_SetFeatureEnabled("teleport.sea", false)
+            self:_SetStatus(
+                "The game did not move you to " .. destinationSea
+                    .. ". You may not have unlocked it yet.",
+                "warning"
+            )
+        end
+    end)
+    return true
+end
+
 function TeleportFeature:Handle(actionId, payload)
     local config = self.Context and self.Context.Config
     if actionId == "teleport.npc.report" then
@@ -1624,6 +1740,28 @@ function TeleportFeature:Handle(actionId, payload)
             or {}
         self:_SelectSetting("Npc", payload, options)
         return true
+    elseif actionId == "teleport.sea.select" then
+        self:_SelectSetting(
+            "Sea",
+            payload,
+            { "First Sea", "Second Sea", "Third Sea" }
+        )
+        return true
+    elseif actionId == "teleport.sea" then
+        if payload ~= true then
+            self.SeaTravelGeneration = (self.SeaTravelGeneration or 0) + 1
+            local active = self.ActiveSeaTravel
+            self.ActiveSeaTravel = nil
+            local coordinator = self.Context.TaskCoordinator
+            if active and coordinator and active.Lease then
+                coordinator:Release(active.Lease)
+            end
+            self:_SetFeatureEnabled("teleport.sea", false)
+            self:_SetStatus("Sea travel stopped", "info")
+            return true
+        end
+        local settings = config and config.TravelSettings
+        return self:_StartSeaTravel(settings and settings.Sea)
     elseif actionId == "teleport.island" or actionId == "teleport.npc" then
         if payload ~= true then
             if self.ActiveTravel and self.ActiveTravel.Action == actionId then
@@ -1665,6 +1803,8 @@ function TeleportFeature:Initialize(context)
     self.Generation = 0
     self.FarmTravelGeneration = 0
     self.ActiveTravel = nil
+    self.ActiveSeaTravel = nil
+    self.SeaTravelGeneration = (self.SeaTravelGeneration or 0) + 1
     self.ActiveFarmTravel = nil
     self.LastFarmGatewayPlanCheck = nil
     self.MovementService = context.MovementService
@@ -1686,6 +1826,13 @@ function TeleportFeature:Initialize(context)
 end
 
 function TeleportFeature:Cleanup()
+    self.SeaTravelGeneration = (self.SeaTravelGeneration or 0) + 1
+    local seaTravel = self.ActiveSeaTravel
+    self.ActiveSeaTravel = nil
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and seaTravel and seaTravel.Lease then
+        coordinator:Release(seaTravel.Lease)
+    end
     self:CancelFarmTravel()
     self:Cancel("Travel cancelled during hub cleanup.")
     if self.MovementService then

@@ -37,6 +37,10 @@ local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
 local STACK_TASK_LOAD_TIMEOUT = 8
+local SEA_PROGRESS_POLL_INTERVAL = 1
+local SEA_PROGRESS_MOVE_THRESHOLD = 8
+local MILITARY_DETECTIVE_POSITION = CFrame.new(4852, 6, 719)
+local RIP_INDRA_ISLAND_POSITION = CFrame.new(-1926.8, 12.2, 1739.8)
 
 local STACK_TASK_SEA_REQUIREMENTS = {
     CakePrince = 3,
@@ -254,6 +258,676 @@ end
 
 function MainFarm:_IsCurrent(session)
     return self.Running and self.Session == session
+end
+
+function MainFarm:_GetSeaIndex()
+    local compatibility = self.Context and self.Context.Compatibility
+    if not compatibility then
+        return nil
+    end
+    for index, methodName in ipairs({ "IsFirstSea", "IsSecondSea", "IsThirdSea" }) do
+        local check = compatibility[methodName]
+        if type(check) == "function" then
+            local ok, matches = pcall(check, compatibility)
+            if ok and matches == true then
+                return index
+            end
+        end
+    end
+    return nil
+end
+
+function MainFarm:_GetProgressionSettings()
+    local config = self.Context and self.Context.Config
+    return config and config.ProgressionSettings
+end
+
+function MainFarm:_SaveProgressionSettings()
+    local persistence = self.Context and self.Context.SettingsPersistence
+    if persistence and type(persistence.ScheduleSave) == "function" then
+        persistence:ScheduleSave()
+    end
+end
+
+function MainFarm:_ProgressRemote(name, ...)
+    self.ProgressRemoteCache = self.ProgressRemoteCache or {}
+    local arguments = table.pack(...)
+    local keyParts = { name }
+    for index = 1, arguments.n do
+        keyParts[#keyParts + 1] = tostring(arguments[index])
+    end
+    local cacheKey = table.concat(keyParts, "\0")
+    local now = os.clock()
+    local cached = self.ProgressRemoteCache[cacheKey]
+    if cached and now < cached.ExpiresAt then
+        return cached.Ok, cached.Value, cached.Error
+    end
+
+    local compatibility = self.Context and self.Context.Compatibility
+    local remote = compatibility and compatibility:GetCommF()
+    if not remote then
+        return false, nil, "Quest remote is unavailable"
+    end
+    local ok, result = pcall(function()
+        return remote:InvokeServer(name, table.unpack(arguments, 1, arguments.n))
+    end)
+    local errorText = not ok and tostring(result) or nil
+    self.ProgressRemoteCache[cacheKey] = {
+        Ok = ok,
+        Value = result,
+        Error = errorText,
+        ExpiresAt = now + SEA_PROGRESS_POLL_INTERVAL,
+    }
+    return ok, result, errorText
+end
+
+function MainFarm:_InvokeProgressAction(name, ...)
+    local compatibility = self.Context and self.Context.Compatibility
+    local remote = compatibility and compatibility:GetCommF()
+    if not remote then
+        return false, "Quest remote is unavailable"
+    end
+    local arguments = table.pack(...)
+    self.ProgressActionAt = self.ProgressActionAt or {}
+    local keyParts = { name }
+    for index = 1, arguments.n do
+        keyParts[#keyParts + 1] = tostring(arguments[index])
+    end
+    local key = table.concat(keyParts, "\0")
+    local now = os.clock()
+    if now - (self.ProgressActionAt[key] or 0) < 0.8 then
+        return true, "request already sent"
+    end
+    self.ProgressActionAt[key] = now
+    local ok, result = pcall(function()
+        return remote:InvokeServer(name, table.unpack(arguments, 1, arguments.n))
+    end)
+    return ok, ok and result or tostring(result)
+end
+
+function MainFarm:_ProgressLease()
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if not coordinator then
+        return true
+    end
+    if self.SeaProgressLease then
+        local current = coordinator:GetCurrent()
+        if current and current.Label == "Sea progression" then
+            return true
+        end
+        self.SeaProgressLease = nil
+    end
+    local lease, blocker = coordinator:TryAcquire(
+        "SeaProgression",
+        "Sea progression",
+        "Protected"
+    )
+    if not lease then
+        self:_SetStatus(
+            "Sea progression is waiting for " ..
+                tostring(blocker and blocker.Label or "the current task") .. " to finish",
+            "info"
+        )
+        return false
+    end
+    self.SeaProgressLease = lease
+    self:_ReleaseMainFarmLease()
+    return true
+end
+
+function MainFarm:_ReleaseProgressLease()
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and self.SeaProgressLease then
+        coordinator:Release(self.SeaProgressLease)
+    end
+    self.SeaProgressLease = nil
+end
+
+function MainFarm:_CompleteSeaUnlock(settingName, destinationSea)
+    local settings = self:_GetProgressionSettings()
+    if settings then
+        settings[settingName] = false
+        if tonumber(settings.ResumeSea) == destinationSea then
+            settings.ResumeSea = nil
+            settings.ResumeMainFarmAfterSeaUnlock = false
+        end
+    end
+    self:_SaveProgressionSettings()
+    self:_ReleaseProgressLease()
+    self:_SetStatus(
+        "Sea " .. tostring(destinationSea) .. " is unlocked. Main Farming can continue here.",
+        "success"
+    )
+end
+
+function MainFarm:_PrepareSeaTransition(destinationSea)
+    local settings = self:_GetProgressionSettings()
+    if settings and self.MainFarmEnabled then
+        settings.ResumeMainFarmAfterSeaUnlock = true
+        settings.ResumeSea = destinationSea
+        self:_SaveProgressionSettings()
+    end
+end
+
+function MainFarm:_ProgressMoveToPart(destination, session, label)
+    local destinationCFrame
+    if typeof(destination) == "CFrame" then
+        destinationCFrame = destination
+    elseif destination and destination:IsA("BasePart") then
+        destinationCFrame = destination.CFrame
+    else
+        return false
+    end
+    local character, _, root = self.Context.Compatibility:GetCharacterParts()
+    if not root then
+        self:_SetStatus("Waiting for your character before continuing sea progression", "warning")
+        return true
+    end
+    if (root.Position - destinationCFrame.Position).Magnitude > SEA_PROGRESS_MOVE_THRESHOLD then
+        self:_MoveTo(destinationCFrame, session, SEA_PROGRESS_MOVE_THRESHOLD, true, label)
+        self:_SetStatus("Moving to " .. label, "info")
+        return true
+    end
+    return false
+end
+
+function MainFarm:_ProgressMoveToIsland(islandName, seaIndex, session)
+    local config = self.Context and self.Context.Config
+    local destinations = config and config.TravelDestinations
+        and config.TravelDestinations[seaIndex]
+    local destination
+    for _, candidate in ipairs(destinations or {}) do
+        if candidate.Name == islandName then
+            destination = candidate
+            break
+        end
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if not destination or not teleportFeature
+        or type(teleportFeature._ResolveIslandCFrame) ~= "function"
+    then
+        return false
+    end
+    local cframe = teleportFeature:_ResolveIslandCFrame(destination)
+    if not cframe then
+        return false
+    end
+    return self:_ProgressMoveToPart(cframe, session, islandName)
+end
+
+function MainFarm:_ProgressAttackTarget(
+    name,
+    session,
+    root,
+    label,
+    targetKind,
+    fallbackIsland,
+    fallbackSea
+)
+    local target = self.EnemyService and self.EnemyService:FindNearest(name, root.Position)
+    if target then
+        self:_EngageModeTarget(target, true, root, session, targetKind or "sea progression")
+        return true
+    end
+    local spawnPart = self.EnemyService and self.EnemyService:FindSpawn(name, root.Position)
+    if spawnPart then
+        self:_MoveTo(spawnPart.CFrame, session, 10, true, label .. " spawn")
+        self:_SetStatus("Waiting for " .. label .. " to appear", "info")
+    elseif fallbackIsland and fallbackSea
+        and self:_ProgressMoveToIsland(fallbackIsland, fallbackSea, session)
+    then
+        self:_SetStatus("Searching " .. fallbackIsland .. " for " .. label, "info")
+    else
+        self:_HoldPosition(session)
+        self:_SetStatus("Waiting for " .. label .. " to appear", "info")
+    end
+    return true
+end
+
+function MainFarm:_StepSea2Unlock(session, root)
+    local ok, progress, err = self:_ProgressRemote("DressrosaQuestProgress")
+    if not ok or type(progress) ~= "table" then
+        self:_SetStatus(
+            "Sea 2 unlock is waiting for quest progress" ..
+                (err and (": " .. err) or ""),
+            "warning"
+        )
+        return true
+    end
+
+    if progress.KilledIceBoss == true or tonumber(progress.KilledIceBoss) == 1 then
+        if os.clock() < (self.NextSeaTransitionAt or 0) then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for the Sea 2 transition", "info")
+            return true
+        end
+        self.NextSeaTransitionAt = os.clock() + 8
+        self:_PrepareSeaTransition(2)
+        self:_SetStatus("Sea 2 unlocked; requesting the game’s Sea 2 transition", "info")
+        local actionOk, actionResult = self:_InvokeProgressAction("TravelDressrosa")
+        if not actionOk then
+            self:_SetStatus("Sea 2 transition failed: " .. tostring(actionResult), "warning")
+        end
+        task.wait(1)
+        return true
+    end
+
+    local compatibility = self.Context.Compatibility
+    local workspace = compatibility.Workspace
+    local map = workspace and workspace:FindFirstChild("Map")
+    local ice = map and map:FindFirstChild("Ice")
+    local door = ice and ice:FindFirstChild("Door", true)
+    local character = compatibility.Player and compatibility.Player.Character
+    local backpack = compatibility.Player
+        and compatibility.Player:FindFirstChildOfClass("Backpack")
+    local keyTool = (character and character:FindFirstChild("Key"))
+        or (backpack and backpack:FindFirstChild("Key"))
+
+    if door and door:IsA("BasePart") and door.CanCollide then
+        if keyTool then
+            if keyTool.Parent == backpack then
+                local _, humanoid = compatibility:GetCharacterParts()
+                if humanoid then
+                    pcall(function() humanoid:EquipTool(keyTool) end)
+                end
+            end
+            if self:_ProgressMoveToPart(door, session, "the Ice Door") then
+                return true
+            end
+            local _, _, rootPart = compatibility:GetCharacterParts()
+            if rootPart and type(compatibility.TouchPart) == "function"
+                and os.clock() >= (self.NextSeaDoorTouchAt or 0)
+            then
+                self.NextSeaDoorTouchAt = os.clock() + 0.8
+                compatibility:TouchPart(rootPart, door, function()
+                    return self:_IsCurrent(session)
+                end)
+            end
+            self:_SetStatus("Opening the Ice Door with the Key", "info")
+            return true
+        end
+
+        if self:_ProgressMoveToPart(MILITARY_DETECTIVE_POSITION, session, "the Military Detective") then
+            return true
+        end
+        self:_SetStatus("Requesting the Ice Admiral Key", "info")
+        local requestOk, requestResult = self:_InvokeProgressAction(
+            "DressrosaQuestProgress",
+            "Detective"
+        )
+        if not requestOk then
+            self:_SetStatus("Could not request the Ice Admiral Key: " .. tostring(requestResult), "warning")
+        end
+        task.wait(1)
+        return true
+    elseif not door then
+        self:_HoldPosition(session)
+        self:_SetStatus("Waiting for the Ice Door to load", "info")
+        return true
+    end
+
+    self:_ProgressAttackTarget(
+        "Ice Admiral",
+        session,
+        root,
+        "Ice Admiral",
+        "sea progression",
+        "Frozen Village",
+        1
+    )
+    return true
+end
+
+function MainFarm:_StepBartilo(session, root, progress)
+    local compatibility = self.Context.Compatibility
+    if progress == 0 then
+        local questState, targetName = self.QuestService:GetActiveQuestState()
+        if questState == "active"
+            and type(targetName) == "string"
+            and string.find(string.lower(targetName), "swan pirate", 1, true)
+        then
+            return self:_ProgressAttackTarget(
+                "Swan Pirate",
+                session,
+                root,
+                "Swan Pirates",
+                "sea progression"
+            )
+        end
+        local npcs = compatibility.Workspace
+            and compatibility.Workspace:FindFirstChild("NPCs")
+        local bartilo = npcs and npcs:FindFirstChild("Bartilo")
+        local npcRoot = bartilo
+            and (bartilo:FindFirstChild("HumanoidRootPart") or bartilo.PrimaryPart)
+        if npcRoot and self:_ProgressMoveToPart(npcRoot, session, "Bartilo") then
+            return true
+        end
+        local requestOk, requestResult = self:_InvokeProgressAction(
+            "StartQuest",
+            "BartiloQuest",
+            1
+        )
+        self:_SetStatus(
+            requestOk and "Starting the Bartilo quest" or
+                "Could not start the Bartilo quest: " .. tostring(requestResult),
+            requestOk and "info" or "warning"
+        )
+        task.wait(1)
+        return true
+    elseif progress == 1 then
+        return self:_ProgressAttackTarget(
+            "Jeremy",
+            session,
+            root,
+            "Jeremy",
+            "sea progression"
+        )
+    elseif progress == 2 then
+        local workspace = compatibility.Workspace
+        local map = workspace and workspace:FindFirstChild("Map")
+        local dressrosa = map and map:FindFirstChild("Dressrosa")
+        local plates = dressrosa and dressrosa:FindFirstChild("BartiloPlates")
+        local targetPlate
+        if plates then
+            for index = 1, 8 do
+                local plate = plates:FindFirstChild("Plate" .. index)
+                if plate and plate:IsA("BasePart")
+                    and plate.BrickColor == BrickColor.new("Sand yellow")
+                then
+                    targetPlate = plate
+                    break
+                end
+            end
+        end
+        if not targetPlate then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for the next Bartilo plate to become available", "info")
+            return true
+        end
+        if self:_ProgressMoveToPart(targetPlate, session, "the next Bartilo plate") then
+            return true
+        end
+        local _, _, rootPart = compatibility:GetCharacterParts()
+        if rootPart then
+            compatibility:TouchPart(rootPart, targetPlate, function()
+                return self:_IsCurrent(session)
+            end)
+        end
+        self:_SetStatus("Pressing the next Bartilo plate", "info")
+        task.wait(0.75)
+        return true
+    end
+    return false
+end
+
+function MainFarm:_StepSea3Unlock(session, root)
+    local ok, bartiloProgress = self:_ProgressRemote("BartiloQuestProgress", "Bartilo")
+    if not ok or type(bartiloProgress) ~= "number" then
+        self:_SetStatus("Sea 3 unlock is waiting for Bartilo quest progress", "warning")
+        return true
+    end
+    if bartiloProgress < 3 then
+        return self:_StepBartilo(session, root, bartiloProgress)
+    end
+
+    local unlocksOk, unlocks = self:_ProgressRemote("GetUnlockables")
+    if not unlocksOk or type(unlocks) ~= "table" then
+        self:_SetStatus("Checking the Trevor requirement", "info")
+        return true
+    end
+    if unlocks.FlamingoAccess == nil or unlocks.FlamingoAccess == false then
+        local settings = self:_GetProgressionSettings()
+        local selectedFruit = settings and settings.TrevorFruit
+        self:_HoldPosition(session)
+        self:_SetStatus(
+            selectedFruit
+                and "Trevor needs a fruit. Press Offer selected fruit when you are ready."
+                or "Trevor needs a fruit. Select one first; nothing will be offered automatically.",
+            "warning"
+        )
+        return true
+    end
+
+    local checkOk, zQuest = self:_ProgressRemote("ZQuestProgress", "Check")
+    if not checkOk then
+        self:_SetStatus("Checking the Sea 3 unlock progress", "info")
+        return true
+    end
+    if not zQuest then
+        return self:_ProgressAttackTarget(
+            "Don Swan",
+            session,
+            root,
+            "Don Swan",
+            "sea progression",
+            "Mansion",
+            2
+        )
+    elseif tonumber(zQuest) == 0 then
+        if self:_ProgressMoveToPart(RIP_INDRA_ISLAND_POSITION, session, "Indra Island") then
+            return true
+        end
+        local beginOk, beginResult = self:_InvokeProgressAction("ZQuestProgress", "Begin")
+        if not beginOk then
+            self:_SetStatus("Could not begin the Indra step: " .. tostring(beginResult), "warning")
+            return true
+        end
+        return self:_ProgressAttackTarget(
+            "rip_indra",
+            session,
+            root,
+            "rip_indra",
+            "sea progression"
+        )
+    end
+
+    local zouOk, zouProgress = self:_ProgressRemote("ZQuestProgress", "Zou")
+    if not zouOk then
+        self:_SetStatus("Checking whether Sea 3 is unlocked", "info")
+        return true
+    end
+    local zouValue = tonumber(zouProgress)
+    if zouValue == nil then
+        self:_SetStatus("Waiting for the game to confirm Sea 3 unlock progress", "info")
+        return true
+    end
+    if zouValue ~= 1 then
+        if os.clock() < (self.NextSeaTransitionAt or 0) then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for the Sea 3 transition", "info")
+            return true
+        end
+        self.NextSeaTransitionAt = os.clock() + 8
+        self:_PrepareSeaTransition(3)
+        self:_SetStatus("Sea 3 unlocked; requesting the game’s Sea 3 transition", "info")
+        local actionOk, actionResult = self:_InvokeProgressAction("TravelZou")
+        if not actionOk then
+            self:_SetStatus("Sea 3 transition failed: " .. tostring(actionResult), "warning")
+        end
+        task.wait(1)
+        return true
+    end
+    if os.clock() >= (self.NextSeaTransitionAt or 0) then
+        self.NextSeaTransitionAt = os.clock() + 8
+        self:_PrepareSeaTransition(3)
+        self:_InvokeProgressAction("TravelZou")
+    end
+    task.wait(1)
+    return true
+end
+
+function MainFarm:_StepSeaProgression(session)
+    local settings = self:_GetProgressionSettings()
+    if not settings then
+        self:_ReleaseProgressLease()
+        return false
+    end
+    local sea = self:_GetSeaIndex()
+    local settingName, destinationSea
+    if settings.AutoUnlockSea2 == true then
+        settingName, destinationSea = "AutoUnlockSea2", 2
+    elseif settings.AutoUnlockSea3 == true then
+        settingName, destinationSea = "AutoUnlockSea3", 3
+    else
+        self:_ReleaseProgressLease()
+        return false
+    end
+    if sea and sea >= destinationSea then
+        if settings.ResumeMainFarmAfterSeaUnlock == true
+            and tonumber(settings.ResumeSea) == sea
+        then
+            settings.ResumeMainFarmAfterSeaUnlock = false
+            settings.ResumeSea = nil
+            self.MainFarmEnabled = true
+            self.Context.State:SetFeatureEnabled("farm.main", true)
+            self:_SaveProgressionSettings()
+        end
+        self:_CompleteSeaUnlock(settingName, destinationSea)
+        return true
+    end
+    if sea ~= destinationSea - 1 then
+        self:_SetStatus(
+            "Auto unlock Sea " .. tostring(destinationSea)
+                .. " is waiting until you are in Sea " .. tostring(destinationSea - 1),
+            "info"
+        )
+        return false
+    end
+    local level = self.QuestService and self.QuestService:GetPlayerLevel()
+    local requiredLevel = destinationSea == 2 and 700 or 1500
+    if not level or level < requiredLevel then
+        self:_SetStatus(
+            "Auto unlock Sea " .. tostring(destinationSea)
+                .. " is waiting for level " .. tostring(requiredLevel),
+            "info"
+        )
+        self:_ReleaseProgressLease()
+        return false
+    end
+    if not self:_ProgressLease() then
+        return false
+    end
+    local _, _, root = self.Context.Compatibility:GetCharacterParts()
+    if not root then
+        self:_SetStatus("Sea progression is waiting for your character", "warning")
+        return true
+    end
+    if destinationSea == 2 then
+        return self:_StepSea2Unlock(session, root)
+    end
+    return self:_StepSea3Unlock(session, root)
+end
+
+function MainFarm:ResumePendingSeaProgression()
+    local settings = self:_GetProgressionSettings()
+    if not settings then
+        return false, "Sea progression settings are unavailable"
+    end
+    local sea = self:_GetSeaIndex()
+    local resumeSea = tonumber(settings.ResumeSea)
+    local resumedFarm = false
+    if settings.ResumeMainFarmAfterSeaUnlock == true and sea == resumeSea then
+        settings.ResumeMainFarmAfterSeaUnlock = false
+        settings.ResumeSea = nil
+        self.MainFarmEnabled = true
+        self.Context.State:SetFeatureEnabled("farm.main", true)
+        self:_SaveProgressionSettings()
+        self:_SetStatus("Sea unlocked; resuming Main Farming in this sea", "success")
+        resumedFarm = true
+    end
+    if settings.AutoUnlockSea2 == true or settings.AutoUnlockSea3 == true then
+        return self:_StartWorker()
+    end
+    if resumedFarm then
+        return self:_StartWorker()
+    end
+    return true
+end
+
+function MainFarm:_OfferTrevorFruit()
+    local settings = self:_GetProgressionSettings()
+    local compatibility = self.Context and self.Context.Compatibility
+    local selected = settings and settings.TrevorFruit
+    if not settings or settings.AutoUnlockSea3 ~= true or self:_GetSeaIndex() ~= 2 then
+        self:_SetStatus("Turn on Auto unlock Sea 3 before offering a fruit to Trevor", "warning")
+        return false
+    end
+    if type(selected) ~= "string" or selected == "" then
+        self:_SetStatus("Select a stored fruit first", "warning")
+        return false
+    end
+    local options = compatibility:GetOwnedBloxFruitOptions()
+    if not table.find(options, selected) then
+        settings.TrevorFruit = nil
+        self:_SaveProgressionSettings()
+        self:_SetStatus("That fruit is no longer in your stored inventory; choose another", "warning")
+        return false
+    end
+    local loadOk, loadResult = self:_InvokeProgressAction("LoadFruit", selected)
+    if not loadOk then
+        self:_SetStatus("Could not load the selected fruit: " .. tostring(loadResult), "error")
+        return false
+    end
+    local firstOk, firstResult = self:_InvokeProgressAction("TalkTrevor", "1")
+    if not firstOk then
+        self:_SetStatus("Trevor did not accept the selected fruit: " .. tostring(firstResult), "warning")
+        return false
+    end
+    self:_InvokeProgressAction("TalkTrevor", "2")
+    self:_InvokeProgressAction("TalkTrevor", "3")
+    settings.TrevorFruit = nil
+    self:_SaveProgressionSettings()
+    self:_SetStatus("Offered the selected fruit to Trevor", "success")
+    return true
+end
+
+function MainFarm:_SetSeaUnlockEnabled(destinationSea, enabled)
+    if type(enabled) ~= "boolean" then
+        self:_SetStatus("Sea unlock setting is invalid", "error")
+        return false
+    end
+    local settings = self:_GetProgressionSettings()
+    if not settings then
+        self:_SetStatus("Sea unlock settings are unavailable", "error")
+        return false
+    end
+    local currentSea = self:_GetSeaIndex()
+    if enabled and currentSea ~= destinationSea - 1 then
+        self:_SetStatus(
+            "Auto unlock Sea " .. tostring(destinationSea)
+                .. " is only available from Sea " .. tostring(destinationSea - 1),
+            "warning"
+        )
+        return false
+    end
+    local settingName = destinationSea == 2 and "AutoUnlockSea2" or "AutoUnlockSea3"
+    settings[settingName] = enabled
+    if enabled then
+        local siblingName = destinationSea == 2 and "AutoUnlockSea3" or "AutoUnlockSea2"
+        settings[siblingName] = false
+        self.Context.State:SetFeatureEnabled(
+            destinationSea == 2 and "progression.sea3.enabled" or "progression.sea2.enabled",
+            false
+        )
+        settings.ResumeMainFarmAfterSeaUnlock = self.MainFarmEnabled == true
+        settings.ResumeSea = nil
+        self:_StartWorker()
+        self:_SetStatus(
+            "Auto unlock Sea " .. tostring(destinationSea) .. " enabled",
+            "success"
+        )
+    else
+        settings.ResumeMainFarmAfterSeaUnlock = false
+        settings.ResumeSea = nil
+        self:_ReleaseProgressLease()
+        self:_SetStatus("Auto unlock Sea " .. tostring(destinationSea) .. " disabled", "info")
+    end
+    self.Context.State:SetFeatureEnabled(
+        destinationSea == 2 and "progression.sea2.enabled" or "progression.sea3.enabled",
+        enabled
+    )
+    self:_SaveProgressionSettings()
+    return true
 end
 
 function MainFarm:_HasEnabledStackTasks()
@@ -4708,6 +5382,9 @@ end
 function MainFarm:_Run(session)
     while self:_IsCurrent(session) do
         local ok, err = pcall(function()
+            if self:_StepSeaProgression(session) then
+                return
+            end
             if self:_StepStackTasks(session) then
                 return
             end
@@ -4736,7 +5413,13 @@ function MainFarm:_Run(session)
                 if self.MovementService then
                     self.MovementService:Cancel()
                 end
-                self:_SetStatus("Stack Farming is idle; waiting for an enabled task", "info")
+                local progression = self:_GetProgressionSettings()
+                if not progression or (
+                    progression.AutoUnlockSea2 ~= true
+                        and progression.AutoUnlockSea3 ~= true
+                ) then
+                    self:_SetStatus("Stack Farming is idle; waiting for an enabled task", "info")
+                end
             end
         end)
         if not ok then
@@ -4760,7 +5443,9 @@ function MainFarm:_Run(session)
             self.DoubleQuestScanTarget = nil
             self.NextDoubleQuestScanAt = 0
             self:_SetStatus(
-                (self.ActiveStackTask and "Stack Farming step error: " or "Main Farm step error: ")
+                (self.SeaProgressLease and "Sea progression step error: "
+                    or self.ActiveStackTask and "Stack Farming step error: "
+                    or "Main Farm step error: ")
                     .. tostring(err),
                 "error"
             )
@@ -4854,6 +5539,10 @@ function MainFarm:Initialize(context)
     self.ActiveStackLease = nil
     self.ActiveMainFarmLease = nil
     self.ActiveStackPrep = nil
+    self.SeaProgressLease = nil
+    self.ProgressRemoteCache = {}
+    self.ProgressActionAt = {}
+    self.NextSeaTransitionAt = 0
     self.StackRemoteRequests = {}
     self.IndraColorState = nil
     self.StackTaskStartedAt = 0
@@ -5496,6 +6185,32 @@ function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, l
 end
 
 function MainFarm:Handle(actionId, payload)
+    if actionId == "progression.sea2.enabled" then
+        return self:_SetSeaUnlockEnabled(2, payload)
+    elseif actionId == "progression.sea3.enabled" then
+        return self:_SetSeaUnlockEnabled(3, payload)
+    elseif actionId == "progression.trevor.fruit.select" then
+        local settings = self:_GetProgressionSettings()
+        local compatibility = self.Context and self.Context.Compatibility
+        local options = compatibility and compatibility:GetOwnedBloxFruitOptions() or {}
+        if not settings
+            or (payload ~= nil
+                and (type(payload) ~= "string" or not table.find(options, payload)))
+        then
+            self:_SetStatus("Choose a fruit currently in your stored inventory", "warning")
+            return false
+        end
+        settings.TrevorFruit = payload
+        self:_SaveProgressionSettings()
+        self:_SetStatus(
+            payload and "Trevor fruit selected; it will not be used until you press Offer"
+                or "Trevor fruit selection cleared",
+            "info"
+        )
+        return true
+    elseif actionId == "progression.trevor.offerFruit" then
+        return self:_OfferTrevorFruit()
+    end
     if actionId == "farm.status.copy" then
         return self:CopyStatusReport()
     end
@@ -5988,6 +6703,7 @@ function MainFarm:Handle(actionId, payload)
 end
 
 function MainFarm:Cleanup()
+    self:_ReleaseProgressLease()
     self.MainFarmEnabled = false
     local stackSettings = self.Context
         and self.Context.Config

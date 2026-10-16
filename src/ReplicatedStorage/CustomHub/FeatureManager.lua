@@ -62,6 +62,19 @@ function FeatureManager:Initialize()
             )
         end
     end
+    if mainFarm and type(mainFarm.ResumePendingSeaProgression) == "function" then
+        local resumeOk, resumeResult, resumeError = pcall(
+            mainFarm.ResumePendingSeaProgression,
+            mainFarm
+        )
+        if not resumeOk or resumeResult == false and resumeError then
+            self.State:SetStatus(
+                "Sea progression could not resume: "
+                    .. tostring(resumeOk and resumeError or resumeResult),
+                "warning"
+            )
+        end
+    end
     return true
 end
 

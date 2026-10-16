@@ -1220,6 +1220,94 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     return found == true
 end
 
+function Compatibility:GetOwnedBloxFruitOptions()
+    local itemServiceModule = self.ReplicatedStorage:FindFirstChild("ItemReplicationService")
+    local itemConfigModule = self.ReplicatedStorage:FindFirstChild("ItemConfig")
+    if not itemServiceModule or not itemConfigModule then
+        return {}
+    end
+
+    local serviceOk, itemService = pcall(require, itemServiceModule)
+    local configOk, itemConfig = pcall(require, itemConfigModule)
+    local keys = serviceOk and type(itemService) == "table" and itemService.KEYS
+    local quantityKey = type(keys) == "table" and keys.QUANTITY
+    if not serviceOk or type(itemService) ~= "table"
+        or not configOk or type(itemConfig) ~= "table"
+        or quantityKey == nil
+        or type(itemService.GetItems) ~= "function"
+        or type(itemConfig.match) ~= "function"
+    then
+        return {}
+    end
+
+    local catalog = self.BloxFruitCatalogCache
+    if not catalog or os.clock() >= catalog.ExpiresAt then
+        local commF = self:GetCommF()
+        local catalogOk, catalogData = false, nil
+        if commF then
+            catalogOk, catalogData = pcall(function()
+                return commF:InvokeServer("GetFruits", false)
+            end)
+        end
+        local prices = {}
+        if catalogOk and type(catalogData) == "table" then
+            for _, fruit in pairs(catalogData) do
+                if type(fruit) == "table"
+                    and type(fruit.Name) == "string"
+                    and tonumber(fruit.Price)
+                then
+                    prices[fruit.Name] = tonumber(fruit.Price)
+                end
+            end
+            prices["Dragon (East)-Dragon (East)"] = 15000000
+            prices["Dragon (West)-Dragon (West)"] = 15000000
+            catalog = {
+                Prices = prices,
+                ExpiresAt = os.clock() + 600,
+            }
+            self.BloxFruitCatalogCache = catalog
+        else
+            return {}
+        end
+    end
+
+    local names = {}
+    local ok = pcall(function()
+        for _, item in itemService:GetItems(quantityKey) do
+            if item and tonumber(item.Value) and tonumber(item.Value) > 0 then
+                local matchOk, definition = pcall(function()
+                    return itemConfig.match(item.ItemId):unwrap()
+                end)
+                local display = matchOk and type(definition) == "table"
+                    and definition.Display
+                if display and display.Category == "Blox Fruit" then
+                    local storageKey = definition.Index
+                        and definition.Index.StorageKey
+                    local name = storageKey or display.Name
+                    local price = catalog.Prices[name]
+                    if type(name) == "string"
+                        and name ~= ""
+                        and type(price) == "number"
+                        and price >= 1000000
+                    then
+                        names[name] = true
+                    end
+                end
+            end
+        end
+    end)
+    if not ok then
+        return {}
+    end
+
+    local options = {}
+    for name in pairs(names) do
+        options[#options + 1] = name
+    end
+    table.sort(options)
+    return options
+end
+
 function Compatibility:GetInventoryMaterialCount(materialName)
     if type(materialName) ~= "string" or materialName == "" then
         return nil, "Material name is invalid"

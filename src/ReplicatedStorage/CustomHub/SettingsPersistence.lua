@@ -270,6 +270,20 @@ function SettingsPersistence:_Capture()
         end
     end
 
+    local progression = config.ProgressionSettings
+    if type(progression) == "table" then
+        snapshot.Settings.ProgressionSettings = {
+            AutoUnlockSea2 = progression.AutoUnlockSea2 == true,
+            AutoUnlockSea3 = progression.AutoUnlockSea3 == true,
+            TrevorFruit = isSimpleString(progression.TrevorFruit)
+                    and progression.TrevorFruit
+                or nil,
+            ResumeMainFarmAfterSeaUnlock =
+                progression.ResumeMainFarmAfterSeaUnlock == true,
+            ResumeSea = tonumber(progression.ResumeSea),
+        }
+    end
+
     local state = self.State
     local stateValues = state and state:GetSnapshot()
     local defaults = config.Defaults or {}
@@ -302,6 +316,21 @@ function SettingsPersistence:_ApplySavedSettings(data)
                     end
                 end
             end
+        end
+        local savedProgression = savedGroups.ProgressionSettings
+        local progression = config.ProgressionSettings
+        if type(savedProgression) == "table" and type(progression) == "table" then
+            progression.AutoUnlockSea2 = savedProgression.AutoUnlockSea2 == true
+            progression.AutoUnlockSea3 = savedProgression.AutoUnlockSea3 == true
+            progression.TrevorFruit = isSimpleString(savedProgression.TrevorFruit)
+                    and savedProgression.TrevorFruit
+                or nil
+            progression.ResumeMainFarmAfterSeaUnlock =
+                savedProgression.ResumeMainFarmAfterSeaUnlock == true
+            local resumeSea = tonumber(savedProgression.ResumeSea)
+            progression.ResumeSea = (resumeSea == 2 or resumeSea == 3)
+                and math.floor(resumeSea)
+                or nil
         end
     end
 

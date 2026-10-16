@@ -17,7 +17,7 @@ function TaskCoordinator.new()
 end
 
 -- Background work is normal Main Farming or user-directed Travel. Stack work
--- may pause either; task-owned Protected work may pause manual Travel only.
+-- may pause either; Protected progression work may take over from Main Farming.
 function TaskCoordinator:TryAcquire(owner, label, group, onPreempt)
     if self.Destroyed then
         return nil, "Task coordination has stopped"
@@ -40,7 +40,9 @@ function TaskCoordinator:TryAcquire(owner, label, group, onPreempt)
         then
             return current
         end
-        local canPreemptMainFarm = group == "StackFarm"
+        local canPreemptMainFarm = (
+                group == "StackFarm" or group == "Protected"
+            )
             and current.Group == "MainFarm"
         local canPreemptBackground = (
                 group == "StackFarm" or group == "Protected"
