@@ -14315,6 +14315,14 @@ local function isFruitCandidate(instance)
         and string.find(string.lower(instance.Name), "fruit", 1, true) ~= nil
 end
 
+local function findFruitHandle(instance)
+    local handle = instance and instance:FindFirstChild("Handle")
+    if handle and handle:IsA("BasePart") then
+        return handle
+    end
+    return instance and instance:FindFirstChildWhichIsA("BasePart", true) or nil
+end
+
 local function isCakePrinceCandidate(instance)
     return instance ~= nil
         and instance:IsA("Model")
@@ -14334,11 +14342,25 @@ function StackTaskQueue.new(workspaceService)
         CompletedByInstance = setmetatable({}, { __mode = "k" }),
         KindByInstance = setmetatable({}, { __mode = "k" }),
         SpawnOrderByInstance = setmetatable({}, { __mode = "k" }),
+        FruitWatchers = setmetatable({}, { __mode = "k" }),
         Sequence = 0,
         Connections = {},
         EnemiesConnection = nil,
         EnemiesFolder = nil,
     }, StackTaskQueue)
+end
+
+function StackTaskQueue:_DisconnectFruitWatcher(instance)
+    local connections = self.FruitWatchers[instance]
+    if not connections then
+        return
+    end
+    self.FruitWatchers[instance] = nil
+    for _, connection in ipairs(connections) do
+        if connection.Connected then
+            connection:Disconnect()
+        end
+    end
 end
 
 function StackTaskQueue:_RememberSpawn(kind, instance)
@@ -14364,6 +14386,7 @@ function StackTaskQueue:_Queue(kind, instance)
         Instance = instance,
         Sequence = self:_RememberSpawn(kind, instance),
         QueuedAt = os.clock(),
+        HadHandle = kind == "Fruit",
     }
     self.PendingByInstance[instance] = entry
     table.insert(self.Pending, entry)
@@ -14374,7 +14397,38 @@ function StackTaskQueue:_ObserveFruit(instance)
         return
     end
     self:_RememberSpawn("Fruit", instance)
-    self:_Queue("Fruit", instance)
+    if not self.Enabled.Fruit or instance.Parent ~= self.Workspace then
+        return
+    end
+
+    if findFruitHandle(instance) then
+        self:_DisconnectFruitWatcher(instance)
+        self:_Queue("Fruit", instance)
+        return
+    end
+    if self.FruitWatchers[instance] then
+        return
+    end
+
+    local connections = {}
+    self.FruitWatchers[instance] = connections
+    local function checkReady()
+        if not self.Workspace or instance.Parent ~= self.Workspace then
+            self:_DisconnectFruitWatcher(instance)
+            return
+        end
+        if findFruitHandle(instance) then
+            self:_DisconnectFruitWatcher(instance)
+            self:_Queue("Fruit", instance)
+        end
+    end
+    table.insert(connections, instance.DescendantAdded:Connect(checkReady))
+    table.insert(connections, instance.AncestryChanged:Connect(function(_, parent)
+        if parent ~= self.Workspace then
+            self:_DisconnectFruitWatcher(instance)
+        end
+    end))
+    checkReady()
 end
 
 function StackTaskQueue:_ObserveCakePrince(instance)
@@ -14468,6 +14522,11 @@ function StackTaskQueue:SetEnabled(kind, enabled)
         self:_QueueExisting(kind)
     else
         self:_RemovePending(kind)
+        if kind == "Fruit" then
+            for instance in pairs(self.FruitWatchers) do
+                self:_DisconnectFruitWatcher(instance)
+            end
+        end
         for instance, observedKind in pairs(self.KindByInstance) do
             if observedKind == kind then
                 self.CompletedByInstance[instance] = nil
@@ -14495,7 +14554,12 @@ function StackTaskQueue:PopNext()
         self.PendingByInstance[entry.Instance] = nil
         if self:IsEnabled(entry)
             and entry.Instance
-            and entry.Instance.Parent ~= nil
+            and (
+                entry.Kind == "Fruit"
+                    and entry.Instance.Parent == self.Workspace
+                    or entry.Kind ~= "Fruit"
+                    and entry.Instance.Parent ~= nil
+            )
             and not self.CompletedByInstance[entry.Instance]
         then
             self.ActiveByInstance[entry.Instance] = true
@@ -14526,6 +14590,9 @@ function StackTaskQueue:Cleanup()
     for _, connection in ipairs(self.Connections) do
         connection:Disconnect()
     end
+    for instance in pairs(self.FruitWatchers) do
+        self:_DisconnectFruitWatcher(instance)
+    end
     table.clear(self.Connections)
     table.clear(self.Pending)
     self.PendingByInstance = setmetatable({}, { __mode = "k" })
@@ -14533,6 +14600,7 @@ function StackTaskQueue:Cleanup()
     self.CompletedByInstance = setmetatable({}, { __mode = "k" })
     self.KindByInstance = setmetatable({}, { __mode = "k" })
     self.SpawnOrderByInstance = setmetatable({}, { __mode = "k" })
+    self.FruitWatchers = setmetatable({}, { __mode = "k" })
     self.EnemiesFolder = nil
     self.Workspace = nil
 end
@@ -14888,6 +14956,10 @@ function MainFarm:_StepStackTasks(session)
         self:_FinishStackTask(entry)
         return true
     end
+    if entry.Kind == "Fruit" and target.Parent ~= workspaceService then
+        self:_FinishStackTask(entry)
+        return true
+    end
 
     if entry.Kind == "CakePrince" then
         if not workspaceService or not target:IsDescendantOf(workspaceService) then
@@ -14910,12 +14982,15 @@ function MainFarm:_StepStackTasks(session)
         end
         return true
     elseif entry.Kind == "Fruit" then
-        if not workspaceService or not target:IsDescendantOf(workspaceService) then
-            self:_FinishStackTask(entry)
-            return true
-        end
         local handle = target:FindFirstChild("Handle")
         if not handle or not handle:IsA("BasePart") then
+            handle = target:FindFirstChildWhichIsA("BasePart", true)
+        end
+        if not handle or not handle:IsA("BasePart") then
+            if entry.HadHandle then
+                self:_FinishStackTask(entry)
+                return true
+            end
             if os.clock() - (self.StackTaskStartedAt or os.clock()) < STACK_TASK_LOAD_TIMEOUT then
                 self:_HoldPosition(session)
                 self:_SetStatus("Waiting for the spawned fruit to load", "info")

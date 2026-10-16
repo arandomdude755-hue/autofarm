@@ -343,6 +343,10 @@ function MainFarm:_StepStackTasks(session)
         self:_FinishStackTask(entry)
         return true
     end
+    if entry.Kind == "Fruit" and target.Parent ~= workspaceService then
+        self:_FinishStackTask(entry)
+        return true
+    end
 
     if entry.Kind == "CakePrince" then
         if not workspaceService or not target:IsDescendantOf(workspaceService) then
@@ -365,12 +369,15 @@ function MainFarm:_StepStackTasks(session)
         end
         return true
     elseif entry.Kind == "Fruit" then
-        if not workspaceService or not target:IsDescendantOf(workspaceService) then
-            self:_FinishStackTask(entry)
-            return true
-        end
         local handle = target:FindFirstChild("Handle")
         if not handle or not handle:IsA("BasePart") then
+            handle = target:FindFirstChildWhichIsA("BasePart", true)
+        end
+        if not handle or not handle:IsA("BasePart") then
+            if entry.HadHandle then
+                self:_FinishStackTask(entry)
+                return true
+            end
             if os.clock() - (self.StackTaskStartedAt or os.clock()) < STACK_TASK_LOAD_TIMEOUT then
                 self:_HoldPosition(session)
                 self:_SetStatus("Waiting for the spawned fruit to load", "info")

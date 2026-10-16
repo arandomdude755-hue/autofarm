@@ -53,9 +53,21 @@ require(
     "spawn discovery must be event-driven and dequeue tasks in observed spawn order",
 )
 require(
+    "findFruitHandle(instance)" in QUEUE
+    and "instance.DescendantAdded:Connect(checkReady)" in QUEUE
+    and "instance.Parent ~= self.Workspace" in QUEUE
+    and "entry.Instance.Parent == self.Workspace" in QUEUE,
+    "fruit tasks should queue as soon as a real handle is ready and only while the fruit is a world item",
+)
+require(
     'self:_EngageModeTarget(target, true, root, session, "stack")' in MAIN_FARM
     and '"spawned fruit"' in MAIN_FARM,
     "stack jobs must use existing boss combat and shared farm travel",
+)
+require(
+    'entry.Kind == "Fruit" and target.Parent ~= workspaceService' in MAIN_FARM
+    and "if entry.HadHandle then" in MAIN_FARM,
+    "fruit pickup/reparenting must finish the active task instead of waiting indefinitely",
 )
 run_loop = MAIN_FARM.split("function MainFarm:_Run(session)", 1)[1].split(
     "function MainFarm:", 1
