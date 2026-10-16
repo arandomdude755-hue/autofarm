@@ -113,7 +113,7 @@ require(
     "team selection retries must run in the background without delaying the hub UI",
 )
 require(
-    'AutoExecute = false' in CONFIG
+    'AutoExecute = true' in CONFIG
     and 'Label = "Auto Execute"' in CONFIG
     and 'Action = "settings.autoExecute"' in CONFIG
     and 'if actionId == "settings.autoExecute" then' in (

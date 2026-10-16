@@ -500,7 +500,7 @@ local Config = {
     },
     StartupSettings = {
         Team = "Marines",
-        AutoExecute = false,
+        AutoExecute = true,
     },
     Layout = {
         MobileWidth = 0.86,
