@@ -1,0 +1,388 @@
+local SettingsPersistence = {}
+SettingsPersistence.__index = SettingsPersistence
+
+local SCHEMA_VERSION = 1
+local SETTINGS_FOLDER = "CustomHub"
+local SAVE_DEBOUNCE_SECONDS = 0.6
+local SETTING_KINDS = {
+    settingDropdown = true,
+    settingSelect = true,
+    settingSlider = true,
+    settingToggle = true,
+}
+
+local function isFiniteNumber(value)
+    return type(value) == "number"
+        and value == value
+        and value > -math.huge
+        and value < math.huge
+end
+
+local function isSimpleString(value)
+    return type(value) == "string"
+        and #value > 0
+        and #value <= 128
+        and not value:find("[%c]")
+end
+
+local function optionValue(option)
+    if type(option) == "string" then
+        return option
+    end
+    if type(option) == "table" then
+        return option.Value or option.value or option.Name or option.Label
+    end
+    return nil
+end
+
+local function containsOption(options, value)
+    if type(options) ~= "table" then
+        return nil
+    end
+    for _, option in ipairs(options) do
+        if optionValue(option) == value then
+            return true
+        end
+    end
+    return false
+end
+
+local function deepEqual(left, right)
+    if type(left) ~= type(right) then
+        return false
+    end
+    if type(left) ~= "table" then
+        return left == right
+    end
+    for key, value in pairs(left) do
+        if not deepEqual(value, right[key]) then
+            return false
+        end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+function SettingsPersistence.new(config, compatibility)
+    local self = setmetatable({
+        Config = config,
+        Compatibility = compatibility,
+        State = nil,
+        Storage = nil,
+        Path = nil,
+        InterfacePreferences = nil,
+        Rules = {},
+        LastSnapshot = nil,
+        SaveGeneration = 0,
+        Destroyed = false,
+        ReadOnly = false,
+        LoadedFromFile = false,
+        LoadWarning = nil,
+        LastSaveWarningAt = 0,
+    }, SettingsPersistence)
+
+    self:_BuildRules()
+    self:_InitializeStorage()
+    return self
+end
+
+function SettingsPersistence:_BuildRules()
+    local config = self.Config or {}
+    local pages = config.Pages
+    if type(pages) ~= "table" then
+        return
+    end
+
+    for _, page in pairs(pages) do
+        for _, control in ipairs(type(page) == "table" and page.Controls or {}) do
+            local kind = control.Kind
+            local setting = control.Setting
+            if SETTING_KINDS[kind] and type(setting) == "string" then
+                local group = control.SettingsKey or "FarmSettings"
+                if group == "FarmSettings"
+                    or group == "StackFarmSettings"
+                    or group == "TravelSettings"
+                then
+                    self.Rules[group] = self.Rules[group] or {}
+                    self.Rules[group][setting] = control
+                end
+            end
+        end
+    end
+end
+
+function SettingsPersistence:_InitializeStorage()
+    local compatibility = self.Compatibility
+    local player = compatibility and compatibility.Player
+    local userId = player and tonumber(player.UserId)
+    if not userId or userId <= 0 or userId % 1 ~= 0 then
+        self.LoadWarning = "Settings auto-save is unavailable for this player session."
+        return
+    end
+
+    local storage, storageError = compatibility:GetLocalSettingsStorage()
+    if not storage then
+        self.LoadWarning = "Settings are session-only; local file storage is unavailable."
+        self.StorageError = storageError
+        return
+    end
+
+    self.Storage = storage
+    self.Path = SETTINGS_FOLDER .. "/settings_" .. tostring(userId) .. ".json"
+end
+
+function SettingsPersistence:SetState(state)
+    self.State = state
+    local preferences = self.InterfacePreferences
+    if state and type(preferences) == "table" then
+        if type(preferences.UiSize) == "string" then
+            state:SetUiSize(preferences.UiSize)
+        end
+        if type(preferences.Compact) == "boolean" then
+            state:SetCompact(preferences.Compact)
+        end
+    end
+    self.LastSnapshot = self:_Capture()
+end
+
+function SettingsPersistence:_ValidateSetting(control, value)
+    if control.Kind == "settingToggle" then
+        return type(value) == "boolean"
+    end
+
+    if control.Kind == "settingSlider" then
+        if not isFiniteNumber(value) then
+            return false
+        end
+        local minimum = tonumber(control.Min)
+        local maximum = tonumber(control.Max)
+        return minimum ~= nil and maximum ~= nil
+            and value >= minimum and value <= maximum
+    end
+
+    if control.Kind == "settingDropdown" or control.Kind == "settingSelect" then
+        if not isSimpleString(value) then
+            return false
+        end
+        local optionResult = containsOption(control.Options, value)
+        if optionResult == false then
+            return false
+        end
+        return true
+    end
+
+    return false
+end
+
+function SettingsPersistence:_Capture()
+    local snapshot = {
+        SchemaVersion = SCHEMA_VERSION,
+        Settings = {},
+        Interface = {},
+    }
+    local config = self.Config or {}
+
+    for group, rules in pairs(self.Rules) do
+        local source = config[group]
+        if type(source) == "table" then
+            local savedGroup = {}
+            for setting, control in pairs(rules) do
+                local value = source[setting]
+                if value ~= nil and self:_ValidateSetting(control, value) then
+                    savedGroup[setting] = value
+                end
+            end
+            snapshot.Settings[group] = savedGroup
+        end
+    end
+
+    local state = self.State
+    local stateValues = state and state:GetSnapshot()
+    local defaults = config.Defaults or {}
+    local uiSize = stateValues and stateValues.uiSize or defaults.UiSize
+    local compact = stateValues and stateValues.compact
+    if compact == nil then
+        compact = defaults.Compact
+    end
+    if type(uiSize) == "string" then
+        snapshot.Interface.UiSize = uiSize
+    end
+    if type(compact) == "boolean" then
+        snapshot.Interface.Compact = compact
+    end
+    return snapshot
+end
+
+function SettingsPersistence:_ApplySavedSettings(data)
+    local config = self.Config or {}
+    local savedGroups = data.Settings
+    if type(savedGroups) == "table" then
+        for group, rules in pairs(self.Rules) do
+            local savedGroup = savedGroups[group]
+            local target = config[group]
+            if type(savedGroup) == "table" and type(target) == "table" then
+                for setting, control in pairs(rules) do
+                    local value = savedGroup[setting]
+                    if value ~= nil and self:_ValidateSetting(control, value) then
+                        target[setting] = value
+                    end
+                end
+            end
+        end
+    end
+
+    local interface = data.Interface
+    local defaults = config.Defaults
+    local footprints = config.Layout and config.Layout.UiSizeFootprints
+    if type(interface) == "table" and type(defaults) == "table" then
+        self.InterfacePreferences = {}
+        if type(interface.UiSize) == "string"
+            and type(footprints) == "table"
+            and type(footprints[interface.UiSize]) == "number"
+        then
+            self.InterfacePreferences.UiSize = interface.UiSize
+        end
+        if type(interface.Compact) == "boolean" then
+            self.InterfacePreferences.Compact = interface.Compact
+        end
+    end
+end
+
+function SettingsPersistence:Load()
+    if not self.Storage or not self.Path then
+        self.LastSnapshot = self:_Capture()
+        return false, self.LoadWarning
+    end
+
+    local fileExists
+    if type(self.Storage.Exists) == "function" then
+        local existsOk, exists = pcall(self.Storage.Exists, self.Path)
+        if existsOk and type(exists) == "boolean" then
+            fileExists = exists
+        end
+    end
+
+    if fileExists == false then
+        self.LastSnapshot = self:_Capture()
+        return true
+    end
+
+    local readOk, content = pcall(self.Storage.Read, self.Path)
+    if not readOk or type(content) ~= "string" or content == "" then
+        self.LastSnapshot = self:_Capture()
+        if fileExists == true then
+            self.LoadWarning = "Saved settings could not be read; defaults are active."
+        end
+        return true
+    end
+
+    local decodeOk, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    if not decodeOk or type(data) ~= "table" then
+        self.LoadWarning = "Saved settings are invalid; defaults are active."
+        self.LastSnapshot = self:_Capture()
+        return true
+    end
+
+    local version = tonumber(data.SchemaVersion) or 0
+    if version > SCHEMA_VERSION then
+        self.ReadOnly = true
+        self.LoadWarning = "Saved settings are newer than this hub; auto-save is paused."
+        self.LastSnapshot = self:_Capture()
+        return true
+    end
+
+    self:_ApplySavedSettings(data)
+    self.LoadedFromFile = true
+    self.LastSnapshot = self:_Capture()
+    return true
+end
+
+function SettingsPersistence:_ReportSaveError(message)
+    local now = os.clock()
+    if self.LastSaveWarningAt > 0 and now - self.LastSaveWarningAt < 30 then
+        return
+    end
+    self.LastSaveWarningAt = now
+    self.LoadWarning = "Settings auto-save failed; changes may not persist."
+    if self.State then
+        self.State:SetStatus(self.LoadWarning, "warning")
+    end
+end
+
+function SettingsPersistence:Save()
+    if self.Destroyed or self.ReadOnly then
+        return false, "Settings persistence is paused"
+    end
+    if not self.Storage or not self.Path then
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+
+    local snapshot = self:_Capture()
+    if self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+        return true
+    end
+
+    local encodeOk, content = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(snapshot)
+    end)
+    if not encodeOk or type(content) ~= "string" then
+        self:_ReportSaveError("Could not encode settings")
+        return false, tostring(content)
+    end
+
+    local writeOk, writeResult, writeError = pcall(self.Storage.Write, self.Path, content)
+    if not writeOk or writeResult ~= true then
+        local err = writeOk and writeError or writeResult
+        self:_ReportSaveError(err)
+        return false, tostring(err or "Local settings file could not be written")
+    end
+
+    self.LastSnapshot = snapshot
+    self.LoadWarning = nil
+    return true
+end
+
+function SettingsPersistence:ScheduleSave()
+    if self.Destroyed or self.ReadOnly or not self.Storage then
+        return false
+    end
+    local snapshot = self:_Capture()
+    if self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+        return true
+    end
+
+    self.SaveGeneration += 1
+    local generation = self.SaveGeneration
+    task.delay(SAVE_DEBOUNCE_SECONDS, function()
+        if self.Destroyed or generation ~= self.SaveGeneration then
+            return
+        end
+        self:Save()
+    end)
+    return true
+end
+
+function SettingsPersistence:Flush()
+    self.SaveGeneration += 1
+    if self.Destroyed or self.ReadOnly or not self.Storage then
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+    return self:Save()
+end
+
+function SettingsPersistence:GetStartupWarning()
+    return self.LoadWarning
+end
+
+function SettingsPersistence:Destroy()
+    self.SaveGeneration += 1
+    self.Destroyed = true
+end
+
+return SettingsPersistence

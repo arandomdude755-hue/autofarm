@@ -7,7 +7,7 @@ local MovementService = require(script.Features.Farm.MovementService)
 local FeatureManager = {}
 FeatureManager.__index = FeatureManager
 
-function FeatureManager.new(state, compatibility, config)
+function FeatureManager.new(state, compatibility, config, settingsPersistence)
     local movementService = MovementService.new(compatibility, function(message, kind)
         state:SetStatus(message, kind or "info")
     end)
@@ -19,11 +19,19 @@ function FeatureManager.new(state, compatibility, config)
             State = state,
             Compatibility = compatibility,
             Config = config,
+            SettingsPersistence = settingsPersistence,
             MovementService = movementService,
             MainFarm = MainFarm,
             TeleportFeature = TeleportFeature,
         },
     }, FeatureManager)
+end
+
+function FeatureManager:_ScheduleSettingsSave()
+    local persistence = self.Context and self.Context.SettingsPersistence
+    if persistence then
+        persistence:ScheduleSave()
+    end
 end
 
 function FeatureManager:Initialize()
@@ -51,12 +59,14 @@ function FeatureManager:Dispatch(actionId, payload)
             return false, "Unsupported UI size"
         end
         self.State:SetUiSize(payload)
+        self:_ScheduleSettingsSave()
         self.State:SetStatus("UI size: " .. payload .. ".", "success")
         return true
     end
 
     if actionId == "settings.compact" then
         self.State:SetCompact(payload == true)
+        self:_ScheduleSettingsSave()
         self.State:SetStatus(
             "Compact layout " .. (payload and "enabled." or "disabled.") .. " (UI only).",
             "success"
@@ -66,6 +76,7 @@ function FeatureManager:Dispatch(actionId, payload)
 
     if actionId == "settings.reset" then
         self.State:ResetPresentation()
+        self:_ScheduleSettingsSave()
         return true
     end
 
@@ -87,6 +98,7 @@ function FeatureManager:Dispatch(actionId, payload)
         end
 
         farmSettings.WeaponCategory = selectedCategory
+        self:_ScheduleSettingsSave()
         self.State:SetStatus(
             "Farm weapon: " .. tostring(farmSettings.WeaponCategory),
             "success"
@@ -107,6 +119,7 @@ function FeatureManager:Dispatch(actionId, payload)
             return false, tostring(handled)
         end
         if handled then
+            self:_ScheduleSettingsSave()
             return true
         end
     end

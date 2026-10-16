@@ -1,6 +1,7 @@
 local Config = require(script.Config)
 local State = require(script.State)
 local Compatibility = require(script.Compatibility)
+local SettingsPersistence = require(script.SettingsPersistence)
 local FeatureManager = require(script.FeatureManager)
 local UI = require(script.UI)
 
@@ -9,13 +10,22 @@ Hub.__index = Hub
 local activeHub = nil
 
 function Hub.new()
-    local state = State.new(Config.Defaults)
     local compatibility = Compatibility.new()
-    local featureManager = FeatureManager.new(state, compatibility, Config)
+    local settingsPersistence = SettingsPersistence.new(Config, compatibility)
+    settingsPersistence:Load()
+    local state = State.new(Config.Defaults)
+    settingsPersistence:SetState(state)
+    local featureManager = FeatureManager.new(
+        state,
+        compatibility,
+        Config,
+        settingsPersistence
+    )
 
     return setmetatable({
         State = state,
         Compatibility = compatibility,
+        SettingsPersistence = settingsPersistence,
         FeatureManager = featureManager,
         UI = nil,
         Started = false,
@@ -71,6 +81,11 @@ function Hub:Start()
     self.Started = true
     activeHub = self
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
+    local settingsWarning = self.SettingsPersistence
+        and self.SettingsPersistence:GetStartupWarning()
+    if settingsWarning then
+        self.State:SetStatus(settingsWarning, "warning")
+    end
     return true
 end
 
@@ -84,7 +99,14 @@ function Hub:Destroy()
         self.UI:Destroy()
         self.UI = nil
     end
+    if self.SettingsPersistence then
+        self.SettingsPersistence:Flush()
+    end
     self.FeatureManager:Cleanup()
+    if self.SettingsPersistence then
+        self.SettingsPersistence:Destroy()
+        self.SettingsPersistence = nil
+    end
     self.Started = false
     if activeHub == self then
         activeHub = nil

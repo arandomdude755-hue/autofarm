@@ -12,6 +12,11 @@ MODULES = (
     ("CustomHub.State", "src/ReplicatedStorage/CustomHub/State.lua", {}),
     ("CustomHub.Compatibility", "src/ReplicatedStorage/CustomHub/Compatibility.lua", {}),
     (
+        "CustomHub.SettingsPersistence",
+        "src/ReplicatedStorage/CustomHub/SettingsPersistence.lua",
+        {},
+    ),
+    (
         "CustomHub.FeatureManager",
         "src/ReplicatedStorage/CustomHub/FeatureManager.lua",
         {
@@ -95,6 +100,7 @@ MODULES = (
             "require(script.Config)": '__bundleLoad("CustomHub.Config")',
             "require(script.State)": '__bundleLoad("CustomHub.State")',
             "require(script.Compatibility)": '__bundleLoad("CustomHub.Compatibility")',
+            "require(script.SettingsPersistence)": '__bundleLoad("CustomHub.SettingsPersistence")',
             "require(script.FeatureManager)": '__bundleLoad("CustomHub.FeatureManager")',
             "require(script.UI)": '__bundleLoad("CustomHub.UI")',
         },

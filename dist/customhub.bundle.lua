@@ -1291,6 +1291,56 @@ function Compatibility.new()
     }, Compatibility)
 end
 
+function Compatibility:GetLocalSettingsStorage()
+    local apiOk, api = pcall(function()
+        return {
+            Read = readfile,
+            Write = writefile,
+            Exists = isfile,
+            IsFolder = isfolder,
+            MakeFolder = makefolder,
+        }
+    end)
+    if not apiOk or type(api) ~= "table"
+        or type(api.Read) ~= "function"
+        or type(api.Write) ~= "function"
+    then
+        return nil, "Local file APIs are unavailable"
+    end
+
+    return {
+        Exists = type(api.Exists) == "function" and function(path)
+            return api.Exists(path)
+        end or nil,
+        Read = function(path)
+            return api.Read(path)
+        end,
+        Write = function(path, content)
+            local folder = "CustomHub"
+            if type(api.IsFolder) == "function" then
+                local folderOk, exists = pcall(api.IsFolder, folder)
+                if folderOk and not exists and type(api.MakeFolder) == "function" then
+                    local makeOk, makeError = pcall(api.MakeFolder, folder)
+                    if not makeOk then
+                        local retryOk, existsAfter = pcall(api.IsFolder, folder)
+                        if not retryOk or not existsAfter then
+                            return false, tostring(makeError)
+                        end
+                    end
+                end
+            elseif type(api.MakeFolder) == "function" then
+                pcall(api.MakeFolder, folder)
+            end
+
+            local writeOk, result = pcall(api.Write, path, content)
+            if not writeOk then
+                return false, tostring(result)
+            end
+            return true
+        end,
+    }
+end
+
 function Compatibility:GetNpcManager()
     if self.NpcManager then
         return self.NpcManager
@@ -2356,6 +2406,399 @@ return Compatibility
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Compatibility.lua
 end
 
+__bundleFactories["CustomHub.SettingsPersistence"] = function()
+-- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/SettingsPersistence.lua
+local SettingsPersistence = {}
+SettingsPersistence.__index = SettingsPersistence
+
+local SCHEMA_VERSION = 1
+local SETTINGS_FOLDER = "CustomHub"
+local SAVE_DEBOUNCE_SECONDS = 0.6
+local SETTING_KINDS = {
+    settingDropdown = true,
+    settingSelect = true,
+    settingSlider = true,
+    settingToggle = true,
+}
+
+local function isFiniteNumber(value)
+    return type(value) == "number"
+        and value == value
+        and value > -math.huge
+        and value < math.huge
+end
+
+local function isSimpleString(value)
+    return type(value) == "string"
+        and #value > 0
+        and #value <= 128
+        and not value:find("[%c]")
+end
+
+local function optionValue(option)
+    if type(option) == "string" then
+        return option
+    end
+    if type(option) == "table" then
+        return option.Value or option.value or option.Name or option.Label
+    end
+    return nil
+end
+
+local function containsOption(options, value)
+    if type(options) ~= "table" then
+        return nil
+    end
+    for _, option in ipairs(options) do
+        if optionValue(option) == value then
+            return true
+        end
+    end
+    return false
+end
+
+local function deepEqual(left, right)
+    if type(left) ~= type(right) then
+        return false
+    end
+    if type(left) ~= "table" then
+        return left == right
+    end
+    for key, value in pairs(left) do
+        if not deepEqual(value, right[key]) then
+            return false
+        end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+function SettingsPersistence.new(config, compatibility)
+    local self = setmetatable({
+        Config = config,
+        Compatibility = compatibility,
+        State = nil,
+        Storage = nil,
+        Path = nil,
+        InterfacePreferences = nil,
+        Rules = {},
+        LastSnapshot = nil,
+        SaveGeneration = 0,
+        Destroyed = false,
+        ReadOnly = false,
+        LoadedFromFile = false,
+        LoadWarning = nil,
+        LastSaveWarningAt = 0,
+    }, SettingsPersistence)
+
+    self:_BuildRules()
+    self:_InitializeStorage()
+    return self
+end
+
+function SettingsPersistence:_BuildRules()
+    local config = self.Config or {}
+    local pages = config.Pages
+    if type(pages) ~= "table" then
+        return
+    end
+
+    for _, page in pairs(pages) do
+        for _, control in ipairs(type(page) == "table" and page.Controls or {}) do
+            local kind = control.Kind
+            local setting = control.Setting
+            if SETTING_KINDS[kind] and type(setting) == "string" then
+                local group = control.SettingsKey or "FarmSettings"
+                if group == "FarmSettings"
+                    or group == "StackFarmSettings"
+                    or group == "TravelSettings"
+                then
+                    self.Rules[group] = self.Rules[group] or {}
+                    self.Rules[group][setting] = control
+                end
+            end
+        end
+    end
+end
+
+function SettingsPersistence:_InitializeStorage()
+    local compatibility = self.Compatibility
+    local player = compatibility and compatibility.Player
+    local userId = player and tonumber(player.UserId)
+    if not userId or userId <= 0 or userId % 1 ~= 0 then
+        self.LoadWarning = "Settings auto-save is unavailable for this player session."
+        return
+    end
+
+    local storage, storageError = compatibility:GetLocalSettingsStorage()
+    if not storage then
+        self.LoadWarning = "Settings are session-only; local file storage is unavailable."
+        self.StorageError = storageError
+        return
+    end
+
+    self.Storage = storage
+    self.Path = SETTINGS_FOLDER .. "/settings_" .. tostring(userId) .. ".json"
+end
+
+function SettingsPersistence:SetState(state)
+    self.State = state
+    local preferences = self.InterfacePreferences
+    if state and type(preferences) == "table" then
+        if type(preferences.UiSize) == "string" then
+            state:SetUiSize(preferences.UiSize)
+        end
+        if type(preferences.Compact) == "boolean" then
+            state:SetCompact(preferences.Compact)
+        end
+    end
+    self.LastSnapshot = self:_Capture()
+end
+
+function SettingsPersistence:_ValidateSetting(control, value)
+    if control.Kind == "settingToggle" then
+        return type(value) == "boolean"
+    end
+
+    if control.Kind == "settingSlider" then
+        if not isFiniteNumber(value) then
+            return false
+        end
+        local minimum = tonumber(control.Min)
+        local maximum = tonumber(control.Max)
+        return minimum ~= nil and maximum ~= nil
+            and value >= minimum and value <= maximum
+    end
+
+    if control.Kind == "settingDropdown" or control.Kind == "settingSelect" then
+        if not isSimpleString(value) then
+            return false
+        end
+        local optionResult = containsOption(control.Options, value)
+        if optionResult == false then
+            return false
+        end
+        return true
+    end
+
+    return false
+end
+
+function SettingsPersistence:_Capture()
+    local snapshot = {
+        SchemaVersion = SCHEMA_VERSION,
+        Settings = {},
+        Interface = {},
+    }
+    local config = self.Config or {}
+
+    for group, rules in pairs(self.Rules) do
+        local source = config[group]
+        if type(source) == "table" then
+            local savedGroup = {}
+            for setting, control in pairs(rules) do
+                local value = source[setting]
+                if value ~= nil and self:_ValidateSetting(control, value) then
+                    savedGroup[setting] = value
+                end
+            end
+            snapshot.Settings[group] = savedGroup
+        end
+    end
+
+    local state = self.State
+    local stateValues = state and state:GetSnapshot()
+    local defaults = config.Defaults or {}
+    local uiSize = stateValues and stateValues.uiSize or defaults.UiSize
+    local compact = stateValues and stateValues.compact
+    if compact == nil then
+        compact = defaults.Compact
+    end
+    if type(uiSize) == "string" then
+        snapshot.Interface.UiSize = uiSize
+    end
+    if type(compact) == "boolean" then
+        snapshot.Interface.Compact = compact
+    end
+    return snapshot
+end
+
+function SettingsPersistence:_ApplySavedSettings(data)
+    local config = self.Config or {}
+    local savedGroups = data.Settings
+    if type(savedGroups) == "table" then
+        for group, rules in pairs(self.Rules) do
+            local savedGroup = savedGroups[group]
+            local target = config[group]
+            if type(savedGroup) == "table" and type(target) == "table" then
+                for setting, control in pairs(rules) do
+                    local value = savedGroup[setting]
+                    if value ~= nil and self:_ValidateSetting(control, value) then
+                        target[setting] = value
+                    end
+                end
+            end
+        end
+    end
+
+    local interface = data.Interface
+    local defaults = config.Defaults
+    local footprints = config.Layout and config.Layout.UiSizeFootprints
+    if type(interface) == "table" and type(defaults) == "table" then
+        self.InterfacePreferences = {}
+        if type(interface.UiSize) == "string"
+            and type(footprints) == "table"
+            and type(footprints[interface.UiSize]) == "number"
+        then
+            self.InterfacePreferences.UiSize = interface.UiSize
+        end
+        if type(interface.Compact) == "boolean" then
+            self.InterfacePreferences.Compact = interface.Compact
+        end
+    end
+end
+
+function SettingsPersistence:Load()
+    if not self.Storage or not self.Path then
+        self.LastSnapshot = self:_Capture()
+        return false, self.LoadWarning
+    end
+
+    local fileExists
+    if type(self.Storage.Exists) == "function" then
+        local existsOk, exists = pcall(self.Storage.Exists, self.Path)
+        if existsOk and type(exists) == "boolean" then
+            fileExists = exists
+        end
+    end
+
+    if fileExists == false then
+        self.LastSnapshot = self:_Capture()
+        return true
+    end
+
+    local readOk, content = pcall(self.Storage.Read, self.Path)
+    if not readOk or type(content) ~= "string" or content == "" then
+        self.LastSnapshot = self:_Capture()
+        if fileExists == true then
+            self.LoadWarning = "Saved settings could not be read; defaults are active."
+        end
+        return true
+    end
+
+    local decodeOk, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    if not decodeOk or type(data) ~= "table" then
+        self.LoadWarning = "Saved settings are invalid; defaults are active."
+        self.LastSnapshot = self:_Capture()
+        return true
+    end
+
+    local version = tonumber(data.SchemaVersion) or 0
+    if version > SCHEMA_VERSION then
+        self.ReadOnly = true
+        self.LoadWarning = "Saved settings are newer than this hub; auto-save is paused."
+        self.LastSnapshot = self:_Capture()
+        return true
+    end
+
+    self:_ApplySavedSettings(data)
+    self.LoadedFromFile = true
+    self.LastSnapshot = self:_Capture()
+    return true
+end
+
+function SettingsPersistence:_ReportSaveError(message)
+    local now = os.clock()
+    if self.LastSaveWarningAt > 0 and now - self.LastSaveWarningAt < 30 then
+        return
+    end
+    self.LastSaveWarningAt = now
+    self.LoadWarning = "Settings auto-save failed; changes may not persist."
+    if self.State then
+        self.State:SetStatus(self.LoadWarning, "warning")
+    end
+end
+
+function SettingsPersistence:Save()
+    if self.Destroyed or self.ReadOnly then
+        return false, "Settings persistence is paused"
+    end
+    if not self.Storage or not self.Path then
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+
+    local snapshot = self:_Capture()
+    if self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+        return true
+    end
+
+    local encodeOk, content = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(snapshot)
+    end)
+    if not encodeOk or type(content) ~= "string" then
+        self:_ReportSaveError("Could not encode settings")
+        return false, tostring(content)
+    end
+
+    local writeOk, writeResult, writeError = pcall(self.Storage.Write, self.Path, content)
+    if not writeOk or writeResult ~= true then
+        local err = writeOk and writeError or writeResult
+        self:_ReportSaveError(err)
+        return false, tostring(err or "Local settings file could not be written")
+    end
+
+    self.LastSnapshot = snapshot
+    self.LoadWarning = nil
+    return true
+end
+
+function SettingsPersistence:ScheduleSave()
+    if self.Destroyed or self.ReadOnly or not self.Storage then
+        return false
+    end
+    local snapshot = self:_Capture()
+    if self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+        return true
+    end
+
+    self.SaveGeneration += 1
+    local generation = self.SaveGeneration
+    task.delay(SAVE_DEBOUNCE_SECONDS, function()
+        if self.Destroyed or generation ~= self.SaveGeneration then
+            return
+        end
+        self:Save()
+    end)
+    return true
+end
+
+function SettingsPersistence:Flush()
+    self.SaveGeneration += 1
+    if self.Destroyed or self.ReadOnly or not self.Storage then
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+    return self:Save()
+end
+
+function SettingsPersistence:GetStartupWarning()
+    return self.LoadWarning
+end
+
+function SettingsPersistence:Destroy()
+    self.SaveGeneration += 1
+    self.Destroyed = true
+end
+
+return SettingsPersistence
+-- END SOURCE: src/ReplicatedStorage/CustomHub/SettingsPersistence.lua
+end
+
 __bundleFactories["CustomHub.FeatureManager"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/FeatureManager.lua
 local PlaceholderFeatures = __bundleLoad("CustomHub.Features.PlaceholderFeatures")
@@ -2367,7 +2810,7 @@ local MovementService = __bundleLoad("CustomHub.Features.Farm.MovementService")
 local FeatureManager = {}
 FeatureManager.__index = FeatureManager
 
-function FeatureManager.new(state, compatibility, config)
+function FeatureManager.new(state, compatibility, config, settingsPersistence)
     local movementService = MovementService.new(compatibility, function(message, kind)
         state:SetStatus(message, kind or "info")
     end)
@@ -2379,11 +2822,19 @@ function FeatureManager.new(state, compatibility, config)
             State = state,
             Compatibility = compatibility,
             Config = config,
+            SettingsPersistence = settingsPersistence,
             MovementService = movementService,
             MainFarm = MainFarm,
             TeleportFeature = TeleportFeature,
         },
     }, FeatureManager)
+end
+
+function FeatureManager:_ScheduleSettingsSave()
+    local persistence = self.Context and self.Context.SettingsPersistence
+    if persistence then
+        persistence:ScheduleSave()
+    end
 end
 
 function FeatureManager:Initialize()
@@ -2411,12 +2862,14 @@ function FeatureManager:Dispatch(actionId, payload)
             return false, "Unsupported UI size"
         end
         self.State:SetUiSize(payload)
+        self:_ScheduleSettingsSave()
         self.State:SetStatus("UI size: " .. payload .. ".", "success")
         return true
     end
 
     if actionId == "settings.compact" then
         self.State:SetCompact(payload == true)
+        self:_ScheduleSettingsSave()
         self.State:SetStatus(
             "Compact layout " .. (payload and "enabled." or "disabled.") .. " (UI only).",
             "success"
@@ -2426,6 +2879,7 @@ function FeatureManager:Dispatch(actionId, payload)
 
     if actionId == "settings.reset" then
         self.State:ResetPresentation()
+        self:_ScheduleSettingsSave()
         return true
     end
 
@@ -2447,6 +2901,7 @@ function FeatureManager:Dispatch(actionId, payload)
         end
 
         farmSettings.WeaponCategory = selectedCategory
+        self:_ScheduleSettingsSave()
         self.State:SetStatus(
             "Farm weapon: " .. tostring(farmSettings.WeaponCategory),
             "success"
@@ -2467,6 +2922,7 @@ function FeatureManager:Dispatch(actionId, payload)
             return false, tostring(handled)
         end
         if handled then
+            self:_ScheduleSettingsSave()
             return true
         end
     end
@@ -21265,6 +21721,7 @@ __bundleFactories["CustomHub"] = function()
 local Config = __bundleLoad("CustomHub.Config")
 local State = __bundleLoad("CustomHub.State")
 local Compatibility = __bundleLoad("CustomHub.Compatibility")
+local SettingsPersistence = __bundleLoad("CustomHub.SettingsPersistence")
 local FeatureManager = __bundleLoad("CustomHub.FeatureManager")
 local UI = __bundleLoad("CustomHub.UI")
 
@@ -21273,13 +21730,22 @@ Hub.__index = Hub
 local activeHub = nil
 
 function Hub.new()
-    local state = State.new(Config.Defaults)
     local compatibility = Compatibility.new()
-    local featureManager = FeatureManager.new(state, compatibility, Config)
+    local settingsPersistence = SettingsPersistence.new(Config, compatibility)
+    settingsPersistence:Load()
+    local state = State.new(Config.Defaults)
+    settingsPersistence:SetState(state)
+    local featureManager = FeatureManager.new(
+        state,
+        compatibility,
+        Config,
+        settingsPersistence
+    )
 
     return setmetatable({
         State = state,
         Compatibility = compatibility,
+        SettingsPersistence = settingsPersistence,
         FeatureManager = featureManager,
         UI = nil,
         Started = false,
@@ -21335,6 +21801,11 @@ function Hub:Start()
     self.Started = true
     activeHub = self
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
+    local settingsWarning = self.SettingsPersistence
+        and self.SettingsPersistence:GetStartupWarning()
+    if settingsWarning then
+        self.State:SetStatus(settingsWarning, "warning")
+    end
     return true
 end
 
@@ -21348,7 +21819,14 @@ function Hub:Destroy()
         self.UI:Destroy()
         self.UI = nil
     end
+    if self.SettingsPersistence then
+        self.SettingsPersistence:Flush()
+    end
     self.FeatureManager:Cleanup()
+    if self.SettingsPersistence then
+        self.SettingsPersistence:Destroy()
+        self.SettingsPersistence = nil
+    end
     self.Started = false
     if activeHub == self then
         activeHub = nil

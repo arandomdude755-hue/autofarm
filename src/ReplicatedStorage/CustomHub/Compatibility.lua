@@ -28,6 +28,56 @@ function Compatibility.new()
     }, Compatibility)
 end
 
+function Compatibility:GetLocalSettingsStorage()
+    local apiOk, api = pcall(function()
+        return {
+            Read = readfile,
+            Write = writefile,
+            Exists = isfile,
+            IsFolder = isfolder,
+            MakeFolder = makefolder,
+        }
+    end)
+    if not apiOk or type(api) ~= "table"
+        or type(api.Read) ~= "function"
+        or type(api.Write) ~= "function"
+    then
+        return nil, "Local file APIs are unavailable"
+    end
+
+    return {
+        Exists = type(api.Exists) == "function" and function(path)
+            return api.Exists(path)
+        end or nil,
+        Read = function(path)
+            return api.Read(path)
+        end,
+        Write = function(path, content)
+            local folder = "CustomHub"
+            if type(api.IsFolder) == "function" then
+                local folderOk, exists = pcall(api.IsFolder, folder)
+                if folderOk and not exists and type(api.MakeFolder) == "function" then
+                    local makeOk, makeError = pcall(api.MakeFolder, folder)
+                    if not makeOk then
+                        local retryOk, existsAfter = pcall(api.IsFolder, folder)
+                        if not retryOk or not existsAfter then
+                            return false, tostring(makeError)
+                        end
+                    end
+                end
+            elseif type(api.MakeFolder) == "function" then
+                pcall(api.MakeFolder, folder)
+            end
+
+            local writeOk, result = pcall(api.Write, path, content)
+            if not writeOk then
+                return false, tostring(result)
+            end
+            return true
+        end,
+    }
+end
+
 function Compatibility:GetNpcManager()
     if self.NpcManager then
         return self.NpcManager

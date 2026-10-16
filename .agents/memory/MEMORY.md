@@ -10,4 +10,5 @@
 - [Movement stall evidence](movement-stall-evidence.md) — a clear ray rules out nearby geometry only; compare commanded-position error before concluding why movement stopped.
 - [Fruit M1 knockback recovery](fruit-m1-knockback-recovery.md) — the movement-hold attempt slowed Fruit M1 without stopping launches; don't reapply unchanged.
 - [Stack Farming priority rules](stack-farming-priority.md) — Keep prep and spawn jobs FIFO, use one worker, and only summon bosses when the required item is already held.
+- [Saved configuration behavior](configuration-persistence.md) — Restore user preferences between runs without automatically resuming Main Farm or travel.
 - [Sidebar submenu overflow](sidebar-submenu-overflow.md) — expanded child rows should auto-scroll into view using generic viewport checks, not tab-specific offsets.

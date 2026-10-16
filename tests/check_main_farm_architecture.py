@@ -179,6 +179,10 @@ for path in all_lua:
                 f"Optional instance API escaped Compatibility: {path.relative_to(ROOT)}")
         require("getconnections" not in text and "getupvalues" not in text,
                 f"Optional connection/upvalue APIs escaped Compatibility: {path.relative_to(ROOT)}")
+        require(
+            all(api not in text for api in ("readfile", "writefile", "isfile", "isfolder", "makefolder")),
+            f"Local file APIs escaped Compatibility: {path.relative_to(ROOT)}",
+        )
     require(all(line == line.rstrip() for line in text.splitlines()),
             f"Trailing whitespace: {path.relative_to(ROOT)}")
 
@@ -192,6 +196,13 @@ require(
     and "pcall(getUpvalues, candidate)" in compatibility_text
     and "pcall(getGc, false)" in compatibility_text,
     "optional executor helpers must be guarded and isolated in Compatibility",
+)
+require(
+    "function Compatibility:GetLocalSettingsStorage()" in compatibility_text
+    and "Read = readfile" in compatibility_text
+    and "Write = writefile" in compatibility_text
+    and "pcall(api.Write, path, content)" in compatibility_text,
+    "local config file access must be capability-checked and isolated in Compatibility",
 )
 
 print("PASS: production CustomHub Rojo mapping and LocalScript entrypoint")
