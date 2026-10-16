@@ -117,12 +117,15 @@ require(
     'commF:InvokeServer("EliteHunter")' in elite_quest
     and 'commF:InvokeServer("AbandonQuest")' in elite_quest
     and "string.find(string.lower(questTitle)" in MAIN_FARM
+    and '"TrackedQuestFrame"' in MAIN_FARM
+    and '"description"' in MAIN_FARM
     and 'self:_EngageModeTarget(target, true, root, session, "stack")' in MAIN_FARM
     and "Elite Hunter quest accepted; waiting for the target to load" in MAIN_FARM
     and "BindLiveEliteTarget(entry, liveTarget)" in MAIN_FARM
+    and "target:IsDescendantOf(self.StackTaskQueue.ReplicatedStorage)" in MAIN_FARM
     and "only available in Third Sea" in MAIN_FARM
     and "or self.Enabled.EliteHunter == true" in QUEUE,
-    "Elite Hunter must accept and confirm its matching quest, use shared combat, and stay Sea 3 only",
+    "Elite Hunter must confirm the Sea 3 tracked quest, attack the reference-resolved target, and use shared combat",
 )
 require(
     'prompt:InputHoldBegin()' in MAIN_FARM

@@ -333,19 +333,45 @@ function MainFarm:_IsEliteHunterQuestActive(targetName)
     local compatibility = self.Context and self.Context.Compatibility
     local readOk = pcall(function()
         local playerGui = compatibility and compatibility:GetPlayerGui()
+        local trackedQuest = playerGui and playerGui:FindFirstChild("TrackedQuestFrame")
+        local trackedFrame = trackedQuest and trackedQuest:FindFirstChild("Frame")
+        local trackedHeader = trackedFrame and trackedFrame:FindFirstChild("header")
+        local trackedHeaderText = trackedHeader and trackedHeader:FindFirstChild("textLabel")
+        local trackedProgress = trackedFrame and trackedFrame:FindFirstChild("progress")
+        local trackedDescription = trackedFrame and trackedFrame:FindFirstChild("description")
+        local function isTextObject(object)
+            return object and (
+                object:IsA("TextLabel")
+                    or object:IsA("TextButton")
+                    or object:IsA("TextBox")
+            )
+        end
+        if isTextObject(trackedHeaderText)
+            and isTextObject(trackedProgress)
+            and isTextObject(trackedDescription)
+        then
+            visibleQuest = true
+            questTitle = table.concat({
+                trackedHeaderText.Text or "",
+                trackedProgress.Text or "",
+                trackedDescription.Text or "",
+            }, " ")
+        end
+
         local main = playerGui and playerGui:FindFirstChild("Main")
         local quest = main and main:FindFirstChild("Quest")
         local container = quest and quest:FindFirstChild("Container")
         local questTitleFrame = container and container:FindFirstChild("QuestTitle")
         local titleLabel = questTitleFrame and questTitleFrame:FindFirstChild("Title")
-        visibleQuest = main ~= nil
+        local mainQuestVisible = main ~= nil
             and quest ~= nil
             and quest:IsA("GuiObject")
             and quest.Visible
             and titleLabel ~= nil
             and titleLabel:IsA("TextLabel")
-        if visibleQuest then
-            questTitle = titleLabel.Text
+        if mainQuestVisible then
+            visibleQuest = true
+            questTitle = table.concat({ questTitle, titleLabel.Text or "" }, " ")
         end
     end)
     if not readOk then
@@ -513,6 +539,15 @@ function MainFarm:_StepStackTasks(session)
                     end
                 end
             end
+        end
+        if not liveTarget
+            and self.StackTaskQueue
+            and self.StackTaskQueue.ReplicatedStorage
+            and target:IsDescendantOf(self.StackTaskQueue.ReplicatedStorage)
+        then
+            -- BNN and Vxeze detect ReplicatedStorage first and pass that valid
+            -- Elite model straight into their normal movement/combat path.
+            liveTarget = target
         end
         if not liveTarget then
             if os.clock() - (self.StackTaskStartedAt or os.clock()) >= STACK_TASK_LOAD_TIMEOUT then
