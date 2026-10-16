@@ -1558,26 +1558,60 @@ function Compatibility:GetPublicServers(cursor)
         return nil, "The game's server browser remote is unavailable"
     end
 
-    local page = tonumber(cursor) or 1
-    if page % 1 ~= 0 or page < 1 or page > 100 then
+    local firstPage = tonumber(cursor) or 1
+    if firstPage % 1 ~= 0 or firstPage < 1 or firstPage > 100 then
         return nil, "Server browser page is invalid"
     end
 
-    -- The reference hubs use the game's server-browser remote, which handles
-    -- the teleport handshake as well as listing server instances.
-    local invokeOk, data = pcall(function()
-        return serverBrowser:InvokeServer(page)
-    end)
-    if not invokeOk then
-        return nil, "The game's server browser request failed: " .. tostring(data)
-    end
-    if type(data) ~= "table" then
-        return nil, "The game's server browser returned an invalid page"
+    -- The reference hubs query all numbered pages concurrently. Stagger requests
+    -- over two seconds so the search is fast without dumping 100 calls at once.
+    local lastPage = 100
+    local requestCount = lastPage - firstPage + 1
+    local completed = 0
+    local successful = 0
+    local lastError = nil
+    local serverData = {}
+    local successfulPages = {}
+
+    for page = firstPage, lastPage do
+        task.delay((page - firstPage) / 50, function()
+            local invokeOk, result = pcall(function()
+                return serverBrowser:InvokeServer(page)
+            end)
+            if invokeOk and type(result) == "table" then
+                successful += 1
+                successfulPages[page] = true
+                for jobId, info in pairs(result) do
+                    if type(jobId) == "string" and type(info) == "table" then
+                        serverData[jobId] = info
+                    end
+                end
+            else
+                lastError = invokeOk
+                    and "The game's server browser returned an invalid page"
+                    or tostring(result)
+            end
+            completed += 1
+        end)
     end
 
-    local maxPlayers = tonumber(self.Players and self.Players.MaxPlayers) or 12
+    local deadline = os.clock() + 8
+    while completed < requestCount and os.clock() < deadline do
+        task.wait(0.05)
+    end
+    if successful == 0 then
+        return nil, completed < requestCount
+            and "The game's server browser scan timed out"
+            or ("The game's server browser request failed: "
+                .. tostring(lastError or "no usable pages returned"))
+    end
+
+    local maxPlayers = tonumber(self.Players and self.Players.MaxPlayers)
+    if not maxPlayers or maxPlayers <= 0 then
+        maxPlayers = 12
+    end
     local servers = {}
-    for jobId, info in pairs(data) do
+    for jobId, info in pairs(serverData) do
         if type(jobId) == "string" and type(info) == "table" then
             local playing = tonumber(info.Count or info.playing)
             if playing then
@@ -1590,9 +1624,16 @@ function Compatibility:GetPublicServers(cursor)
             end
         end
     end
+    local nextPage
+    for page = firstPage, lastPage do
+        if not successfulPages[page] then
+            nextPage = page
+            break
+        end
+    end
     return {
         Servers = servers,
-        NextCursor = page < 100 and tostring(page + 1) or nil,
+        NextCursor = nextPage and tostring(nextPage) or nil,
     }
 end
 
@@ -16435,7 +16476,7 @@ ServerHopService.__index = ServerHopService
 local INITIAL_SCAN_DELAY = 6
 local ARRIVAL_SCAN_DELAY = 8
 local RETRY_DELAY = 3
-local PAGE_DELAY = 0.5
+local PAGE_DELAY = 2
 local TELEPORT_TIMEOUT = 25
 local SESSION_LIFETIME = 3600
 local MAX_VISITED_SERVERS = 300
@@ -16901,13 +16942,11 @@ function ServerHopService:_BeginFetch()
             session.Cursor = result.NextCursor
             self.PageCount += 1
             if session.Cursor then
-                local pause = PAGE_DELAY
                 if self.PageCount >= 4 then
                     self.PageCount = 0
-                    pause = 5
                     self:_SetStatus("Still checking public servers", "info")
                 end
-                self.NextAttemptAt = os.clock() + pause
+                self.NextAttemptAt = os.clock() + PAGE_DELAY
                 self:_ReleaseCoordinatorLease()
                 return
             end

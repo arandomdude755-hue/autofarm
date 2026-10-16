@@ -4,7 +4,7 @@ ServerHopService.__index = ServerHopService
 local INITIAL_SCAN_DELAY = 6
 local ARRIVAL_SCAN_DELAY = 8
 local RETRY_DELAY = 3
-local PAGE_DELAY = 0.5
+local PAGE_DELAY = 2
 local TELEPORT_TIMEOUT = 25
 local SESSION_LIFETIME = 3600
 local MAX_VISITED_SERVERS = 300
@@ -470,13 +470,11 @@ function ServerHopService:_BeginFetch()
             session.Cursor = result.NextCursor
             self.PageCount += 1
             if session.Cursor then
-                local pause = PAGE_DELAY
                 if self.PageCount >= 4 then
                     self.PageCount = 0
-                    pause = 5
                     self:_SetStatus("Still checking public servers", "info")
                 end
-                self.NextAttemptAt = os.clock() + pause
+                self.NextAttemptAt = os.clock() + PAGE_DELAY
                 self:_ReleaseCoordinatorLease()
                 return
             end

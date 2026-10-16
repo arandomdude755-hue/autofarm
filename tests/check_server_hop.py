@@ -40,6 +40,9 @@ require(
     'FindFirstChild("__ServerBrowser")' in COMPATIBILITY
     and "function Compatibility:GetPublicServers(cursor)" in COMPATIBILITY
     and "serverBrowser:InvokeServer(page)" in COMPATIBILITY
+    and "local lastPage = 100" in COMPATIBILITY
+    and "task.delay((page - firstPage) / 50" in COMPATIBILITY
+    and "local deadline = os.clock() + 8" in COMPATIBILITY
     and "serverBrowser:InvokeServer(\"teleport\", jobId)" in COMPATIBILITY
     and "function Compatibility:TeleportToPublicServer(jobId)" in COMPATIBILITY
     and "TeleportToPlaceInstance" not in COMPATIBILITY
@@ -47,6 +50,11 @@ require(
     and "not self:_IsVisited(jobId)" in HOP
     and "math.random(1, #candidates)" in HOP,
     "server hopping must use the game's server browser for listings and teleport handshakes",
+)
+require(
+    "local PAGE_DELAY = 2" in HOP
+    and "pause = 5" not in HOP,
+    "server-list partial pages must retry safely without the old long paging pause",
 )
 require(
     "function SettingsPersistence:SetHopSession(session)" in PERSISTENCE
