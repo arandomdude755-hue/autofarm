@@ -53,9 +53,10 @@ require(
     "successful settings actions must schedule a debounced save",
 )
 require(
-    'SETTINGS_FOLDER .. "/settings_" .. tostring(userId) .. ".json"' in PERSISTENCE
+    'self.Path = SETTINGS_FOLDER .. "/settings_" .. userIdText .. ".json"' in PERSISTENCE
+    and 'self.HopPath = HOP_SESSION_FILE_PREFIX .. userIdText .. ".json"' in PERSISTENCE
     and 'type(setting) == "string"' in PERSISTENCE,
-    "settings files must be per-user and load only known UI setting keys",
+    "settings and hop-session files must be per-user and load only known UI setting keys",
 )
 
 print("PASS: versioned per-user settings load/save and transient-state exclusion")

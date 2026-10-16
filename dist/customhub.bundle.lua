@@ -1551,92 +1551,48 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         or "Team selection screen was not found"
 end
 
-function Compatibility:_GetHttpRequestFunction()
-    local ok, requestFunction = pcall(function()
-        if type(request) == "function" then
-            return request
-        end
-        if type(http_request) == "function" then
-            return http_request
-        end
-        if type(syn) == "table" and type(syn.request) == "function" then
-            return syn.request
-        end
-        if type(http) == "table" and type(http.request) == "function" then
-            return http.request
-        end
-        if type(fluxus) == "table" and type(fluxus.request) == "function" then
-            return fluxus.request
-        end
-        return nil
-    end)
-    if not ok then
-        return nil
-    end
-    return type(requestFunction) == "function" and requestFunction or nil
-end
-
 function Compatibility:GetPublicServers(cursor)
-    local placeId = tonumber(game.PlaceId)
-    if not placeId or placeId <= 0 then
-        return nil, "Current place id is unavailable"
+    local serverBrowser = self.ReplicatedStorage
+        and self.ReplicatedStorage:FindFirstChild("__ServerBrowser")
+    if not serverBrowser or not serverBrowser:IsA("RemoteFunction") then
+        return nil, "The game's server browser remote is unavailable"
     end
 
-    local url = "https://games.roblox.com/v1/games/"
-        .. tostring(math.floor(placeId))
-        .. "/servers/Public?sortOrder=Asc&limit=25"
-    if type(cursor) == "string" and cursor ~= "" then
-        local encodeOk, encodedCursor = pcall(function()
-            return self.HttpService:UrlEncode(cursor)
-        end)
-        if not encodeOk then
-            return nil, "Could not encode the server-list cursor"
-        end
-        url = url .. "&cursor=" .. encodedCursor
+    local page = tonumber(cursor) or 1
+    if page % 1 ~= 0 or page < 1 or page > 100 then
+        return nil, "Server browser page is invalid"
     end
 
-    local responseBody
-    local requestFunction = self:_GetHttpRequestFunction()
-    if requestFunction then
-        local requestOk, response = pcall(requestFunction, {
-            Url = url,
-            Method = "GET",
-        })
-        if requestOk and type(response) == "table" then
-            local statusCode = tonumber(response.StatusCode or response.Status)
-            if statusCode and (statusCode < 200 or statusCode >= 300) then
-                return nil, "Roblox server list returned HTTP "
-                    .. tostring(statusCode)
-                    .. " for place "
-                    .. tostring(math.floor(placeId))
-            end
-            responseBody = response.Body
-        elseif not requestOk then
-            return nil, tostring(response)
-        end
-    end
-
-    if type(responseBody) ~= "string" or responseBody == "" then
-        local httpOk, body = pcall(function()
-            return game:HttpGet(url)
-        end)
-        if not httpOk or type(body) ~= "string" then
-            return nil, "Public server list access is unavailable"
-        end
-        responseBody = body
-    end
-
-    local decodeOk, data = pcall(function()
-        return self.HttpService:JSONDecode(responseBody)
+    -- The reference hubs use the game's server-browser remote, which handles
+    -- the teleport handshake as well as listing server instances.
+    local invokeOk, data = pcall(function()
+        return serverBrowser:InvokeServer(page)
     end)
-    if not decodeOk or type(data) ~= "table" or type(data.data) ~= "table" then
-        return nil, "Roblox returned an invalid public server list"
+    if not invokeOk then
+        return nil, "The game's server browser request failed: " .. tostring(data)
+    end
+    if type(data) ~= "table" then
+        return nil, "The game's server browser returned an invalid page"
+    end
+
+    local maxPlayers = tonumber(self.Players and self.Players.MaxPlayers) or 12
+    local servers = {}
+    for jobId, info in pairs(data) do
+        if type(jobId) == "string" and type(info) == "table" then
+            local playing = tonumber(info.Count or info.playing)
+            if playing then
+                servers[#servers + 1] = {
+                    id = jobId,
+                    playing = playing,
+                    maxPlayers = tonumber(info.MaxPlayers or info.maxPlayers)
+                        or maxPlayers,
+                }
+            end
+        end
     end
     return {
-        Servers = data.data,
-        NextCursor = type(data.nextPageCursor) == "string"
-            and data.nextPageCursor
-            or nil,
+        Servers = servers,
+        NextCursor = page < 100 and tostring(page + 1) or nil,
     }
 end
 
@@ -1648,26 +1604,20 @@ function Compatibility:TeleportToPublicServer(jobId)
         return false, "This is already the current server"
     end
 
-    local teleportService
-    local serviceOk, service = pcall(function()
-        return game:GetService("TeleportService")
-    end)
-    if serviceOk then
-        teleportService = service
-    end
-    if not teleportService or not self.Player then
-        return false, "Server joining is unavailable"
+    local serverBrowser = self.ReplicatedStorage
+        and self.ReplicatedStorage:FindFirstChild("__ServerBrowser")
+    if not serverBrowser or not serverBrowser:IsA("RemoteFunction") then
+        return false, "The game's server browser remote is unavailable"
     end
 
-    local teleportOk, teleportError = pcall(function()
-        teleportService:TeleportToPlaceInstance(
-            game.PlaceId,
-            jobId,
-            self.Player
-        )
+    local teleportOk, result = pcall(function()
+        return serverBrowser:InvokeServer("teleport", jobId)
     end)
     if not teleportOk then
-        return false, tostring(teleportError)
+        return false, tostring(result)
+    end
+    if result == false then
+        return false, "The game's server browser rejected the destination"
     end
     return true
 end
@@ -2658,6 +2608,7 @@ SettingsPersistence.__index = SettingsPersistence
 
 local SCHEMA_VERSION = 2
 local SETTINGS_FOLDER = "CustomHub"
+local HOP_SESSION_FILE_PREFIX = SETTINGS_FOLDER .. "/hop_session_"
 local SAVE_DEBOUNCE_SECONDS = 0.6
 local SETTING_KINDS = {
     settingDropdown = true,
@@ -2787,11 +2738,11 @@ function SettingsPersistence.new(config, compatibility)
         State = nil,
         Storage = nil,
         Path = nil,
+        HopPath = nil,
         InterfacePreferences = nil,
         Rules = {},
         LastSnapshot = nil,
         HopSession = nil,
-        LastHopSession = nil,
         SaveGeneration = 0,
         Destroyed = false,
         ReadOnly = false,
@@ -2848,7 +2799,9 @@ function SettingsPersistence:_InitializeStorage()
     end
 
     self.Storage = storage
-    self.Path = SETTINGS_FOLDER .. "/settings_" .. tostring(userId) .. ".json"
+    local userIdText = tostring(userId)
+    self.Path = SETTINGS_FOLDER .. "/settings_" .. userIdText .. ".json"
+    self.HopPath = HOP_SESSION_FILE_PREFIX .. userIdText .. ".json"
 end
 
 function SettingsPersistence:SetState(state)
@@ -2968,6 +2921,41 @@ function SettingsPersistence:_ApplySavedSettings(data)
     end
 end
 
+function SettingsPersistence:_LoadHopSession(legacySession)
+    self.HopSession = validateHopSession(legacySession)
+    if not self.Storage or not self.HopPath then
+        return
+    end
+
+    local fileExists
+    if type(self.Storage.Exists) == "function" then
+        local existsOk, exists = pcall(self.Storage.Exists, self.HopPath)
+        if existsOk and type(exists) == "boolean" then
+            fileExists = exists
+        end
+    end
+    if fileExists == false then
+        return
+    end
+
+    local readOk, content = pcall(self.Storage.Read, self.HopPath)
+    if not readOk or type(content) ~= "string" or content == "" then
+        if fileExists == true then
+            self.HopSession = nil
+        end
+        return
+    end
+
+    local decodeOk, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    if decodeOk and type(data) == "table" then
+        self.HopSession = validateHopSession(data)
+    else
+        self.HopSession = nil
+    end
+end
+
 function SettingsPersistence:Load()
     if not self.Storage or not self.Path then
         self.LastSnapshot = self:_Capture()
@@ -2983,12 +2971,14 @@ function SettingsPersistence:Load()
     end
 
     if fileExists == false then
+        self:_LoadHopSession(nil)
         self.LastSnapshot = self:_Capture()
         return true
     end
 
     local readOk, content = pcall(self.Storage.Read, self.Path)
     if not readOk or type(content) ~= "string" or content == "" then
+        self:_LoadHopSession(nil)
         self.LastSnapshot = self:_Capture()
         if fileExists == true then
             self.LoadWarning = "Saved settings could not be read; defaults are active."
@@ -3000,6 +2990,7 @@ function SettingsPersistence:Load()
         return game:GetService("HttpService"):JSONDecode(content)
     end)
     if not decodeOk or type(data) ~= "table" then
+        self:_LoadHopSession(nil)
         self.LoadWarning = "Saved settings are invalid; defaults are active."
         self.LastSnapshot = self:_Capture()
         return true
@@ -3014,8 +3005,7 @@ function SettingsPersistence:Load()
     end
 
     self:_ApplySavedSettings(data)
-    self.HopSession = validateHopSession(data.HopSession)
-    self.LastHopSession = copyTable(self.HopSession)
+    self:_LoadHopSession(data.HopSession)
     self.LoadedFromFile = true
     self.LastSnapshot = self:_Capture()
     return true
@@ -3042,21 +3032,12 @@ function SettingsPersistence:Save(force)
     end
 
     local snapshot = self:_Capture()
-    local hopSession = copyTable(self.HopSession)
-    if not force
-        and self.LastSnapshot
-        and deepEqual(snapshot, self.LastSnapshot)
-        and deepEqual(hopSession, self.LastHopSession)
-    then
+    if not force and self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
         return true
     end
 
-    local document = copyTable(snapshot)
-    if hopSession then
-        document.HopSession = hopSession
-    end
     local encodeOk, content = pcall(function()
-        return game:GetService("HttpService"):JSONEncode(document)
+        return game:GetService("HttpService"):JSONEncode(snapshot)
     end)
     if not encodeOk or type(content) ~= "string" then
         self:_ReportSaveError("Could not encode settings")
@@ -3071,7 +3052,6 @@ function SettingsPersistence:Save(force)
     end
 
     self.LastSnapshot = snapshot
-    self.LastHopSession = copyTable(hopSession)
     self.LoadWarning = nil
     return true
 end
@@ -3080,7 +3060,7 @@ function SettingsPersistence:CanPersistHopSession()
     return not self.Destroyed
         and not self.ReadOnly
         and self.Storage ~= nil
-        and self.Path ~= nil
+        and self.HopPath ~= nil
 end
 
 function SettingsPersistence:GetHopSession()
@@ -3096,7 +3076,21 @@ function SettingsPersistence:SetHopSession(session)
         return false, "Hop session data is invalid or expired"
     end
     self.HopSession = validated
-    return self:Save(true)
+    local encodeOk, content = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(validated)
+    end)
+    if not encodeOk or type(content) ~= "string" then
+        return false, "Hop session could not be encoded"
+    end
+    local writeOk, written, writeError = pcall(
+        self.Storage.Write,
+        self.HopPath,
+        content
+    )
+    if not writeOk or written ~= true then
+        return false, tostring(writeError or written or "Hop session could not be saved")
+    end
+    return true
 end
 
 function SettingsPersistence:ClearHopSession()
@@ -3105,7 +3099,15 @@ function SettingsPersistence:ClearHopSession()
         return false, self.LoadWarning or "Local settings storage is unavailable"
     end
     self.HopSession = nil
-    return self:Save(true)
+    local writeOk, written, writeError = pcall(
+        self.Storage.Write,
+        self.HopPath,
+        "{}"
+    )
+    if not writeOk or written ~= true then
+        return false, tostring(writeError or written or "Hop session could not be cleared")
+    end
+    return true
 end
 
 function SettingsPersistence:ScheduleSave()

@@ -255,92 +255,48 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         or "Team selection screen was not found"
 end
 
-function Compatibility:_GetHttpRequestFunction()
-    local ok, requestFunction = pcall(function()
-        if type(request) == "function" then
-            return request
-        end
-        if type(http_request) == "function" then
-            return http_request
-        end
-        if type(syn) == "table" and type(syn.request) == "function" then
-            return syn.request
-        end
-        if type(http) == "table" and type(http.request) == "function" then
-            return http.request
-        end
-        if type(fluxus) == "table" and type(fluxus.request) == "function" then
-            return fluxus.request
-        end
-        return nil
-    end)
-    if not ok then
-        return nil
-    end
-    return type(requestFunction) == "function" and requestFunction or nil
-end
-
 function Compatibility:GetPublicServers(cursor)
-    local placeId = tonumber(game.PlaceId)
-    if not placeId or placeId <= 0 then
-        return nil, "Current place id is unavailable"
+    local serverBrowser = self.ReplicatedStorage
+        and self.ReplicatedStorage:FindFirstChild("__ServerBrowser")
+    if not serverBrowser or not serverBrowser:IsA("RemoteFunction") then
+        return nil, "The game's server browser remote is unavailable"
     end
 
-    local url = "https://games.roblox.com/v1/games/"
-        .. tostring(math.floor(placeId))
-        .. "/servers/Public?sortOrder=Asc&limit=25"
-    if type(cursor) == "string" and cursor ~= "" then
-        local encodeOk, encodedCursor = pcall(function()
-            return self.HttpService:UrlEncode(cursor)
-        end)
-        if not encodeOk then
-            return nil, "Could not encode the server-list cursor"
-        end
-        url = url .. "&cursor=" .. encodedCursor
+    local page = tonumber(cursor) or 1
+    if page % 1 ~= 0 or page < 1 or page > 100 then
+        return nil, "Server browser page is invalid"
     end
 
-    local responseBody
-    local requestFunction = self:_GetHttpRequestFunction()
-    if requestFunction then
-        local requestOk, response = pcall(requestFunction, {
-            Url = url,
-            Method = "GET",
-        })
-        if requestOk and type(response) == "table" then
-            local statusCode = tonumber(response.StatusCode or response.Status)
-            if statusCode and (statusCode < 200 or statusCode >= 300) then
-                return nil, "Roblox server list returned HTTP "
-                    .. tostring(statusCode)
-                    .. " for place "
-                    .. tostring(math.floor(placeId))
-            end
-            responseBody = response.Body
-        elseif not requestOk then
-            return nil, tostring(response)
-        end
-    end
-
-    if type(responseBody) ~= "string" or responseBody == "" then
-        local httpOk, body = pcall(function()
-            return game:HttpGet(url)
-        end)
-        if not httpOk or type(body) ~= "string" then
-            return nil, "Public server list access is unavailable"
-        end
-        responseBody = body
-    end
-
-    local decodeOk, data = pcall(function()
-        return self.HttpService:JSONDecode(responseBody)
+    -- The reference hubs use the game's server-browser remote, which handles
+    -- the teleport handshake as well as listing server instances.
+    local invokeOk, data = pcall(function()
+        return serverBrowser:InvokeServer(page)
     end)
-    if not decodeOk or type(data) ~= "table" or type(data.data) ~= "table" then
-        return nil, "Roblox returned an invalid public server list"
+    if not invokeOk then
+        return nil, "The game's server browser request failed: " .. tostring(data)
+    end
+    if type(data) ~= "table" then
+        return nil, "The game's server browser returned an invalid page"
+    end
+
+    local maxPlayers = tonumber(self.Players and self.Players.MaxPlayers) or 12
+    local servers = {}
+    for jobId, info in pairs(data) do
+        if type(jobId) == "string" and type(info) == "table" then
+            local playing = tonumber(info.Count or info.playing)
+            if playing then
+                servers[#servers + 1] = {
+                    id = jobId,
+                    playing = playing,
+                    maxPlayers = tonumber(info.MaxPlayers or info.maxPlayers)
+                        or maxPlayers,
+                }
+            end
+        end
     end
     return {
-        Servers = data.data,
-        NextCursor = type(data.nextPageCursor) == "string"
-            and data.nextPageCursor
-            or nil,
+        Servers = servers,
+        NextCursor = page < 100 and tostring(page + 1) or nil,
     }
 end
 
@@ -352,26 +308,20 @@ function Compatibility:TeleportToPublicServer(jobId)
         return false, "This is already the current server"
     end
 
-    local teleportService
-    local serviceOk, service = pcall(function()
-        return game:GetService("TeleportService")
-    end)
-    if serviceOk then
-        teleportService = service
-    end
-    if not teleportService or not self.Player then
-        return false, "Server joining is unavailable"
+    local serverBrowser = self.ReplicatedStorage
+        and self.ReplicatedStorage:FindFirstChild("__ServerBrowser")
+    if not serverBrowser or not serverBrowser:IsA("RemoteFunction") then
+        return false, "The game's server browser remote is unavailable"
     end
 
-    local teleportOk, teleportError = pcall(function()
-        teleportService:TeleportToPlaceInstance(
-            game.PlaceId,
-            jobId,
-            self.Player
-        )
+    local teleportOk, result = pcall(function()
+        return serverBrowser:InvokeServer("teleport", jobId)
     end)
     if not teleportOk then
-        return false, tostring(teleportError)
+        return false, tostring(result)
+    end
+    if result == false then
+        return false, "The game's server browser rejected the destination"
     end
     return true
 end

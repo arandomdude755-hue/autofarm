@@ -3,6 +3,7 @@ SettingsPersistence.__index = SettingsPersistence
 
 local SCHEMA_VERSION = 2
 local SETTINGS_FOLDER = "CustomHub"
+local HOP_SESSION_FILE_PREFIX = SETTINGS_FOLDER .. "/hop_session_"
 local SAVE_DEBOUNCE_SECONDS = 0.6
 local SETTING_KINDS = {
     settingDropdown = true,
@@ -132,11 +133,11 @@ function SettingsPersistence.new(config, compatibility)
         State = nil,
         Storage = nil,
         Path = nil,
+        HopPath = nil,
         InterfacePreferences = nil,
         Rules = {},
         LastSnapshot = nil,
         HopSession = nil,
-        LastHopSession = nil,
         SaveGeneration = 0,
         Destroyed = false,
         ReadOnly = false,
@@ -193,7 +194,9 @@ function SettingsPersistence:_InitializeStorage()
     end
 
     self.Storage = storage
-    self.Path = SETTINGS_FOLDER .. "/settings_" .. tostring(userId) .. ".json"
+    local userIdText = tostring(userId)
+    self.Path = SETTINGS_FOLDER .. "/settings_" .. userIdText .. ".json"
+    self.HopPath = HOP_SESSION_FILE_PREFIX .. userIdText .. ".json"
 end
 
 function SettingsPersistence:SetState(state)
@@ -313,6 +316,41 @@ function SettingsPersistence:_ApplySavedSettings(data)
     end
 end
 
+function SettingsPersistence:_LoadHopSession(legacySession)
+    self.HopSession = validateHopSession(legacySession)
+    if not self.Storage or not self.HopPath then
+        return
+    end
+
+    local fileExists
+    if type(self.Storage.Exists) == "function" then
+        local existsOk, exists = pcall(self.Storage.Exists, self.HopPath)
+        if existsOk and type(exists) == "boolean" then
+            fileExists = exists
+        end
+    end
+    if fileExists == false then
+        return
+    end
+
+    local readOk, content = pcall(self.Storage.Read, self.HopPath)
+    if not readOk or type(content) ~= "string" or content == "" then
+        if fileExists == true then
+            self.HopSession = nil
+        end
+        return
+    end
+
+    local decodeOk, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    if decodeOk and type(data) == "table" then
+        self.HopSession = validateHopSession(data)
+    else
+        self.HopSession = nil
+    end
+end
+
 function SettingsPersistence:Load()
     if not self.Storage or not self.Path then
         self.LastSnapshot = self:_Capture()
@@ -328,12 +366,14 @@ function SettingsPersistence:Load()
     end
 
     if fileExists == false then
+        self:_LoadHopSession(nil)
         self.LastSnapshot = self:_Capture()
         return true
     end
 
     local readOk, content = pcall(self.Storage.Read, self.Path)
     if not readOk or type(content) ~= "string" or content == "" then
+        self:_LoadHopSession(nil)
         self.LastSnapshot = self:_Capture()
         if fileExists == true then
             self.LoadWarning = "Saved settings could not be read; defaults are active."
@@ -345,6 +385,7 @@ function SettingsPersistence:Load()
         return game:GetService("HttpService"):JSONDecode(content)
     end)
     if not decodeOk or type(data) ~= "table" then
+        self:_LoadHopSession(nil)
         self.LoadWarning = "Saved settings are invalid; defaults are active."
         self.LastSnapshot = self:_Capture()
         return true
@@ -359,8 +400,7 @@ function SettingsPersistence:Load()
     end
 
     self:_ApplySavedSettings(data)
-    self.HopSession = validateHopSession(data.HopSession)
-    self.LastHopSession = copyTable(self.HopSession)
+    self:_LoadHopSession(data.HopSession)
     self.LoadedFromFile = true
     self.LastSnapshot = self:_Capture()
     return true
@@ -387,21 +427,12 @@ function SettingsPersistence:Save(force)
     end
 
     local snapshot = self:_Capture()
-    local hopSession = copyTable(self.HopSession)
-    if not force
-        and self.LastSnapshot
-        and deepEqual(snapshot, self.LastSnapshot)
-        and deepEqual(hopSession, self.LastHopSession)
-    then
+    if not force and self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
         return true
     end
 
-    local document = copyTable(snapshot)
-    if hopSession then
-        document.HopSession = hopSession
-    end
     local encodeOk, content = pcall(function()
-        return game:GetService("HttpService"):JSONEncode(document)
+        return game:GetService("HttpService"):JSONEncode(snapshot)
     end)
     if not encodeOk or type(content) ~= "string" then
         self:_ReportSaveError("Could not encode settings")
@@ -416,7 +447,6 @@ function SettingsPersistence:Save(force)
     end
 
     self.LastSnapshot = snapshot
-    self.LastHopSession = copyTable(hopSession)
     self.LoadWarning = nil
     return true
 end
@@ -425,7 +455,7 @@ function SettingsPersistence:CanPersistHopSession()
     return not self.Destroyed
         and not self.ReadOnly
         and self.Storage ~= nil
-        and self.Path ~= nil
+        and self.HopPath ~= nil
 end
 
 function SettingsPersistence:GetHopSession()
@@ -441,7 +471,21 @@ function SettingsPersistence:SetHopSession(session)
         return false, "Hop session data is invalid or expired"
     end
     self.HopSession = validated
-    return self:Save(true)
+    local encodeOk, content = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(validated)
+    end)
+    if not encodeOk or type(content) ~= "string" then
+        return false, "Hop session could not be encoded"
+    end
+    local writeOk, written, writeError = pcall(
+        self.Storage.Write,
+        self.HopPath,
+        content
+    )
+    if not writeOk or written ~= true then
+        return false, tostring(writeError or written or "Hop session could not be saved")
+    end
+    return true
 end
 
 function SettingsPersistence:ClearHopSession()
@@ -450,7 +494,15 @@ function SettingsPersistence:ClearHopSession()
         return false, self.LoadWarning or "Local settings storage is unavailable"
     end
     self.HopSession = nil
-    return self:Save(true)
+    local writeOk, written, writeError = pcall(
+        self.Storage.Write,
+        self.HopPath,
+        "{}"
+    )
+    if not writeOk or written ~= true then
+        return false, tostring(writeError or written or "Hop session could not be cleared")
+    end
+    return true
 end
 
 function SettingsPersistence:ScheduleSave()

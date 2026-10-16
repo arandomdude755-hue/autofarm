@@ -37,16 +37,16 @@ require(
     "server hop options must default off and startup team must default to Marines",
 )
 require(
-    "games.roblox.com/v1/games/" in COMPATIBILITY
+    'FindFirstChild("__ServerBrowser")' in COMPATIBILITY
     and "function Compatibility:GetPublicServers(cursor)" in COMPATIBILITY
-    and '"/servers/Public?sortOrder=Asc&limit=25"' in COMPATIBILITY
+    and "serverBrowser:InvokeServer(page)" in COMPATIBILITY
+    and "serverBrowser:InvokeServer(\"teleport\", jobId)" in COMPATIBILITY
     and "function Compatibility:TeleportToPublicServer(jobId)" in COMPATIBILITY
-    and "local placeId = tonumber(game.PlaceId)" in COMPATIBILITY
-    and "game.PlaceId,\n            jobId," in COMPATIBILITY
+    and "TeleportToPlaceInstance" not in COMPATIBILITY
     and "playing < maxPlayers" in HOP
     and "not self:_IsVisited(jobId)" in HOP
     and "math.random(1, #candidates)" in HOP,
-    "server hopping must use the public server list and skip current, full, or visited servers",
+    "server hopping must use the game's server browser for listings and teleport handshakes",
 )
 require(
     "function SettingsPersistence:SetHopSession(session)" in PERSISTENCE
@@ -77,6 +77,13 @@ require(
     "hop should reduce pre-join persistence work and preserve the actual Roblox join/fetch errors",
 )
 require(
+    'HOP_SESSION_FILE_PREFIX = SETTINGS_FOLDER .. "/hop_session_"' in PERSISTENCE
+    and "self.HopPath = HOP_SESSION_FILE_PREFIX .. userIdText .. \".json\"" in PERSISTENCE
+    and "self.Storage.Write,\n        self.HopPath,\n        content" in PERSISTENCE
+    and "document.HopSession" not in PERSISTENCE,
+    "hop progress must persist in a small dedicated file instead of rewriting all saved settings",
+)
+require(
     "function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)" in COMPATIBILITY
     and 'playerGui:FindFirstChild("Main (minimal)")' in COMPATIBILITY
     and 'playerGui:FindFirstChild("Main")' in COMPATIBILITY
@@ -91,5 +98,5 @@ require(
     "team selection must run before the hub interface is mounted",
 )
 
-print("PASS: Elite Hunter/berry public-server hopping shares Stack Farming and resumes only its own teleport")
+print("PASS: Elite Hunter/berry hopping uses the game's server browser and its teleport handshake")
 print("PASS: startup team selection defaults to Marines and runs before the hub UI")
