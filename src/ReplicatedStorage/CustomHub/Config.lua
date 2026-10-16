@@ -1000,6 +1000,12 @@ local Config = {
                     Description = "Reload Custom Hub after a teleport if your executor supports it.",
                 },
                 {
+                    Kind = "button",
+                    Label = "Test teleport queue",
+                    Action = "settings.autoExecute.probe",
+                    Description = "Turn Auto Execute off first. This test will not reload the hub.",
+                },
+                {
                     Kind = "settingDropdown",
                     Label = "UI size",
                     Action = "settings.uiSize.select",

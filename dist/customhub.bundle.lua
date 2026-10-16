@@ -1029,6 +1029,12 @@ local Config = {
                     Description = "Reload Custom Hub after a teleport if your executor supports it.",
                 },
                 {
+                    Kind = "button",
+                    Label = "Test teleport queue",
+                    Action = "settings.autoExecute.probe",
+                    Description = "Turn Auto Execute off first. This test will not reload the hub.",
+                },
+                {
                     Kind = "settingDropdown",
                     Label = "UI size",
                     Action = "settings.uiSize.select",
@@ -1504,6 +1510,82 @@ end)
         return false, "The executor rejected the queued reload"
     end
     return true, "Auto Execute will reload the current Custom Hub bundle after teleport"
+end
+
+function Compatibility:QueueAutoExecuteProbe()
+    local queueFunction, _, apiName = self:_GetQueueOnTeleport()
+    if type(queueFunction) ~= "function" then
+        return false, apiName
+    end
+
+    local probeId = tostring(math.floor(os.clock() * 1000000))
+    pcall(function()
+        probeId = self.HttpService:GenerateGUID(false)
+    end)
+
+    local queuedSource = string.format([[
+task.spawn(function()
+    local function waitFor(predicate, timeout)
+        local deadline = os.clock() + timeout
+        repeat
+            local ok, result = pcall(predicate)
+            if ok and result then
+                return result
+            end
+            task.wait(0.25)
+        until os.clock() >= deadline
+        return nil
+    end
+
+    if not waitFor(function()
+        return game:IsLoaded()
+    end, 120) then
+        warn("[Custom Hub Queue Probe] Timed out waiting for the new game session. Probe: %s")
+        return
+    end
+
+    local Players = game:GetService("Players")
+    local player = waitFor(function()
+        return Players.LocalPlayer
+    end, 60)
+    if not player then
+        warn("[Custom Hub Queue Probe] LocalPlayer was unavailable. Probe: %s")
+        return
+    end
+
+    local playerGui = waitFor(function()
+        return player:FindFirstChildOfClass("PlayerGui")
+    end, 60)
+    if not playerGui then
+        warn("[Custom Hub Queue Probe] PlayerGui was unavailable. Probe: %s")
+        return
+    end
+
+    local message = "Queued script ran after teleport. Probe: %s; API: %s"
+    warn("[Custom Hub Queue Probe] " .. message)
+    local starterGui = game:GetService("StarterGui")
+    for _ = 1, 20 do
+        local shown = pcall(function()
+            starterGui:SetCore("SendNotification", {
+                Title = "Custom Hub Queue Test",
+                Text = message,
+                Duration = 8,
+            })
+        end)
+        if shown then
+            return
+        end
+        task.wait(0.25)
+    end
+    warn("[Custom Hub Queue Probe] Could not display the confirmation notification.")
+end)
+]], probeId, probeId, probeId, probeId, apiName)
+
+    local queueOk, queueResult = pcall(queueFunction, queuedSource)
+    if not queueOk or queueResult == false then
+        return false, "The executor rejected the queue test"
+    end
+    return true, apiName, probeId
 end
 
 function Compatibility:GetLocalSettingsStorage()
@@ -3689,6 +3771,40 @@ function FeatureManager:Dispatch(actionId, payload)
             "success"
         )
         return true
+    end
+
+    if actionId == "settings.autoExecute.probe" then
+        local startupSettings = self.Context.Config
+            and self.Context.Config.StartupSettings
+        local compatibility = self.Context.Compatibility
+        if not startupSettings or not compatibility then
+            self.State:SetStatus("Queue test is unavailable.", "error")
+            return false, "Auto Execute settings are unavailable"
+        end
+        if startupSettings.AutoExecute == true then
+            self.State:SetStatus(
+                "Turn off Auto Execute before testing the teleport queue.",
+                "error",
+                "Also disable any separate executor auto-execute file for this test."
+            )
+            return false, "Auto Execute must be off while running the queue test"
+        end
+
+        local queued, apiName, probeId = compatibility:QueueAutoExecuteProbe()
+        if not queued then
+            self.State:SetStatus(
+                "Teleport queue test couldn't be queued: " .. tostring(apiName),
+                "error",
+                "This executor did not accept the test script."
+            )
+            return false, apiName
+        end
+
+        self.State:SetStatus(
+            "Queue test armed with " .. tostring(apiName) .. ". Switch servers to test it.",
+            "success"
+        )
+        return true, probeId
     end
 
     if actionId == "settings.uiSize.select" then

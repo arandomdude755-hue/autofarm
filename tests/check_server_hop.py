@@ -116,12 +116,22 @@ require(
     'AutoExecute = true' in CONFIG
     and 'Label = "Auto Execute"' in CONFIG
     and 'Action = "settings.autoExecute"' in CONFIG
+    and 'Label = "Test teleport queue"' in CONFIG
+    and 'Action = "settings.autoExecute.probe"' in CONFIG
     and 'if actionId == "settings.autoExecute" then' in (
+        ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"
+    ).read_text(encoding="utf-8")
+    and 'if actionId == "settings.autoExecute.probe" then' in (
         ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"
     ).read_text(encoding="utf-8")
     and 'AUTO_EXECUTE_SOURCE_URL = "https://raw.githubusercontent.com/arandomdude755-hue/autofarm/dev/dist/customhub.bundle.lua"' in COMPATIBILITY
     and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
     and "function Compatibility:SetAutoExecuteEnabled(enabled)" in COMPATIBILITY
+    and "function Compatibility:QueueAutoExecuteProbe()" in COMPATIBILITY
+    and 'starterGui:SetCore("SendNotification"' in COMPATIBILITY
+    and "startupSettings.AutoExecute == true" in (
+        ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"
+    ).read_text(encoding="utf-8")
     and '"queue_on_teleport"' in COMPATIBILITY
     and '"queueonteleport"' in COMPATIBILITY
     and '"queueOnTeleport"' in COMPATIBILITY

@@ -126,6 +126,40 @@ function FeatureManager:Dispatch(actionId, payload)
         return true
     end
 
+    if actionId == "settings.autoExecute.probe" then
+        local startupSettings = self.Context.Config
+            and self.Context.Config.StartupSettings
+        local compatibility = self.Context.Compatibility
+        if not startupSettings or not compatibility then
+            self.State:SetStatus("Queue test is unavailable.", "error")
+            return false, "Auto Execute settings are unavailable"
+        end
+        if startupSettings.AutoExecute == true then
+            self.State:SetStatus(
+                "Turn off Auto Execute before testing the teleport queue.",
+                "error",
+                "Also disable any separate executor auto-execute file for this test."
+            )
+            return false, "Auto Execute must be off while running the queue test"
+        end
+
+        local queued, apiName, probeId = compatibility:QueueAutoExecuteProbe()
+        if not queued then
+            self.State:SetStatus(
+                "Teleport queue test couldn't be queued: " .. tostring(apiName),
+                "error",
+                "This executor did not accept the test script."
+            )
+            return false, apiName
+        end
+
+        self.State:SetStatus(
+            "Queue test armed with " .. tostring(apiName) .. ". Switch servers to test it.",
+            "success"
+        )
+        return true, probeId
+    end
+
     if actionId == "settings.uiSize.select" then
         local layout = self.Context.Config and self.Context.Config.Layout
         local footprints = layout and layout.UiSizeFootprints
