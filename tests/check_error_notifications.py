@@ -19,10 +19,13 @@ def require(condition, message):
 
 require(
     "notification = self._values.notification" in STATE
-    and "function State:_QueueErrorNotification(playerMessage, kind)" in STATE
+    and "function State:_QueueErrorNotification(playerMessage, kind, options)" in STATE
     and 'if kind == "error" or (kind == "warning" and playerMessage ~= nil) then' in STATE
-    and '"That action couldn\'t be completed. Check the hub status line for details."' in STATE,
-    "State must expose a player-readable error notification and keep generic errors non-technical",
+    and '"That action couldn\'t be completed. Check the hub status line for details."' in STATE
+    and "local cooldown = tonumber(options.Cooldown) or 30" in STATE
+    and "function State:ClearNotification(key)" in STATE
+    and "self._values.notification = nil" in STATE,
+    "State must deduplicate repeated issues, clear resolved alerts, and keep messages player-readable",
 )
 require(
     'kind == "warning" and playerMessage ~= nil' in STATE
@@ -36,8 +39,17 @@ require(
     and "UDim2.new(1, -16, 1, -16)" in UI
     and "self:_ShowNotification(snapshot.notification)" in UI
     and "task.delay(4.5" in UI
+    and "function UI:_HideNotification()" in UI
+    and "if self.CurrentNotificationPersistent then" in UI
     and "theme.Error" in UI,
-    "the error toast must use the hub theme, appear bottom-right, and dismiss automatically",
+    "the error toast must use the hub theme, appear bottom-right, and support persistent resolution-aware alerts",
+)
+require(
+    'Key = "indra_missing_haki"' in MAIN_FARM
+    and "Persistent = true" in MAIN_FARM
+    and 'state:ClearNotification("indra_missing_haki")' in MAIN_FARM
+    and "current.Persistent = current.Persistent or options.Persistent == true" in STATE,
+    "Indra's missing-color alert should remain visible once and clear when its condition is resolved or cancelled",
 )
 require(
     "control.LockedBySetting" in UI

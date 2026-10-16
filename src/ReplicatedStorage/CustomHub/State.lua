@@ -17,8 +17,8 @@ function State.new(defaults)
         featureEnabled = {},
     }
     self._notificationSerial = 0
-    self._lastNotificationKey = nil
-    self._lastNotificationAt = 0
+    self._activeNotificationKey = nil
+    self._notificationLastShownAt = {}
     return self
 end
 
@@ -73,30 +73,64 @@ function State:Subscribe(listener)
     }
 end
 
-function State:_QueueErrorNotification(playerMessage, kind)
+function State:_QueueErrorNotification(playerMessage, kind, options)
     local notificationKind = kind == "warning" and "warning" or "error"
     local title = notificationKind == "warning" and "Action needed" or "Action unavailable"
     local body = tostring(
         playerMessage
             or "That action couldn't be completed. Check the hub status line for details."
     )
-    local key = title .. "\0" .. body
+    options = type(options) == "table" and options or {}
+    local key = tostring(options.Key or (title .. "\0" .. body))
     local now = os.clock()
-    if key == self._lastNotificationKey and now - self._lastNotificationAt < 1.25 then
+
+    local current = self._values.notification
+    local cooldown = tonumber(options.Cooldown) or 30
+    local lastShownAt = self._notificationLastShownAt[key]
+    if current and current.Key == key
+        and (current.Persistent == true or not lastShownAt or now - lastShownAt < cooldown)
+    then
+        current.Message = body
+        current.Title = title
+        current.Kind = notificationKind
+        current.Persistent = current.Persistent or options.Persistent == true
+        self._activeNotificationKey = key
         return
     end
-    self._lastNotificationKey = key
-    self._lastNotificationAt = now
+
+    if lastShownAt and now - lastShownAt < cooldown then
+        self._activeNotificationKey = key
+        return
+    end
+
+    self._notificationLastShownAt[key] = now
+    self._activeNotificationKey = key
     self._notificationSerial += 1
     self._values.notification = {
         Id = self._notificationSerial,
+        Key = key,
         Title = title,
         Message = body,
         Kind = notificationKind,
+        Persistent = options.Persistent == true,
     }
 end
 
-function State:SetStatus(message, kind, playerMessage)
+function State:ClearNotification(key)
+    local notification = self._values.notification
+    if key ~= nil and (not notification or notification.Key ~= key) then
+        return false
+    end
+    self._activeNotificationKey = nil
+    self._values.notification = nil
+    if key ~= nil then
+        self._notificationLastShownAt[key] = nil
+    end
+    self:_Notify()
+    return true
+end
+
+function State:SetStatus(message, kind, playerMessage, notificationOptions)
     local text = tostring(message)
     if #text > self._maxStatusCharacters then
         text = text:sub(1, self._maxStatusCharacters - 3) .. "..."
@@ -104,7 +138,9 @@ function State:SetStatus(message, kind, playerMessage)
     self._values.status = text
     self._values.statusKind = kind or "info"
     if kind == "error" or (kind == "warning" and playerMessage ~= nil) then
-        self:_QueueErrorNotification(playerMessage, kind)
+        self:_QueueErrorNotification(playerMessage, kind, notificationOptions)
+    else
+        self._activeNotificationKey = nil
     end
     self:_Notify()
 end

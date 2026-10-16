@@ -1087,8 +1087,8 @@ function State.new(defaults)
         featureEnabled = {},
     }
     self._notificationSerial = 0
-    self._lastNotificationKey = nil
-    self._lastNotificationAt = 0
+    self._activeNotificationKey = nil
+    self._notificationLastShownAt = {}
     return self
 end
 
@@ -1143,30 +1143,64 @@ function State:Subscribe(listener)
     }
 end
 
-function State:_QueueErrorNotification(playerMessage, kind)
+function State:_QueueErrorNotification(playerMessage, kind, options)
     local notificationKind = kind == "warning" and "warning" or "error"
     local title = notificationKind == "warning" and "Action needed" or "Action unavailable"
     local body = tostring(
         playerMessage
             or "That action couldn't be completed. Check the hub status line for details."
     )
-    local key = title .. "\0" .. body
+    options = type(options) == "table" and options or {}
+    local key = tostring(options.Key or (title .. "\0" .. body))
     local now = os.clock()
-    if key == self._lastNotificationKey and now - self._lastNotificationAt < 1.25 then
+
+    local current = self._values.notification
+    local cooldown = tonumber(options.Cooldown) or 30
+    local lastShownAt = self._notificationLastShownAt[key]
+    if current and current.Key == key
+        and (current.Persistent == true or not lastShownAt or now - lastShownAt < cooldown)
+    then
+        current.Message = body
+        current.Title = title
+        current.Kind = notificationKind
+        current.Persistent = current.Persistent or options.Persistent == true
+        self._activeNotificationKey = key
         return
     end
-    self._lastNotificationKey = key
-    self._lastNotificationAt = now
+
+    if lastShownAt and now - lastShownAt < cooldown then
+        self._activeNotificationKey = key
+        return
+    end
+
+    self._notificationLastShownAt[key] = now
+    self._activeNotificationKey = key
     self._notificationSerial += 1
     self._values.notification = {
         Id = self._notificationSerial,
+        Key = key,
         Title = title,
         Message = body,
         Kind = notificationKind,
+        Persistent = options.Persistent == true,
     }
 end
 
-function State:SetStatus(message, kind, playerMessage)
+function State:ClearNotification(key)
+    local notification = self._values.notification
+    if key ~= nil and (not notification or notification.Key ~= key) then
+        return false
+    end
+    self._activeNotificationKey = nil
+    self._values.notification = nil
+    if key ~= nil then
+        self._notificationLastShownAt[key] = nil
+    end
+    self:_Notify()
+    return true
+end
+
+function State:SetStatus(message, kind, playerMessage, notificationOptions)
     local text = tostring(message)
     if #text > self._maxStatusCharacters then
         text = text:sub(1, self._maxStatusCharacters - 3) .. "..."
@@ -1174,7 +1208,9 @@ function State:SetStatus(message, kind, playerMessage)
     self._values.status = text
     self._values.statusKind = kind or "info"
     if kind == "error" or (kind == "warning" and playerMessage ~= nil) then
-        self:_QueueErrorNotification(playerMessage, kind)
+        self:_QueueErrorNotification(playerMessage, kind, notificationOptions)
+    else
+        self._activeNotificationKey = nil
     end
     self:_Notify()
 end
@@ -2605,6 +2641,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         NotificationTween = nil,
         NotificationGeneration = 0,
         LastNotificationId = 0,
+        CurrentNotificationPersistent = false,
         TabButtons = {},
         TabLabels = {},
         TabMarkers = {},
@@ -3116,6 +3153,8 @@ function UI:_Refresh(snapshot)
     end
     if snapshot.notification then
         self:_ShowNotification(snapshot.notification)
+    elseif self.NotificationFrame and self.NotificationFrame.Visible then
+        self:_HideNotification()
     end
 
     for tabName, button in pairs(self.TabButtons) do
@@ -3248,7 +3287,23 @@ end
 
 function UI:_ShowNotification(notification)
     local frame = self.NotificationFrame
-    if not frame or not notification or notification.Id <= self.LastNotificationId then
+    if not frame or not notification or notification.Id < self.LastNotificationId then
+        return
+    end
+    if notification.Id == self.LastNotificationId then
+        local wasPersistent = self.CurrentNotificationPersistent
+        self.NotificationTitle.Text = notification.Title or "Action unavailable"
+        self.NotificationMessage.Text = tostring(notification.Message or "")
+        self.CurrentNotificationPersistent = notification.Persistent == true
+        if self.CurrentNotificationPersistent and not wasPersistent then
+            self.NotificationGeneration += 1
+            if self.NotificationTween then
+                self.NotificationTween:Cancel()
+                self.NotificationTween = nil
+            end
+            frame.Position = UDim2.new(1, -16, 1, -16)
+            frame.Visible = true
+        end
         return
     end
     self.LastNotificationId = notification.Id
@@ -3268,6 +3323,7 @@ function UI:_ShowNotification(notification)
     self.NotificationAccent.BackgroundColor3 = accent
     self.NotificationStroke.Color = accent
     self.NotificationTitle.TextColor3 = accent
+    self.CurrentNotificationPersistent = notification.Persistent == true
 
     local showTween = TweenService:Create(
         frame,
@@ -3277,6 +3333,9 @@ function UI:_ShowNotification(notification)
     self.NotificationTween = showTween
     showTween:Play()
 
+    if self.CurrentNotificationPersistent then
+        return
+    end
     task.delay(4.5, function()
         if self.NotificationGeneration ~= generation
             or not self.NotificationFrame
@@ -3301,6 +3360,18 @@ function UI:_ShowNotification(notification)
             end
         end)
     end)
+end
+
+function UI:_HideNotification()
+    self.NotificationGeneration += 1
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
+    if self.NotificationFrame then
+        self.NotificationFrame.Visible = false
+    end
+    self.CurrentNotificationPersistent = false
 end
 
 function UI:_ClearPage()
@@ -15669,7 +15740,7 @@ local function diagnosticSeaName(compatibility)
     return "Unknown"
 end
 
-function MainFarm:_SetStatus(message, kind, playerMessage)
+function MainFarm:_SetStatus(message, kind, playerMessage, notificationOptions)
     local now = os.clock()
     if self.LastStatus == message
         and self.LastStatusPlayerMessage == playerMessage
@@ -15681,7 +15752,7 @@ function MainFarm:_SetStatus(message, kind, playerMessage)
     self.LastStatusAt = now
     self.LastStatusPlayerMessage = playerMessage
     if self.Context and self.Context.State then
-        self.Context.State:SetStatus(message, kind, playerMessage)
+        self.Context.State:SetStatus(message, kind, playerMessage, notificationOptions)
     end
 end
 
@@ -16156,6 +16227,10 @@ function MainFarm:_BeginStackPreparation(kind, toolName)
 end
 
 function MainFarm:_CancelStackPreparation(message)
+    local state = self.Context and self.Context.State
+    if state and type(state.ClearNotification) == "function" then
+        state:ClearNotification("indra_missing_haki")
+    end
     self.ActiveStackPrep = nil
     self:_ClearTarget()
     if self.MovementService then
@@ -16381,13 +16456,23 @@ function MainFarm:_StepStackPreparation(session, root, prep)
                 end
             end
         end
-        if #missing > 0 and not prep.MissingNotified then
+        if #missing > 0 then
             prep.MissingNotified = true
             self:_SetStatus(
                 "Missing Legendary Haki color(s): " .. table.concat(missing, ", "),
                 "warning",
-                "Rip Indra needs the missing Haki color(s): " .. table.concat(missing, ", ")
+                "Rip Indra needs the missing Haki color(s): " .. table.concat(missing, ", "),
+                {
+                    Key = "indra_missing_haki",
+                    Persistent = true,
+                }
             )
+        else
+            local state = self.Context and self.Context.State
+            if state and type(state.ClearNotification) == "function" then
+                state:ClearNotification("indra_missing_haki")
+            end
+            prep.MissingNotified = false
         end
         if nextPad then
             self:_ActivateIndraColor(prep, nextPad.Color)

@@ -146,6 +146,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         NotificationTween = nil,
         NotificationGeneration = 0,
         LastNotificationId = 0,
+        CurrentNotificationPersistent = false,
         TabButtons = {},
         TabLabels = {},
         TabMarkers = {},
@@ -657,6 +658,8 @@ function UI:_Refresh(snapshot)
     end
     if snapshot.notification then
         self:_ShowNotification(snapshot.notification)
+    elseif self.NotificationFrame and self.NotificationFrame.Visible then
+        self:_HideNotification()
     end
 
     for tabName, button in pairs(self.TabButtons) do
@@ -789,7 +792,23 @@ end
 
 function UI:_ShowNotification(notification)
     local frame = self.NotificationFrame
-    if not frame or not notification or notification.Id <= self.LastNotificationId then
+    if not frame or not notification or notification.Id < self.LastNotificationId then
+        return
+    end
+    if notification.Id == self.LastNotificationId then
+        local wasPersistent = self.CurrentNotificationPersistent
+        self.NotificationTitle.Text = notification.Title or "Action unavailable"
+        self.NotificationMessage.Text = tostring(notification.Message or "")
+        self.CurrentNotificationPersistent = notification.Persistent == true
+        if self.CurrentNotificationPersistent and not wasPersistent then
+            self.NotificationGeneration += 1
+            if self.NotificationTween then
+                self.NotificationTween:Cancel()
+                self.NotificationTween = nil
+            end
+            frame.Position = UDim2.new(1, -16, 1, -16)
+            frame.Visible = true
+        end
         return
     end
     self.LastNotificationId = notification.Id
@@ -809,6 +828,7 @@ function UI:_ShowNotification(notification)
     self.NotificationAccent.BackgroundColor3 = accent
     self.NotificationStroke.Color = accent
     self.NotificationTitle.TextColor3 = accent
+    self.CurrentNotificationPersistent = notification.Persistent == true
 
     local showTween = TweenService:Create(
         frame,
@@ -818,6 +838,9 @@ function UI:_ShowNotification(notification)
     self.NotificationTween = showTween
     showTween:Play()
 
+    if self.CurrentNotificationPersistent then
+        return
+    end
     task.delay(4.5, function()
         if self.NotificationGeneration ~= generation
             or not self.NotificationFrame
@@ -842,6 +865,18 @@ function UI:_ShowNotification(notification)
             end
         end)
     end)
+end
+
+function UI:_HideNotification()
+    self.NotificationGeneration += 1
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
+    if self.NotificationFrame then
+        self.NotificationFrame.Visible = false
+    end
+    self.CurrentNotificationPersistent = false
 end
 
 function UI:_ClearPage()

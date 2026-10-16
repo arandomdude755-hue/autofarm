@@ -180,7 +180,7 @@ local function diagnosticSeaName(compatibility)
     return "Unknown"
 end
 
-function MainFarm:_SetStatus(message, kind, playerMessage)
+function MainFarm:_SetStatus(message, kind, playerMessage, notificationOptions)
     local now = os.clock()
     if self.LastStatus == message
         and self.LastStatusPlayerMessage == playerMessage
@@ -192,7 +192,7 @@ function MainFarm:_SetStatus(message, kind, playerMessage)
     self.LastStatusAt = now
     self.LastStatusPlayerMessage = playerMessage
     if self.Context and self.Context.State then
-        self.Context.State:SetStatus(message, kind, playerMessage)
+        self.Context.State:SetStatus(message, kind, playerMessage, notificationOptions)
     end
 end
 
@@ -667,6 +667,10 @@ function MainFarm:_BeginStackPreparation(kind, toolName)
 end
 
 function MainFarm:_CancelStackPreparation(message)
+    local state = self.Context and self.Context.State
+    if state and type(state.ClearNotification) == "function" then
+        state:ClearNotification("indra_missing_haki")
+    end
     self.ActiveStackPrep = nil
     self:_ClearTarget()
     if self.MovementService then
@@ -892,13 +896,23 @@ function MainFarm:_StepStackPreparation(session, root, prep)
                 end
             end
         end
-        if #missing > 0 and not prep.MissingNotified then
+        if #missing > 0 then
             prep.MissingNotified = true
             self:_SetStatus(
                 "Missing Legendary Haki color(s): " .. table.concat(missing, ", "),
                 "warning",
-                "Rip Indra needs the missing Haki color(s): " .. table.concat(missing, ", ")
+                "Rip Indra needs the missing Haki color(s): " .. table.concat(missing, ", "),
+                {
+                    Key = "indra_missing_haki",
+                    Persistent = true,
+                }
             )
+        else
+            local state = self.Context and self.Context.State
+            if state and type(state.ClearNotification) == "function" then
+                state:ClearNotification("indra_missing_haki")
+            end
+            prep.MissingNotified = false
         end
         if nextPad then
             self:_ActivateIndraColor(prep, nextPad.Color)
