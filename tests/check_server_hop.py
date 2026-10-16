@@ -99,6 +99,7 @@ require(
     and "button.Selectable = true" in COMPATIBILITY
     and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
     and "player.Team and (not chooseTeam or not promptVisible)" in COMPATIBILITY
+    and "task.delay(0.25, clearGuiSelection)" in COMPATIBILITY
     and "VirtualInputManager" in COMPATIBILITY
     and "button:Activate()" in COMPATIBILITY
     and "self.Compatibility:SelectTeamIfPrompted" in HUB,

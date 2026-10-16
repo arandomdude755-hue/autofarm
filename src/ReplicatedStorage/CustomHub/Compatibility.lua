@@ -180,6 +180,12 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         return false, "PlayerGui is unavailable"
     end
 
+    local function clearGuiSelection()
+        pcall(function()
+            game:GetService("GuiService").SelectedObject = nil
+        end)
+    end
+
     local timeout = math.clamp(tonumber(timeoutSeconds) or 20, 0, 30)
     local deadline = os.clock() + timeout
     local attempted = false
@@ -202,6 +208,8 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         end
         local promptVisible = chooseTeam ~= nil and chooseTeam.Visible == true
         if player.Team and (not chooseTeam or not promptVisible) then
+            clearGuiSelection()
+            task.delay(0.25, clearGuiSelection)
             return true, "Team selected"
         end
 
