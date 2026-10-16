@@ -94,6 +94,38 @@ function FeatureManager:Dispatch(actionId, payload)
         return true
     end
 
+    if actionId == "settings.autoExecute" then
+        local startupSettings = self.Context.Config
+            and self.Context.Config.StartupSettings
+        local compatibility = self.Context.Compatibility
+        if not startupSettings or type(payload) ~= "boolean" or not compatibility then
+            self.State:SetStatus("Auto Execute setting is unavailable.", "error")
+            return false, "Invalid Auto Execute setting"
+        end
+
+        local enabled, result = compatibility:SetAutoExecuteEnabled(payload)
+        if payload and not enabled then
+            startupSettings.AutoExecute = false
+            self:_ScheduleSettingsSave()
+            self.State:SetStatus(
+                "Auto Execute isn't available: " .. tostring(result),
+                "error",
+                "This executor can't queue the Custom Hub to reload after a teleport."
+            )
+            return false, result
+        end
+
+        startupSettings.AutoExecute = payload
+        self:_ScheduleSettingsSave()
+        self.State:SetStatus(
+            payload
+                and "Auto Execute enabled; Custom Hub will reload after teleport."
+                or "Auto Execute disabled; any queued reload will be skipped.",
+            "success"
+        )
+        return true
+    end
+
     if actionId == "settings.uiSize.select" then
         local layout = self.Context.Config and self.Context.Config.Layout
         local footprints = layout and layout.UiSizeFootprints

@@ -471,6 +471,7 @@ local Config = {
     },
     StartupSettings = {
         Team = "Marines",
+        AutoExecute = false,
     },
     Layout = {
         MobileWidth = 0.86,
@@ -989,6 +990,14 @@ local Config = {
                     Setting = "Team",
                     SettingsKey = "StartupSettings",
                     Options = { "Marines", "Pirates" },
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto Execute",
+                    Action = "settings.autoExecute",
+                    Setting = "AutoExecute",
+                    SettingsKey = "StartupSettings",
+                    Description = "Reload Custom Hub after a teleport if your executor supports it.",
                 },
                 {
                     Kind = "settingDropdown",

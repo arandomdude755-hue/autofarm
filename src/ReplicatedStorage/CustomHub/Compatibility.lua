@@ -15,6 +15,9 @@ local TITLE_MENU_CLOSE_GUARD_DURATION = 1.5
 local TITLE_LOCKED_CONFIRMATION_DELAY = 0.25
 local TITLE_STATE_CACHE_TTL = 5
 local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
+local AUTO_EXECUTE_SOURCE_URL = "https://raw.githubusercontent.com/arandomdude755-hue/autofarm/dev/dist/customhub.bundle.lua"
+local AUTO_EXECUTE_ENABLED_KEY = "__CUSTOM_HUB_AUTO_EXECUTE"
+local AUTO_EXECUTE_GENERATION_KEY = "__CUSTOM_HUB_AUTO_EXECUTE_GENERATION"
 
 function Compatibility.new()
     return setmetatable({
@@ -28,6 +31,149 @@ function Compatibility.new()
         NpcManager = nil,
         NpcCatalogNames = nil,
     }, Compatibility)
+end
+
+function Compatibility:_GetExecutorEnvironment()
+    local getEnvironment
+    pcall(function()
+        getEnvironment = getgenv
+    end)
+    if type(getEnvironment) == "function" then
+        local ok, environment = pcall(getEnvironment)
+        if ok and type(environment) == "table" then
+            return environment
+        end
+    end
+    return _G
+end
+
+function Compatibility:_GetQueueOnTeleport()
+    local environment = self:_GetExecutorEnvironment()
+    local namespaces = { environment }
+    if type(_G) == "table" and _G ~= environment then
+        table.insert(namespaces, _G)
+    end
+    for _, namespaceName in ipairs({ "syn", "fluxus" }) do
+        local namespace
+        pcall(function()
+            namespace = environment[namespaceName] or _G[namespaceName]
+        end)
+        if type(namespace) == "table" then
+            table.insert(namespaces, namespace)
+        end
+    end
+
+    for _, name in ipairs({
+        "queue_on_teleport",
+        "queueonteleport",
+        "queueOnTeleport",
+        "queue_on_tp",
+    }) do
+        for _, namespace in ipairs(namespaces) do
+            local queueFunction
+            pcall(function()
+                queueFunction = namespace[name]
+            end)
+            if type(queueFunction) == "function" then
+                return queueFunction, environment, name
+            end
+        end
+    end
+    return nil, environment, "queue-on-teleport API is unavailable"
+end
+
+function Compatibility:SetAutoExecuteEnabled(enabled)
+    if type(enabled) ~= "boolean" then
+        return false, "Auto Execute setting is invalid"
+    end
+
+    local queueFunction, environment, apiName = self:_GetQueueOnTeleport()
+    if type(environment) ~= "table" then
+        return false, "Executor global environment is unavailable"
+    end
+    local generation
+    local flagOk = pcall(function()
+        generation = math.floor(
+            tonumber(environment[AUTO_EXECUTE_GENERATION_KEY]) or 0
+        ) + 1
+        environment[AUTO_EXECUTE_GENERATION_KEY] = generation
+        environment[AUTO_EXECUTE_ENABLED_KEY] = enabled
+    end)
+    if not flagOk then
+        return false, "Executor could not save the Auto Execute state"
+    end
+    if not enabled then
+        return true, "Auto Execute disabled; queued reloads will be skipped"
+    end
+    if type(queueFunction) ~= "function" then
+        pcall(function()
+            environment[AUTO_EXECUTE_ENABLED_KEY] = false
+            environment[AUTO_EXECUTE_GENERATION_KEY] = generation + 1
+        end)
+        return false, apiName
+    end
+
+    local queuedSource = string.format([[
+local environment
+local getEnvironment = getgenv
+pcall(function()
+    if type(getEnvironment) == "function" then
+        environment = getEnvironment()
+    end
+end)
+if type(environment) ~= "table" then
+    environment = _G
+end
+if type(environment) ~= "table"
+    or environment.%s ~= true
+    or tonumber(environment.%s) ~= %d
+then
+    return
+end
+task.spawn(function()
+    local startedAt = os.clock()
+    while not game:IsLoaded() and os.clock() - startedAt < 60 do
+        task.wait(0.25)
+    end
+    local Players = game:GetService("Players")
+    while not Players.LocalPlayer
+        or not Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    do
+        if os.clock() - startedAt >= 60 then
+            return
+        end
+        task.wait(0.25)
+    end
+    local ok, source = pcall(function()
+        return game:HttpGet("%s")
+    end)
+    if not ok or type(source) ~= "string" then
+        warn("Custom Hub Auto Execute could not download the current bundle")
+        return
+    end
+    local compileOk, chunk = pcall(function()
+        return loadstring(source)
+    end)
+    if not compileOk or type(chunk) ~= "function" then
+        warn("Custom Hub Auto Execute could not compile the downloaded bundle")
+        return
+    end
+    local runOk = pcall(chunk)
+    if not runOk then
+        warn("Custom Hub Auto Execute failed while starting the downloaded bundle")
+    end
+end)
+]], AUTO_EXECUTE_ENABLED_KEY, AUTO_EXECUTE_GENERATION_KEY, generation, AUTO_EXECUTE_SOURCE_URL)
+
+    local queueOk, queueResult = pcall(queueFunction, queuedSource)
+    if not queueOk or queueResult == false then
+        pcall(function()
+            environment[AUTO_EXECUTE_ENABLED_KEY] = false
+            environment[AUTO_EXECUTE_GENERATION_KEY] = generation + 1
+        end)
+        return false, "The executor rejected the queued reload"
+    end
+    return true, "Auto Execute will reload the current Custom Hub bundle after teleport"
 end
 
 function Compatibility:GetLocalSettingsStorage()
@@ -186,6 +332,15 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         end)
     end
 
+    local function clearGuiSelectionBriefly()
+        task.spawn(function()
+            for _ = 1, 12 do
+                clearGuiSelection()
+                task.wait(0.1)
+            end
+        end)
+    end
+
     local timeout = math.clamp(tonumber(timeoutSeconds) or 20, 0, 30)
     local deadline = os.clock() + timeout
     local attempted = false
@@ -208,8 +363,7 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         end
         local promptVisible = chooseTeam ~= nil and chooseTeam.Visible == true
         if player.Team and (not chooseTeam or not promptVisible) then
-            clearGuiSelection()
-            task.delay(0.25, clearGuiSelection)
+            clearGuiSelectionBriefly()
             return true, "Team selected"
         end
 
@@ -291,6 +445,7 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         end
 
         if player.Team and chooseTeam and not chooseTeam.Visible then
+            clearGuiSelectionBriefly()
             return true, "Team selected"
         end
     end
@@ -299,6 +454,7 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         or playerGui:FindFirstChild("Main")
     local chooseTeam = main and main:FindFirstChild("ChooseTeam")
     if player.Team and (not chooseTeam or not chooseTeam.Visible) then
+        clearGuiSelectionBriefly()
         return true, "A team is already selected"
     end
     if attempted then

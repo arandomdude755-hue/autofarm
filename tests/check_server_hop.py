@@ -99,7 +99,8 @@ require(
     and "button.Selectable = true" in COMPATIBILITY
     and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
     and "player.Team and (not chooseTeam or not promptVisible)" in COMPATIBILITY
-    and "task.delay(0.25, clearGuiSelection)" in COMPATIBILITY
+    and "local function clearGuiSelectionBriefly()" in COMPATIBILITY
+    and "for _ = 1, 12 do" in COMPATIBILITY
     and "VirtualInputManager" in COMPATIBILITY
     and "button:Activate()" in COMPATIBILITY
     and "self.Compatibility:SelectTeamIfPrompted" in HUB,
@@ -110,6 +111,24 @@ require(
     < HUB.index("self.Compatibility:SelectTeamIfPrompted")
     and "self.TeamSelectionTask = task.spawn(function()" in HUB,
     "team selection retries must run in the background without delaying the hub UI",
+)
+require(
+    'AutoExecute = false' in CONFIG
+    and 'Label = "Auto Execute"' in CONFIG
+    and 'Action = "settings.autoExecute"' in CONFIG
+    and 'if actionId == "settings.autoExecute" then' in (
+        ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"
+    ).read_text(encoding="utf-8")
+    and 'AUTO_EXECUTE_SOURCE_URL = "https://raw.githubusercontent.com/arandomdude755-hue/autofarm/dev/dist/customhub.bundle.lua"' in COMPATIBILITY
+    and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
+    and "function Compatibility:SetAutoExecuteEnabled(enabled)" in COMPATIBILITY
+    and '"queue_on_teleport"' in COMPATIBILITY
+    and '"queueonteleport"' in COMPATIBILITY
+    and '"queueOnTeleport"' in COMPATIBILITY
+    and "AUTO_EXECUTE_GENERATION_KEY" in COMPATIBILITY
+    and "AUTO_EXECUTE_ENABLED_KEY" in COMPATIBILITY
+    and 'if startupSettings.AutoExecute == true then' in HUB,
+    "Auto Execute must persist in Main Settings and queue the current bundle across common executor APIs",
 )
 require(
     'function State:PushNotification(title, message, kind, options)' in (

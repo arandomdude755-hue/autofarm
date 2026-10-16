@@ -123,6 +123,15 @@ function Hub:Start()
             "warning"
         )
     end
+    if startupSettings.AutoExecute == true then
+        local queued, queueError = self.Compatibility:SetAutoExecuteEnabled(true)
+        if not queued then
+            self.State:SetStatus(
+                "Auto Execute couldn't be queued: " .. tostring(queueError),
+                "warning"
+            )
+        end
+    end
     return true
 end
 
