@@ -921,7 +921,6 @@ local Config = {
                     Setting = "HopForBerries",
                     SettingsKey = "StackFarmSettings",
                     ParentSetting = "AutoCollectBerries",
-                    RequiredSea = 3,
                     Description = "Requires Collect Berries to be on.",
                 },
                 {
@@ -17930,8 +17929,10 @@ end
 function ServerHopService:_ReadModes()
     local settings = self.Settings or {}
     return {
-        EliteHunter = settings.HopForEliteHunter == true,
-        Berry = settings.HopForBerries == true,
+        EliteHunter = settings.HopForEliteHunter == true
+            and self:_IsModeAvailableInCurrentSea("EliteHunter"),
+        Berry = settings.HopForBerries == true
+            and self:_IsModeAvailableInCurrentSea("Berry"),
     }
 end
 
@@ -17959,6 +17960,29 @@ function ServerHopService:_IsThirdSea()
     end
     local ok, result = pcall(compatibility.IsThirdSea, compatibility)
     return ok and result == true
+end
+
+function ServerHopService:_IsSupportedSea()
+    local compatibility = self.Compatibility
+    for _, methodName in ipairs({ "IsFirstSea", "IsSecondSea", "IsThirdSea" }) do
+        local check = compatibility and compatibility[methodName]
+        if type(check) == "function" then
+            local ok, result = pcall(check, compatibility)
+            if ok and result == true then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function ServerHopService:_IsModeAvailableInCurrentSea(mode)
+    if mode == "EliteHunter" then
+        return self:_IsThirdSea()
+    elseif mode == "Berry" then
+        return self:_IsSupportedSea()
+    end
+    return false
 end
 
 function ServerHopService:_CopySession(session)
@@ -18158,7 +18182,6 @@ function ServerHopService:Initialize(settings)
         and tonumber(savedSession.PlaceId) == tonumber(game.PlaceId)
         and savedSession.PendingJobId == currentJobId
         and savedSession.ExpiresAt > os.time()
-        and self:_IsThirdSea()
         and (modes.EliteHunter or modes.Berry)
 
     if shouldResume then
@@ -18212,8 +18235,10 @@ function ServerHopService:SetEnabled(mode, enabled)
         return false, "Server search setting is invalid"
     end
     if enabled then
-        if not self:_IsThirdSea() then
-            return false, "Elite Hunter and berry hopping is only available in Third Sea"
+        if not self:_IsModeAvailableInCurrentSea(mode) then
+            return false, mode == "EliteHunter"
+                and "Elite Hunter hopping is only available in Third Sea"
+                or "Berry hopping is only available in a game sea"
         end
         local persistence = self.SettingsPersistence
         if not persistence
@@ -18400,12 +18425,6 @@ function ServerHopService:Step()
     if self.Destroyed or not self:_HasEnabledMode() then
         return false
     end
-    if not self:_IsThirdSea() then
-        self:_SetStatus("Server search is only available in Third Sea", "warning")
-        self.NextAttemptAt = os.clock() + 30
-        return false
-    end
-
     if self.InFlight then
         if tostring(game.JobId or "") == self.PendingJobId then
             self.InFlight = false
@@ -18650,6 +18669,19 @@ local function isStackTaskAvailableInCurrentSea(compatibility, kind)
     end
     local ok, isCurrentSea = pcall(check, compatibility)
     return ok and isCurrentSea == true
+end
+
+local function isInSupportedSea(compatibility)
+    for _, methodName in ipairs({ "IsFirstSea", "IsSecondSea", "IsThirdSea" }) do
+        local check = compatibility and compatibility[methodName]
+        if type(check) == "function" then
+            local ok, isCurrentSea = pcall(check, compatibility)
+            if ok and isCurrentSea == true then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local MainFarm = {
@@ -24284,9 +24316,7 @@ function MainFarm:Initialize(context)
             stackSettings.HopForEliteHunter = false
             hopEliteRequested = false
         end
-        if hopBerryRequested
-            and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
-        then
+        if hopBerryRequested and not isInSupportedSea(context.Compatibility) then
             stackSettings.HopForBerries = false
             hopBerryRequested = false
         end
@@ -24824,16 +24854,17 @@ function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, l
         )
         return false
     end
-    if payload and not isStackTaskAvailableInCurrentSea(
-        self.Context.Compatibility,
-        "EliteHunter"
-    ) then
-        self:_SetStatus(
-            "Server search is only available in Third Sea",
-            "error",
-            "Elite Hunter and berry server search only works in Third Sea."
-        )
-        return false
+    if payload then
+        local available = mode == "EliteHunter"
+            and isStackTaskAvailableInCurrentSea(self.Context.Compatibility, "EliteHunter")
+            or mode == "Berry" and isInSupportedSea(self.Context.Compatibility)
+        if not available then
+            local message = mode == "EliteHunter"
+                and "Elite Hunter server search is only available in Third Sea"
+                or "Berry server search needs to be in a game sea"
+            self:_SetStatus(message, "error", message .. ".")
+            return false
+        end
     end
 
     local previousQueueEnabled = queue.Enabled[queueKind] == true

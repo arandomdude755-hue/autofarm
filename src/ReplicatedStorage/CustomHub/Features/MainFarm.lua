@@ -92,6 +92,19 @@ local function isStackTaskAvailableInCurrentSea(compatibility, kind)
     return ok and isCurrentSea == true
 end
 
+local function isInSupportedSea(compatibility)
+    for _, methodName in ipairs({ "IsFirstSea", "IsSecondSea", "IsThirdSea" }) do
+        local check = compatibility and compatibility[methodName]
+        if type(check) == "function" then
+            local ok, isCurrentSea = pcall(check, compatibility)
+            if ok and isCurrentSea == true then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local MainFarm = {
     Running = false,
     MainFarmEnabled = false,
@@ -5724,9 +5737,7 @@ function MainFarm:Initialize(context)
             stackSettings.HopForEliteHunter = false
             hopEliteRequested = false
         end
-        if hopBerryRequested
-            and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
-        then
+        if hopBerryRequested and not isInSupportedSea(context.Compatibility) then
             stackSettings.HopForBerries = false
             hopBerryRequested = false
         end
@@ -6264,16 +6275,17 @@ function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, l
         )
         return false
     end
-    if payload and not isStackTaskAvailableInCurrentSea(
-        self.Context.Compatibility,
-        "EliteHunter"
-    ) then
-        self:_SetStatus(
-            "Server search is only available in Third Sea",
-            "error",
-            "Elite Hunter and berry server search only works in Third Sea."
-        )
-        return false
+    if payload then
+        local available = mode == "EliteHunter"
+            and isStackTaskAvailableInCurrentSea(self.Context.Compatibility, "EliteHunter")
+            or mode == "Berry" and isInSupportedSea(self.Context.Compatibility)
+        if not available then
+            local message = mode == "EliteHunter"
+                and "Elite Hunter server search is only available in Third Sea"
+                or "Berry server search needs to be in a game sea"
+            self:_SetStatus(message, "error", message .. ".")
+            return false
+        end
     end
 
     local previousQueueEnabled = queue.Enabled[queueKind] == true

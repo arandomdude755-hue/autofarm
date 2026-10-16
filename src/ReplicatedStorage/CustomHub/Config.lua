@@ -892,7 +892,6 @@ local Config = {
                     Setting = "HopForBerries",
                     SettingsKey = "StackFarmSettings",
                     ParentSetting = "AutoCollectBerries",
-                    RequiredSea = 3,
                     Description = "Requires Collect Berries to be on.",
                 },
                 {

@@ -26,6 +26,12 @@ UI = (ROOT / "src/ReplicatedStorage/CustomHub/UI.lua").read_text(
 TEAM_SELECT = COMPATIBILITY.split(
     "function Compatibility:SelectTeamIfPrompted", 1
 )[1].split("\nfunction Compatibility:GetPublicServers", 1)[0]
+berry_hop_control = CONFIG.split('Action = "stack.hop.berry.enabled"', 1)[1].split(
+    "\n                },", 1
+)[0]
+elite_hop_control = CONFIG.split(
+    'Action = "stack.hop.eliteHunter.enabled"', 1
+)[1].split("\n                },", 1)[0]
 
 
 def require(condition, message):
@@ -38,9 +44,18 @@ require(
     and "HopForBerries = false" in CONFIG
     and 'Action = "stack.hop.eliteHunter.enabled"' in CONFIG
     and 'Action = "stack.hop.berry.enabled"' in CONFIG
-    and 'RequiredSea = 3' in CONFIG
+    and 'RequiredSea = 3' in elite_hop_control
+    and 'RequiredSea = 3' not in berry_hop_control
     and 'Team = "Marines"' in CONFIG,
-    "server hop options must default off and startup team must default to Marines",
+    "hop options must default off, Elite Hunter hopping stays Third Sea-only, and berry hopping is visible in every sea",
+)
+require(
+    "function ServerHopService:_IsSupportedSea()" in HOP
+    and 'self:_IsModeAvailableInCurrentSea("Berry")' in HOP
+    and "Berry = settings.HopForBerries == true" in HOP
+    and "or mode == \"Berry\" and isInSupportedSea(self.Context.Compatibility)" in MAIN_FARM
+    and "hopBerryRequested and not isInSupportedSea(context.Compatibility)" in MAIN_FARM,
+    "berry hopping should be enabled and restored in any recognized game sea without widening Elite Hunter",
 )
 require(
     'FindFirstChild("__ServerBrowser")' in COMPATIBILITY
