@@ -706,6 +706,34 @@ function MapGatewayService:FindPlan(
     return plan, nil
 end
 
+function MapGatewayService:EstimateTravelDistance(destination, currentPosition)
+    if typeof(destination) ~= "Vector3" or typeof(currentPosition) ~= "Vector3" then
+        return nil, "Travel positions are unavailable"
+    end
+
+    local previousDiagnostic = self.LastDiagnostic
+    local ok, plan = pcall(
+        self.FindPlan,
+        self,
+        destination,
+        currentPosition,
+        "route estimate"
+    )
+    local estimateDiagnostic = self.LastDiagnostic
+    self.LastDiagnostic = previousDiagnostic
+
+    if not ok then
+        return (destination - currentPosition).Magnitude, tostring(plan)
+    end
+    local plannedDistance = estimateDiagnostic
+        and tonumber(estimateDiagnostic.PlannedDistance)
+    local selectedRoutes = estimateDiagnostic and estimateDiagnostic.SelectedRoutes
+    if plannedDistance and type(selectedRoutes) == "table" and #selectedRoutes > 0 then
+        return plannedDistance
+    end
+    return (destination - currentPosition).Magnitude
+end
+
 function MapGatewayService:RecordTravelPhase(phase, route, details)
     local diagnostic = self.LastDiagnostic
     if not diagnostic then

@@ -297,26 +297,6 @@ function MainFarm:_StepStackTasks(session)
         return false
     end
 
-    local entry = self.ActiveStackTask
-    if entry and not queue:IsEnabled(entry) then
-        self:_FinishStackTask(entry, "Stack task turned off", false)
-        return true
-    end
-    if not entry then
-        entry = queue:PopNext()
-        if entry then
-            self:_BeginStackTask(entry)
-        end
-    end
-
-    if not entry then
-        if self.MainFarmEnabled then
-            return false
-        end
-        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
-        return true
-    end
-
     local compatibility = self.Context and self.Context.Compatibility
     local character, humanoid, root
     if compatibility then
@@ -327,6 +307,38 @@ function MainFarm:_StepStackTasks(session)
             self.MovementService:Cancel()
         end
         self:_SetStatus("Stack Farming is waiting for your character", "warning")
+        return true
+    end
+
+    local entry = self.ActiveStackTask
+    if entry and not queue:IsEnabled(entry) then
+        self:_FinishStackTask(entry, "Stack task turned off", false)
+        return true
+    end
+    if not entry then
+        local teleportFeature = self.Context and self.Context.TeleportFeature
+        local estimateTravelCost
+        if teleportFeature
+            and type(teleportFeature.EstimateFarmTravelDistance) == "function"
+        then
+            estimateTravelCost = function(fromPosition, toPosition)
+                return teleportFeature:EstimateFarmTravelDistance(
+                    fromPosition,
+                    toPosition
+                )
+            end
+        end
+        entry = queue:PopNext(root.Position, estimateTravelCost)
+        if entry then
+            self:_BeginStackTask(entry)
+        end
+    end
+
+    if not entry then
+        if self.MainFarmEnabled then
+            return false
+        end
+        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
         return true
     end
 

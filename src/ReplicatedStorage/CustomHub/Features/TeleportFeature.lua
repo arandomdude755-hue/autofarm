@@ -1364,6 +1364,49 @@ function TeleportFeature:MoveFarmTo(destination, options)
     return true, "gateway route selected"
 end
 
+function TeleportFeature:EstimateFarmTravelDistance(currentPosition, destinationPosition)
+    if typeof(currentPosition) ~= "Vector3"
+        or typeof(destinationPosition) ~= "Vector3"
+    then
+        return nil, "Travel positions are unavailable"
+    end
+
+    local destination = CFrame.new(destinationPosition)
+    local specialRoute = self.MovementService
+        and self.MovementService:GetSpecialTravelRoute(destination, currentPosition)
+    if specialRoute then
+        local stagePosition = specialRoute.Stage and specialRoute.Stage.Position
+        local arrivalReference = specialRoute.ArrivalReference
+        if typeof(stagePosition) ~= "Vector3" then
+            return (destinationPosition - currentPosition).Magnitude
+        end
+
+        local approachDistance
+        if specialRoute.Name == "Tiki" then
+            approachDistance = (stagePosition - currentPosition).Magnitude
+        elseif self.GatewayService then
+            approachDistance = self.GatewayService:EstimateTravelDistance(
+                stagePosition,
+                currentPosition
+            )
+        else
+            approachDistance = (stagePosition - currentPosition).Magnitude
+        end
+        local finalDistance = typeof(arrivalReference) == "Vector3"
+                and (destinationPosition - arrivalReference).Magnitude
+            or 0
+        return approachDistance + finalDistance
+    end
+
+    if self.GatewayService then
+        return self.GatewayService:EstimateTravelDistance(
+            destinationPosition,
+            currentPosition
+        )
+    end
+    return (destinationPosition - currentPosition).Magnitude
+end
+
 function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local context = self.Context
     local compatibility = context and context.Compatibility

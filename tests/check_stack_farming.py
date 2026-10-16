@@ -49,15 +49,38 @@ require(
 require(
     "workspaceService.ChildAdded:Connect" in QUEUE
     and "folder.ChildAdded:Connect" in QUEUE
-    and "left.Sequence < right.Sequence" in QUEUE,
-    "spawn discovery must be event-driven and dequeue tasks in observed spawn order",
+    and "left.QueueSequence < right.QueueSequence" in QUEUE
+    and "QueueSequence = spawnSequence" in QUEUE,
+    "spawn discovery must be event-driven and preserve priority across task types",
 )
 require(
     "findFruitHandle(instance)" in QUEUE
     and "instance.DescendantAdded:Connect(checkReady)" in QUEUE
     and "instance.Parent ~= self.Workspace" in QUEUE
-    and "entry.Instance.Parent == self.Workspace" in QUEUE,
+    and "instance.Parent == self.Workspace" in QUEUE,
     "fruit tasks should queue as soon as a real handle is ready and only while the fruit is a world item",
+)
+require(
+    "local function optimizeFruitRun" in QUEUE
+    and "local fullMask = 2 ^ count - 1" in QUEUE
+    and "local ordered = optimizeFruitRun(fruitRun, currentPosition, estimateTravelCost)"
+    in QUEUE
+    and "entry.QueueSequence = queueSlots[fruitIndex]" in QUEUE,
+    "consecutive fruit pickups should use the shortest available route order",
+)
+require(
+    "function MapGatewayService:EstimateTravelDistance" in (
+        ROOT / "src/ReplicatedStorage/CustomHub/Features/MapGatewayService.lua"
+    ).read_text(encoding="utf-8")
+    and "function TeleportFeature:EstimateFarmTravelDistance" in (
+        ROOT / "src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua"
+    ).read_text(encoding="utf-8")
+    and "queue:PopNext(root.Position, estimateTravelCost)" in MAIN_FARM,
+    "fruit route optimization should estimate the shared gateway-aware travel cost",
+)
+require(
+    "while self.Pending[index] and self.Pending[index].Kind == \"Fruit\" do" in QUEUE,
+    "fruit optimization must not reorder across an earlier non-fruit stack task",
 )
 require(
     'self:_EngageModeTarget(target, true, root, session, "stack")' in MAIN_FARM
@@ -90,5 +113,5 @@ require(
 )
 
 print("PASS: Main Farming and Stack Farming are separate nested pages")
-print("PASS: Cake Prince and fruit jobs are FIFO and share one farm worker")
+print("PASS: stack jobs share one worker; fruit batches use gateway-aware route ordering")
 print("PASS: standalone stack jobs and travel conflict handling are wired")

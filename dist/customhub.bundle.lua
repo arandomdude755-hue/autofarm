@@ -7901,6 +7901,34 @@ function MapGatewayService:FindPlan(
     return plan, nil
 end
 
+function MapGatewayService:EstimateTravelDistance(destination, currentPosition)
+    if typeof(destination) ~= "Vector3" or typeof(currentPosition) ~= "Vector3" then
+        return nil, "Travel positions are unavailable"
+    end
+
+    local previousDiagnostic = self.LastDiagnostic
+    local ok, plan = pcall(
+        self.FindPlan,
+        self,
+        destination,
+        currentPosition,
+        "route estimate"
+    )
+    local estimateDiagnostic = self.LastDiagnostic
+    self.LastDiagnostic = previousDiagnostic
+
+    if not ok then
+        return (destination - currentPosition).Magnitude, tostring(plan)
+    end
+    local plannedDistance = estimateDiagnostic
+        and tonumber(estimateDiagnostic.PlannedDistance)
+    local selectedRoutes = estimateDiagnostic and estimateDiagnostic.SelectedRoutes
+    if plannedDistance and type(selectedRoutes) == "table" and #selectedRoutes > 0 then
+        return plannedDistance
+    end
+    return (destination - currentPosition).Magnitude
+end
+
 function MapGatewayService:RecordTravelPhase(phase, route, details)
     local diagnostic = self.LastDiagnostic
     if not diagnostic then
@@ -9799,6 +9827,49 @@ function TeleportFeature:MoveFarmTo(destination, options)
         end
     end)
     return true, "gateway route selected"
+end
+
+function TeleportFeature:EstimateFarmTravelDistance(currentPosition, destinationPosition)
+    if typeof(currentPosition) ~= "Vector3"
+        or typeof(destinationPosition) ~= "Vector3"
+    then
+        return nil, "Travel positions are unavailable"
+    end
+
+    local destination = CFrame.new(destinationPosition)
+    local specialRoute = self.MovementService
+        and self.MovementService:GetSpecialTravelRoute(destination, currentPosition)
+    if specialRoute then
+        local stagePosition = specialRoute.Stage and specialRoute.Stage.Position
+        local arrivalReference = specialRoute.ArrivalReference
+        if typeof(stagePosition) ~= "Vector3" then
+            return (destinationPosition - currentPosition).Magnitude
+        end
+
+        local approachDistance
+        if specialRoute.Name == "Tiki" then
+            approachDistance = (stagePosition - currentPosition).Magnitude
+        elseif self.GatewayService then
+            approachDistance = self.GatewayService:EstimateTravelDistance(
+                stagePosition,
+                currentPosition
+            )
+        else
+            approachDistance = (stagePosition - currentPosition).Magnitude
+        end
+        local finalDistance = typeof(arrivalReference) == "Vector3"
+                and (destinationPosition - arrivalReference).Magnitude
+            or 0
+        return approachDistance + finalDistance
+    end
+
+    if self.GatewayService then
+        return self.GatewayService:EstimateTravelDistance(
+            destinationPosition,
+            currentPosition
+        )
+    end
+    return (destinationPosition - currentPosition).Magnitude
 end
 
 function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
@@ -14381,10 +14452,12 @@ function StackTaskQueue:_Queue(kind, instance)
         return
     end
 
+    local spawnSequence = self:_RememberSpawn(kind, instance)
     local entry = {
         Kind = kind,
         Instance = instance,
-        Sequence = self:_RememberSpawn(kind, instance),
+        Sequence = spawnSequence,
+        QueueSequence = spawnSequence,
         QueuedAt = os.clock(),
         HadHandle = kind == "Fruit",
     }
@@ -14540,28 +14613,177 @@ function StackTaskQueue:IsEnabled(entry)
     return entry ~= nil and self.Enabled[entry.Kind] == true
 end
 
+local function optimizeFruitRun(entries, currentPosition, estimateTravelCost)
+    local count = #entries
+    if count < 2 or typeof(currentPosition) ~= "Vector3" then
+        return entries
+    end
+
+    local positions = {}
+    for index, entry in ipairs(entries) do
+        local handle = findFruitHandle(entry.Instance)
+        if not handle then
+            return entries
+        end
+        positions[index] = handle.Position
+    end
+
+    local costs = {}
+    local function getCost(fromIndex, toIndex)
+        costs[fromIndex] = costs[fromIndex] or {}
+        local cached = costs[fromIndex][toIndex]
+        if cached then
+            return cached
+        end
+
+        local fromPosition = fromIndex == 0 and currentPosition or positions[fromIndex]
+        local toPosition = positions[toIndex]
+        local cost
+        if type(estimateTravelCost) == "function" then
+            local ok, result = pcall(estimateTravelCost, fromPosition, toPosition)
+            if ok and type(result) == "number" and result == result and result < math.huge then
+                cost = result
+            end
+        end
+        if not cost then
+            cost = (toPosition - fromPosition).Magnitude
+        end
+        costs[fromIndex][toIndex] = cost
+        return cost
+    end
+
+    local order = {}
+    if count <= 10 then
+        -- Exact shortest visiting order for the small fruit batches normally seen in a server.
+        local fullMask = 2 ^ count - 1
+        local memo = {}
+        local function solve(mask, lastIndex)
+            if mask == fullMask then
+                return 0
+            end
+            local memoKey = mask * (count + 1) + lastIndex
+            local cached = memo[memoKey]
+            if cached then
+                return cached.Cost
+            end
+
+            local bestCost = math.huge
+            local bestNext
+            for nextIndex = 1, count do
+                local bit = 2 ^ (nextIndex - 1)
+                if math.floor(mask / bit) % 2 == 0 then
+                    local nextMask = mask + bit
+                    local total = getCost(lastIndex, nextIndex)
+                        + solve(nextMask, nextIndex)
+                    if total < bestCost then
+                        bestCost = total
+                        bestNext = nextIndex
+                    end
+                end
+            end
+            memo[memoKey] = { Cost = bestCost, Next = bestNext }
+            return bestCost
+        end
+
+        solve(0, 0)
+        local mask = 0
+        local lastIndex = 0
+        while mask ~= fullMask do
+            local choice = memo[mask * (count + 1) + lastIndex]
+            local nextIndex = choice and choice.Next
+            if not nextIndex then
+                return entries
+            end
+            table.insert(order, nextIndex)
+            mask += 2 ^ (nextIndex - 1)
+            lastIndex = nextIndex
+        end
+    else
+        -- Keep unusually large batches responsive; use gateway-aware nearest-next selection.
+        local remaining = {}
+        for index = 1, count do
+            remaining[index] = true
+        end
+        local lastIndex = 0
+        for _ = 1, count do
+            local bestIndex
+            local bestCost = math.huge
+            for index = 1, count do
+                if remaining[index] then
+                    local cost = getCost(lastIndex, index)
+                    if cost < bestCost then
+                        bestCost = cost
+                        bestIndex = index
+                    end
+                end
+            end
+            if not bestIndex then
+                return entries
+            end
+            table.insert(order, bestIndex)
+            remaining[bestIndex] = nil
+            lastIndex = bestIndex
+        end
+    end
+
+    local ordered = {}
+    for _, index in ipairs(order) do
+        ordered[#ordered + 1] = entries[index]
+    end
+    return ordered
+end
+
 function StackTaskQueue:HasEnabledTasks()
     return self.Enabled.CakePrince == true or self.Enabled.Fruit == true
 end
 
-function StackTaskQueue:PopNext()
+function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
     table.sort(self.Pending, function(left, right)
-        return left.Sequence < right.Sequence
+        return left.QueueSequence < right.QueueSequence
     end)
+
+    local validPending = {}
+    for _, entry in ipairs(self.Pending) do
+        local instance = entry.Instance
+        local isPresent = instance
+            and (
+                entry.Kind == "Fruit"
+                    and instance.Parent == self.Workspace
+                    or entry.Kind ~= "Fruit"
+                    and instance.Parent ~= nil
+            )
+        if self:IsEnabled(entry) and isPresent and not self.CompletedByInstance[instance] then
+            validPending[#validPending + 1] = entry
+        else
+            self.PendingByInstance[instance] = nil
+        end
+    end
+    self.Pending = validPending
+
+    if self.Pending[1] and self.Pending[1].Kind == "Fruit" then
+        local fruitRun = {}
+        local index = 1
+        while self.Pending[index] and self.Pending[index].Kind == "Fruit" do
+            fruitRun[#fruitRun + 1] = self.Pending[index]
+            index += 1
+        end
+        if #fruitRun > 1 then
+            local ordered = optimizeFruitRun(fruitRun, currentPosition, estimateTravelCost)
+            local queueSlots = {}
+            for fruitIndex, entry in ipairs(fruitRun) do
+                queueSlots[fruitIndex] = entry.QueueSequence
+            end
+            for fruitIndex, entry in ipairs(ordered) do
+                entry.QueueSequence = queueSlots[fruitIndex]
+                self.Pending[fruitIndex] = entry
+            end
+        end
+    end
 
     while #self.Pending > 0 do
         local entry = table.remove(self.Pending, 1)
         self.PendingByInstance[entry.Instance] = nil
-        if self:IsEnabled(entry)
-            and entry.Instance
-            and (
-                entry.Kind == "Fruit"
-                    and entry.Instance.Parent == self.Workspace
-                    or entry.Kind ~= "Fruit"
-                    and entry.Instance.Parent ~= nil
-            )
-            and not self.CompletedByInstance[entry.Instance]
-        then
+        if self:IsEnabled(entry) and entry.Instance then
             self.ActiveByInstance[entry.Instance] = true
             return entry
         end
@@ -14910,26 +15132,6 @@ function MainFarm:_StepStackTasks(session)
         return false
     end
 
-    local entry = self.ActiveStackTask
-    if entry and not queue:IsEnabled(entry) then
-        self:_FinishStackTask(entry, "Stack task turned off", false)
-        return true
-    end
-    if not entry then
-        entry = queue:PopNext()
-        if entry then
-            self:_BeginStackTask(entry)
-        end
-    end
-
-    if not entry then
-        if self.MainFarmEnabled then
-            return false
-        end
-        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
-        return true
-    end
-
     local compatibility = self.Context and self.Context.Compatibility
     local character, humanoid, root
     if compatibility then
@@ -14940,6 +15142,38 @@ function MainFarm:_StepStackTasks(session)
             self.MovementService:Cancel()
         end
         self:_SetStatus("Stack Farming is waiting for your character", "warning")
+        return true
+    end
+
+    local entry = self.ActiveStackTask
+    if entry and not queue:IsEnabled(entry) then
+        self:_FinishStackTask(entry, "Stack task turned off", false)
+        return true
+    end
+    if not entry then
+        local teleportFeature = self.Context and self.Context.TeleportFeature
+        local estimateTravelCost
+        if teleportFeature
+            and type(teleportFeature.EstimateFarmTravelDistance) == "function"
+        then
+            estimateTravelCost = function(fromPosition, toPosition)
+                return teleportFeature:EstimateFarmTravelDistance(
+                    fromPosition,
+                    toPosition
+                )
+            end
+        end
+        entry = queue:PopNext(root.Position, estimateTravelCost)
+        if entry then
+            self:_BeginStackTask(entry)
+        end
+    end
+
+    if not entry then
+        if self.MainFarmEnabled then
+            return false
+        end
+        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
         return true
     end
 
