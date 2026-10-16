@@ -180,23 +180,18 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         return false, "PlayerGui is unavailable"
     end
 
-    if player.Team then
-        return true, "A team is already selected"
-    end
-
     local timeout = math.clamp(tonumber(timeoutSeconds) or 20, 0, 30)
     local deadline = os.clock() + timeout
     local attempted = false
     local sawPrompt = false
-    local promptClosedAt = nil
+    local remoteAttempts = 0
+    local nextRemoteAttemptAt = 0
+    local remoteAttemptPending = false
+    local lastRemoteError = nil
     while os.clock() <= deadline do
         if not game:IsLoaded() or not player:FindFirstChild("DataLoaded") then
             task.wait(0.1)
             continue
-        end
-
-        if player.Team then
-            return true, "Team selected"
         end
 
         local main = playerGui:FindFirstChild("Main (minimal)")
@@ -205,13 +200,41 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
             main = playerGui:FindFirstChild("Main")
             chooseTeam = main and main:FindFirstChild("ChooseTeam")
         end
-        if chooseTeam and chooseTeam.Visible then
+        local promptVisible = chooseTeam ~= nil and chooseTeam.Visible == true
+        if player.Team and (not chooseTeam or not promptVisible) then
+            return true, "Team selected"
+        end
+
+        if chooseTeam then
             sawPrompt = true
-            promptClosedAt = nil
+            if remoteAttempts < 2
+                and not remoteAttemptPending
+                and os.clock() >= nextRemoteAttemptAt
+            then
+                remoteAttempts += 1
+                nextRemoteAttemptAt = os.clock() + 1.5
+                local remote = self:GetCommF()
+                if remote and remote:IsA("RemoteFunction") then
+                    remoteAttemptPending = true
+                    task.spawn(function()
+                        local invokeOk, invokeError = pcall(function()
+                            remote:InvokeServer("SetTeam", teamName)
+                        end)
+                        if not invokeOk then
+                            lastRemoteError = tostring(invokeError)
+                        end
+                        remoteAttemptPending = false
+                    end)
+                end
+            end
+
             local container = chooseTeam:FindFirstChild("Container")
             local teamCard = container and container:FindFirstChild(teamName)
             local frame = teamCard and teamCard:FindFirstChild("Frame")
-            local button = frame and frame:FindFirstChildWhichIsA("GuiButton", true)
+            local button = frame and frame:FindFirstChild("TextButton")
+            if not button then
+                button = frame and frame:FindFirstChildWhichIsA("GuiButton", true)
+            end
             if not button and teamCard then
                 button = teamCard:FindFirstChildWhichIsA("GuiButton", true)
             end
@@ -250,28 +273,29 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
                     end
                 end)
             else
-                task.wait(0.1)
+                task.wait(0.2)
             end
         else
-            if sawPrompt then
-                promptClosedAt = promptClosedAt or os.clock()
-                if os.clock() - promptClosedAt >= 0.75 then
-                    return false, "Team prompt closed before selection was confirmed"
-                end
+            if player.Team then
+                return true, "A team is already selected"
             end
             task.wait(0.1)
         end
 
-        if player.Team then
+        if player.Team and chooseTeam and not chooseTeam.Visible then
             return true, "Team selected"
         end
     end
 
-    if player.Team then
+    local main = playerGui:FindFirstChild("Main (minimal)")
+        or playerGui:FindFirstChild("Main")
+    local chooseTeam = main and main:FindFirstChild("ChooseTeam")
+    if player.Team and (not chooseTeam or not chooseTeam.Visible) then
         return true, "A team is already selected"
     end
     if attempted then
         return false, "Could not confirm the " .. teamName .. " team selection"
+            .. (lastRemoteError and ("; SetTeam request failed: " .. lastRemoteError) or "")
     elseif sawPrompt then
         return false, "The team selection screen did not contain a usable button"
     end
