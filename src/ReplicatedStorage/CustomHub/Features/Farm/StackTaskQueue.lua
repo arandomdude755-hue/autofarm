@@ -91,11 +91,10 @@ local function instancePivot(instance)
     return nil
 end
 
-function StackTaskQueue.new(workspaceService, collectionService, replicatedStorage)
+function StackTaskQueue.new(workspaceService, collectionService)
     return setmetatable({
         Workspace = workspaceService,
         CollectionService = collectionService,
-        ReplicatedStorage = replicatedStorage,
         Enabled = {
             CakePrince = false,
             EliteHunter = false,
@@ -225,7 +224,10 @@ function StackTaskQueue:_ObserveCakePrince(instance)
 end
 
 function StackTaskQueue:_ObserveEliteHunter(instance)
-    if not isAliveEliteHunter(instance) then
+    if not isAliveEliteHunter(instance)
+        or not self.EnemiesFolder
+        or instance.Parent ~= self.EnemiesFolder
+    then
         return
     end
 
@@ -435,24 +437,9 @@ function StackTaskQueue:Initialize()
         self:_ObserveFruit(instance)
     end))
 
-    local replicatedStorage = self.ReplicatedStorage
-    if replicatedStorage then
-        table.insert(
-            self.Connections,
-            replicatedStorage.ChildAdded:Connect(function(instance)
-                self:_ObserveEliteHunter(instance)
-            end)
-        )
-    end
-
     self:_WatchEnemies(workspaceService:FindFirstChild("Enemies"))
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
-    end
-    if replicatedStorage then
-        for _, instance in ipairs(replicatedStorage:GetChildren()) do
-            self:_ObserveEliteHunter(instance)
-        end
     end
 
     local collectionService = self.CollectionService
@@ -492,12 +479,6 @@ function StackTaskQueue:_QueueExisting(kind)
             end
         end
     elseif kind == "EliteHunter" then
-        local replicatedStorage = self.ReplicatedStorage
-        if replicatedStorage then
-            for _, instance in ipairs(replicatedStorage:GetChildren()) do
-                self:_ObserveEliteHunter(instance)
-            end
-        end
         local enemies = workspaceService:FindFirstChild("Enemies")
         if enemies then
             self:_WatchEnemies(enemies)
@@ -707,7 +688,11 @@ function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
             and (
                 entry.Kind == "Fruit"
                     and instance.Parent == self.Workspace
+                    or entry.Kind == "EliteHunter"
+                    and instance.Parent == self.EnemiesFolder
+                    and isAliveEliteHunter(instance)
                     or entry.Kind ~= "Fruit"
+                    and entry.Kind ~= "EliteHunter"
                     and instance.Parent ~= nil
             )
         if self:IsEnabled(entry) and isPresent and not self.CompletedByInstance[instance] then
@@ -796,7 +781,6 @@ function StackTaskQueue:Cleanup()
     self.EnemiesFolder = nil
     self.CollectionService = nil
     self.Workspace = nil
-    self.ReplicatedStorage = nil
 end
 
 return StackTaskQueue

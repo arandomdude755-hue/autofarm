@@ -339,13 +339,11 @@ function MainFarm:_IsEliteHunterQuestActive(targetName)
         local questTitleFrame = container and container:FindFirstChild("QuestTitle")
         local titleLabel = questTitleFrame and questTitleFrame:FindFirstChild("Title")
         visibleQuest = main ~= nil
-            and (not main:IsA("ScreenGui") or main.Enabled)
             and quest ~= nil
             and quest:IsA("GuiObject")
             and quest.Visible
             and titleLabel ~= nil
             and titleLabel:IsA("TextLabel")
-            and titleLabel.Visible
         if visibleQuest then
             questTitle = titleLabel.Text
         end
@@ -4013,8 +4011,7 @@ function MainFarm:Initialize(context)
     end
     self.StackTaskQueue = StackTaskQueue.new(
         context.Compatibility and context.Compatibility.Workspace,
-        context.Compatibility and context.Compatibility.CollectionService,
-        context.Compatibility and context.Compatibility.ReplicatedStorage
+        context.Compatibility and context.Compatibility.CollectionService
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then

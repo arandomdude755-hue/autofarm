@@ -55,9 +55,10 @@ require(
     "Deandre = true" in QUEUE
     and "Urban = true" in QUEUE
     and "Diablo = true" in QUEUE
-    and 'replicatedStorage.ChildAdded:Connect' in QUEUE
+    and "instance.Parent ~= self.EnemiesFolder" in QUEUE
+    and 'folder.ChildAdded:Connect(function(instance)' in QUEUE
     and 'self:_ObserveEliteHunter(instance)' in QUEUE,
-    "Elite Hunter tasks should detect the three live targets in ReplicatedStorage and Workspace",
+    "Elite Hunter tasks should queue only live world targets from Workspace.Enemies",
 )
 require(
     '"BerryBush"' in QUEUE

@@ -14471,11 +14471,10 @@ local function instancePivot(instance)
     return nil
 end
 
-function StackTaskQueue.new(workspaceService, collectionService, replicatedStorage)
+function StackTaskQueue.new(workspaceService, collectionService)
     return setmetatable({
         Workspace = workspaceService,
         CollectionService = collectionService,
-        ReplicatedStorage = replicatedStorage,
         Enabled = {
             CakePrince = false,
             EliteHunter = false,
@@ -14605,7 +14604,10 @@ function StackTaskQueue:_ObserveCakePrince(instance)
 end
 
 function StackTaskQueue:_ObserveEliteHunter(instance)
-    if not isAliveEliteHunter(instance) then
+    if not isAliveEliteHunter(instance)
+        or not self.EnemiesFolder
+        or instance.Parent ~= self.EnemiesFolder
+    then
         return
     end
 
@@ -14815,24 +14817,9 @@ function StackTaskQueue:Initialize()
         self:_ObserveFruit(instance)
     end))
 
-    local replicatedStorage = self.ReplicatedStorage
-    if replicatedStorage then
-        table.insert(
-            self.Connections,
-            replicatedStorage.ChildAdded:Connect(function(instance)
-                self:_ObserveEliteHunter(instance)
-            end)
-        )
-    end
-
     self:_WatchEnemies(workspaceService:FindFirstChild("Enemies"))
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
-    end
-    if replicatedStorage then
-        for _, instance in ipairs(replicatedStorage:GetChildren()) do
-            self:_ObserveEliteHunter(instance)
-        end
     end
 
     local collectionService = self.CollectionService
@@ -14872,12 +14859,6 @@ function StackTaskQueue:_QueueExisting(kind)
             end
         end
     elseif kind == "EliteHunter" then
-        local replicatedStorage = self.ReplicatedStorage
-        if replicatedStorage then
-            for _, instance in ipairs(replicatedStorage:GetChildren()) do
-                self:_ObserveEliteHunter(instance)
-            end
-        end
         local enemies = workspaceService:FindFirstChild("Enemies")
         if enemies then
             self:_WatchEnemies(enemies)
@@ -15087,7 +15068,11 @@ function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
             and (
                 entry.Kind == "Fruit"
                     and instance.Parent == self.Workspace
+                    or entry.Kind == "EliteHunter"
+                    and instance.Parent == self.EnemiesFolder
+                    and isAliveEliteHunter(instance)
                     or entry.Kind ~= "Fruit"
+                    and entry.Kind ~= "EliteHunter"
                     and instance.Parent ~= nil
             )
         if self:IsEnabled(entry) and isPresent and not self.CompletedByInstance[instance] then
@@ -15176,7 +15161,6 @@ function StackTaskQueue:Cleanup()
     self.EnemiesFolder = nil
     self.CollectionService = nil
     self.Workspace = nil
-    self.ReplicatedStorage = nil
 end
 
 return StackTaskQueue
@@ -15526,13 +15510,11 @@ function MainFarm:_IsEliteHunterQuestActive(targetName)
         local questTitleFrame = container and container:FindFirstChild("QuestTitle")
         local titleLabel = questTitleFrame and questTitleFrame:FindFirstChild("Title")
         visibleQuest = main ~= nil
-            and (not main:IsA("ScreenGui") or main.Enabled)
             and quest ~= nil
             and quest:IsA("GuiObject")
             and quest.Visible
             and titleLabel ~= nil
             and titleLabel:IsA("TextLabel")
-            and titleLabel.Visible
         if visibleQuest then
             questTitle = titleLabel.Text
         end
@@ -19200,8 +19182,7 @@ function MainFarm:Initialize(context)
     end
     self.StackTaskQueue = StackTaskQueue.new(
         context.Compatibility and context.Compatibility.Workspace,
-        context.Compatibility and context.Compatibility.CollectionService,
-        context.Compatibility and context.Compatibility.ReplicatedStorage
+        context.Compatibility and context.Compatibility.CollectionService
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then
