@@ -491,6 +491,8 @@ local Config = {
         AttackSoulReaper = false,
         AttackDoughKing = false,
         AttackDarkbeard = false,
+        PrioritizeRipIndra = false,
+        PrioritizeDoughKing = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
     },
@@ -744,53 +746,69 @@ local Config = {
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Auto Attack Cake Prince",
+                    Label = "Auto attack/summon Cake Prince",
                     Action = "stack.cakePrince.enabled",
                     Setting = "AutoAttackCakePrince",
                     SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Auto Elite Hunter",
+                    Label = "Auto attack Elite Hunter",
                     Action = "stack.eliteHunter.enabled",
                     Setting = "AutoEliteHunter",
                     SettingsKey = "StackFarmSettings",
-                },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Second Sea",
+                    RequiredSea = 3,
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Attack Darkbeard when spawned",
+                    Label = "Auto attack/summon Darkbeard",
                     Action = "stack.darkbeard.enabled",
                     Setting = "AttackDarkbeard",
                     SettingsKey = "StackFarmSettings",
-                },
-                {
-                    Kind = "sectionHeader",
-                    Label = "Third Sea",
+                    RequiredSea = 2,
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Attack Rip Indra when spawned",
+                    Label = "Auto attack/summon/press pads Rip Indra",
                     Action = "stack.ripIndra.enabled",
                     Setting = "AttackRipIndra",
                     SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Attack Soul Reaper when spawned",
+                    Label = "Prioritize Indra if holding God's Chalice",
+                    Action = "stack.ripIndra.prioritize",
+                    Setting = "PrioritizeRipIndra",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                    Description = "Choose Indra before Dough King when both are enabled.",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto attack/summon Soul Reaper",
                     Action = "stack.soulReaper.enabled",
                     Setting = "AttackSoulReaper",
                     SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Attack Dough King when spawned",
+                    Label = "Auto attack/summon Dough King",
                     Action = "stack.doughKing.enabled",
                     Setting = "AttackDoughKing",
                     SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Prioritize Dough King if holding God's Chalice",
+                    Action = "stack.doughKing.prioritize",
+                    Setting = "PrioritizeDoughKing",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                    Description = "Choose Dough King before Indra; gather Conjured Cocoa for Sweet Chalice.",
                 },
                 {
                     Kind = "sectionHeader",
@@ -1620,6 +1638,75 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     self.OwnedInventoryCache[itemName] = found == true
     self.OwnedInventoryCacheAt = now
     return found == true
+end
+
+function Compatibility:GetInventoryMaterialCount(materialName)
+    if type(materialName) ~= "string" or materialName == "" then
+        return nil, "Material name is invalid"
+    end
+
+    local now = os.clock()
+    self.InventoryMaterialCountCache = self.InventoryMaterialCountCache or {}
+    local cached = self.InventoryMaterialCountCache[materialName]
+    if cached and now < cached.ExpiresAt then
+        return cached.Count
+    end
+
+    local itemServiceModule = self.ReplicatedStorage:FindFirstChild("ItemReplicationService")
+    local itemConfigModule = self.ReplicatedStorage:FindFirstChild("ItemConfig")
+    if not itemServiceModule or not itemConfigModule then
+        return nil, "Inventory lookup modules are unavailable"
+    end
+
+    local serviceOk, itemService = pcall(require, itemServiceModule)
+    local configOk, itemConfig = pcall(require, itemConfigModule)
+    local keys = serviceOk and type(itemService) == "table" and itemService.KEYS
+    local quantityKey = type(keys) == "table" and keys.QUANTITY
+    if not serviceOk or type(itemService) ~= "table"
+        or not configOk or type(itemConfig) ~= "table"
+        or quantityKey == nil
+        or type(itemService.GetItems) ~= "function"
+        or type(itemConfig.match) ~= "function"
+    then
+        return nil, "Inventory lookup APIs are unavailable"
+    end
+
+    local scanOk, count = pcall(function()
+        local total = 0
+        for _, item in itemService:GetItems(quantityKey) do
+            if item and tonumber(item.Value) and tonumber(item.Value) > 0 then
+                local matchOk, itemDefinition = pcall(function()
+                    return itemConfig.match(item.ItemId):unwrap()
+                end)
+                if matchOk and itemDefinition then
+                    local display = itemDefinition.Display
+                    local storageKey = itemDefinition.Index
+                        and itemDefinition.Index.StorageKey
+                    local debugLabel = itemDefinition.Index
+                        and itemDefinition.Index.DebugLabel
+                    local resolvedName = display
+                        and (display.Name or storageKey)
+                        or storageKey
+                    if type(debugLabel) == "string" then
+                        resolvedName = debugLabel:match("^(.-)%s*%[") or resolvedName
+                    end
+                    if resolvedName == materialName then
+                        total += tonumber(item.Value)
+                    end
+                end
+            end
+        end
+        return total
+    end)
+    if not scanOk then
+        return nil, "Inventory material scan failed: " .. tostring(count)
+    end
+
+    self.InventoryMaterialCountCache[materialName] = {
+        Count = count,
+        ExpiresAt = now + 1,
+    }
+    return count
 end
 
 function Compatibility:GetUnlockedTitleCheck(titleName)
@@ -3287,8 +3374,8 @@ function UI:_UpdateControlGridLayout()
         viewport = Vector2.new(390, 844)
     end
     local landscape = viewport.X > viewport.Y
-    local rowHeight = self.Config.Layout.RowHeight
     for _, group in ipairs(self.ControlGroups) do
+        local rowHeight = group.RowHeight or self.Config.Layout.RowHeight
         local columnCount = 1
         if not (self.ActivePage and self.ActivePage.SingleColumn)
             and landscape
@@ -3303,6 +3390,22 @@ function UI:_UpdateControlGridLayout()
             or UDim2.new(1, 0, 0, rowHeight)
         self:_SyncControlGroupHeight(group)
     end
+end
+
+function UI:_IsRequiredSeaAvailable(control)
+    local requiredSea = tonumber(control and control.RequiredSea)
+    if not requiredSea then
+        return true
+    end
+    local method = requiredSea == 1 and "IsFirstSea"
+        or requiredSea == 2 and "IsSecondSea"
+        or requiredSea == 3 and "IsThirdSea"
+    local check = method and self.Compatibility and self.Compatibility[method]
+    if type(check) ~= "function" then
+        return false
+    end
+    local ok, available = pcall(check, self.Compatibility)
+    return ok and available == true
 end
 
 function UI:_TabMatchesSearch(tabName, query)
@@ -3728,7 +3831,9 @@ function UI:_ActivateControl(control)
             local settings = self:_GetControlSettings(control)
             currentValue = settings[control.Setting] == true
         end
-        return self.Dispatch(control.Action, not currentValue)
+        local result = self.Dispatch(control.Action, not currentValue)
+        self:_Refresh(self.State:GetSnapshot())
+        return result
     end
     return self.Dispatch(control.Action, true)
 end
@@ -4259,9 +4364,13 @@ function UI:_AddControl(control, parent)
         or control.Kind == "button"
             and 24
             or 0
+    local descriptionHeight = type(control.Description) == "string"
+            and control.Description ~= ""
+        and 18
+        or 0
     local row = create((isSelector or isSlider) and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
-        Size = UDim2.new(1, 0, 0, layout.RowHeight),
+        Size = UDim2.new(1, 0, 0, layout.RowHeight + descriptionHeight),
         BackgroundColor3 = theme.Control,
         BackgroundTransparency = 0.18,
         BorderSizePixel = 0,
@@ -4318,7 +4427,9 @@ function UI:_AddControl(control, parent)
     create("TextLabel", {
         Name = "Title",
         Position = UDim2.fromOffset(layout.RowInset, titleTop),
-        Size = titleSize,
+        Size = descriptionHeight > 0
+            and UDim2.new(titleSize.X.Scale, titleSize.X.Offset, 0, 22)
+            or titleSize,
         BackgroundTransparency = 1,
         Font = theme.StrongFont,
         Text = control.Label,
@@ -4327,6 +4438,20 @@ function UI:_AddControl(control, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
+    if descriptionHeight > 0 then
+        create("TextLabel", {
+            Name = "Description",
+            Position = UDim2.new(0, layout.RowInset, 0, 22),
+            Size = UDim2.new(1, -layout.RowInset * 2, 0, 15),
+            BackgroundTransparency = 1,
+            Font = theme.Font,
+            Text = control.Description,
+            TextColor3 = theme.MutedText,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+    end
     if control.Kind == "button" then
         create("TextLabel", {
             Name = "ActionIndicator",
@@ -4645,6 +4770,14 @@ function UI:_CreateControlGroup(group, layoutOrder)
     local headerHeight = group.HeaderControl
         and (layout.SectionHeaderHeight or 42)
         or 0
+    local hasDescription = false
+    for _, control in ipairs(group.Controls or {}) do
+        if type(control.Description) == "string" and control.Description ~= "" then
+            hasDescription = true
+            break
+        end
+    end
+    group.RowHeight = layout.RowHeight + (hasDescription and 18 or 0)
     local cardName = group.HeaderControl
         and self:_ControlNodeName(group.HeaderControl)
         or ("ControlGroup_" .. tostring(layoutOrder))
@@ -4740,7 +4873,7 @@ function UI:_CreateControlGroup(group, layoutOrder)
         BorderSizePixel = 0,
     }, group.Card)
     group.Layout = create("UIGridLayout", {
-        CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
+        CellSize = UDim2.new(1, 0, 0, group.RowHeight),
         CellPadding = UDim2.fromOffset(7, 5),
         FillDirection = Enum.FillDirection.Horizontal,
         FillDirectionMaxCells = 1,
@@ -4802,9 +4935,16 @@ function UI:_RenderTab(tabName)
             self:_UpdateControlGridLayout()
         end
     )
+    local visibleControls = {}
+    for _, control in ipairs(page.Controls) do
+        if self:_IsRequiredSeaAvailable(control) then
+            table.insert(visibleControls, control)
+        end
+    end
+    self.ActiveControls = visibleControls
     local groups = {}
     local currentGroup
-    for _, control in ipairs(page.Controls) do
+    for _, control in ipairs(visibleControls) do
         if control.Kind == "sectionHeader" then
             currentGroup = {
                 HeaderControl = control,
@@ -4823,6 +4963,9 @@ function UI:_RenderTab(tabName)
     end
 
     for groupIndex, group in ipairs(groups) do
+        if #group.Controls == 0 then
+            continue
+        end
         self:_CreateControlGroup(group, groupIndex)
         for controlIndex, control in ipairs(group.Controls) do
             local row = self:_AddControl(control, group.ControlsFrame)
@@ -5582,7 +5725,18 @@ function UI:Mount()
             gameWorkspace:GetAttributeChangedSignal("MAP"),
             function()
                 self:_CloseDropdown()
-                self:_Refresh(self.State:GetSnapshot())
+                local pageHasSeaControls = false
+                for _, control in ipairs(self.ActivePage and self.ActivePage.Controls or {}) do
+                    if control.RequiredSea then
+                        pageHasSeaControls = true
+                        break
+                    end
+                end
+                if pageHasSeaControls and self.ActiveTab then
+                    self:_RenderTab(self.ActiveTab)
+                else
+                    self:_Refresh(self.State:GetSnapshot())
+                end
             end
         )
     end
@@ -15195,6 +15349,26 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.Berry == true
 end
 
+function StackTaskQueue:TakePendingKind(kind)
+    for index, entry in ipairs(self.Pending) do
+        if entry.Kind == kind then
+            local instance = entry.Instance
+            local isPresent = instance
+                and instance.Parent == self.EnemiesFolder
+                and isSpawnedStackBoss(instance)
+            table.remove(self.Pending, index)
+            self.PendingByInstance[instance] = nil
+            if self:IsEnabled(entry) and isPresent then
+                self.ActiveByInstance[instance] = true
+                return entry
+            end
+            self.CompletedByInstance[instance] = true
+            return nil, "The boss was defeated before it could be reached"
+        end
+    end
+    return nil
+end
+
 function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
     table.sort(self.Pending, function(left, right)
         return left.QueueSequence < right.QueueSequence
@@ -15353,11 +15527,18 @@ local MAX_EMPTY_SPAWN_CYCLES = 2
 local STACK_TASK_LOAD_TIMEOUT = 8
 
 local STACK_TASK_SEA_REQUIREMENTS = {
+    CakePrince = 3,
     EliteHunter = 3,
     RipIndra = 3,
     SoulReaper = 3,
     DoughKing = 3,
     Darkbeard = 2,
+}
+
+local INDRA_HAKI_COLORS = {
+    { BrickColor = "Hot pink", HiddenName = "Winter Sky", Label = "Pink" },
+    { BrickColor = "Really red", HiddenName = "Pure Red", Label = "Red" },
+    { BrickColor = "Oyster", HiddenName = "Snow White", Label = "White" },
 }
 
 local STACK_BOSS_LABELS = {
@@ -15617,6 +15798,12 @@ function MainFarm:_FinishStackTask(entry, reason, markCompleted)
         self.StackTaskQueue:Complete(entry, markCompleted)
     end
     self.ActiveStackTask = nil
+    if entry.PreparationKind
+        and self.ActiveStackPrep
+        and self.ActiveStackPrep.Kind == entry.PreparationKind
+    then
+        self.ActiveStackPrep = nil
+    end
     self.StackTaskStartedAt = 0
     self.StackInterruptedFarm = false
     self:_ClearTarget()
@@ -15789,6 +15976,541 @@ function MainFarm:_EnsureEliteHunterQuest(entry, target)
     return false
 end
 
+function MainFarm:_GetStackTool(toolName)
+    local compatibility = self.Context and self.Context.Compatibility
+    local character = compatibility and compatibility.Player
+        and compatibility.Player.Character
+    local backpack = compatibility and compatibility.Player
+        and compatibility.Player:FindFirstChild("Backpack")
+    for _, container in pairs({ character, backpack }) do
+        local tool = container and container:FindFirstChild(toolName)
+        if tool and tool:IsA("Tool") then
+            return tool
+        end
+    end
+    return nil
+end
+
+function MainFarm:_StartStackRemoteRequest(key, interval, ...)
+    self.StackRemoteRequests = self.StackRemoteRequests or {}
+    local state = self.StackRemoteRequests[key]
+    if not state then
+        state = { NextAt = 0, Pending = false }
+        self.StackRemoteRequests[key] = state
+    end
+    local now = os.clock()
+    if state.Pending or now < (state.NextAt or 0) then
+        return state
+    end
+
+    local arguments = table.pack(...)
+    state.Pending = true
+    state.NextAt = now + interval
+    task.spawn(function()
+        local compatibility = self.Context and self.Context.Compatibility
+        local commF = compatibility and compatibility:GetCommF()
+        local ok, result = pcall(function()
+            if not commF then
+                error("CommF is unavailable")
+            end
+            return commF:InvokeServer(table.unpack(arguments, 1, arguments.n))
+        end)
+        state.Pending = false
+        state.LastOk = ok
+        state.LastValue = result
+        state.CompletedAt = os.clock()
+    end)
+    return state
+end
+
+function MainFarm:_PollCakePrinceSpawner()
+    local settings = self.Context and self.Context.Config
+        and self.Context.Config.StackFarmSettings
+    if not settings or settings.AutoAttackCakePrince ~= true
+        or self.ActiveStackPrep and self.ActiveStackPrep.Kind == "DoughKing"
+    then
+        return
+    end
+    local request = self:_StartStackRemoteRequest("CakePrinceSpawner", 4, "CakePrinceSpawner")
+    if request.LastOk and type(request.LastValue) == "string"
+        and string.find(string.lower(request.LastValue), "open the portal now", 1, true)
+        and not request.PortalRequestSent
+    then
+        request.PortalRequestSent = true
+        self:_StartStackRemoteRequest("CakePrincePortal", 1, "CakePrinceSpawner")
+    elseif request.LastOk and type(request.LastValue) == "string"
+        and not string.find(string.lower(request.LastValue), "open the portal now", 1, true)
+    then
+        request.PortalRequestSent = false
+    end
+end
+
+function MainFarm:_RefreshIndraColors()
+    local now = os.clock()
+    local state = self.IndraColorState
+    if not state then
+        state = { NextAt = 0, Pending = false, Unlocked = nil }
+        self.IndraColorState = state
+    end
+    if state.Pending or now < state.NextAt then
+        return state
+    end
+    state.Pending = true
+    state.NextAt = now + 5
+    task.spawn(function()
+        local compatibility = self.Context and self.Context.Compatibility
+        local commF = compatibility and compatibility:GetCommF()
+        local ok, colors = pcall(function()
+            if not commF then
+                error("CommF is unavailable")
+            end
+            return commF:InvokeServer("getColors")
+        end)
+        local unlocked = {}
+        if ok and type(colors) == "table" then
+            for _, color in ipairs(colors) do
+                if type(color) == "table" and color.Unlocked == true then
+                    unlocked[color.HiddenName] = true
+                end
+            end
+            state.Unlocked = unlocked
+            state.LastError = nil
+        else
+            state.LastError = tostring(colors)
+        end
+        state.Pending = false
+        state.CompletedAt = os.clock()
+    end)
+    return state
+end
+
+function MainFarm:_FindIndraPads()
+    local workspaceService = self.Context and self.Context.Compatibility
+        and self.Context.Compatibility.Workspace
+    local map = workspaceService and workspaceService:FindFirstChild("Map")
+    local boatCastle = map and map:FindFirstChild("Boat Castle")
+    local summoner = boatCastle and boatCastle:FindFirstChild("Summoner")
+    local circle = summoner and summoner:FindFirstChild("Circle")
+    local pads = {}
+    if circle then
+        for _, part in ipairs(circle:GetChildren()) do
+            if part:IsA("BasePart") then
+                for _, color in ipairs(INDRA_HAKI_COLORS) do
+                    if part.BrickColor.Name == color.BrickColor then
+                        table.insert(pads, { Part = part, Color = color })
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return pads, summoner and summoner:FindFirstChild("Detection")
+end
+
+function MainFarm:_ActivateIndraColor(prep, color)
+    if prep.ActivatingColor or os.clock() < (prep.NextColorActivationAt or 0) then
+        return
+    end
+    prep.ActivatingColor = color.HiddenName
+    prep.NextColorActivationAt = os.clock() + 3
+    task.spawn(function()
+        local compatibility = self.Context and self.Context.Compatibility
+        local replicatedStorage = compatibility and compatibility.ReplicatedStorage
+        local modules = replicatedStorage and replicatedStorage:FindFirstChild("Modules")
+        local net = modules and modules:FindFirstChild("Net")
+        local customizeRemote = net and net:FindFirstChild("RF/FruitCustomizerRF")
+        local ok, result = pcall(function()
+            if customizeRemote then
+                customizeRemote:InvokeServer({
+                    StorageName = color.HiddenName,
+                    Type = "AuraSkin",
+                    Context = "Equip",
+                })
+            end
+            local commF = compatibility and compatibility:GetCommF()
+            if not commF then
+                error("CommF is unavailable")
+            end
+            return commF:InvokeServer("activateColor", color.HiddenName)
+        end)
+        prep.LastColorActivationOk = ok
+        prep.LastColorActivationError = ok and nil or tostring(result)
+        prep.ActivatingColor = nil
+    end)
+end
+
+function MainFarm:_BeginStackPreparation(kind, toolName)
+    self.ActiveStackPrep = {
+        Kind = kind,
+        ToolName = toolName,
+        StartedAt = os.clock(),
+        Phase = "approach",
+        MissingNotified = false,
+        SummonIssued = false,
+    }
+    local compatibility = self.Context and self.Context.Compatibility
+    self.ActiveStackPrep.Character = compatibility
+        and compatibility.Player
+        and compatibility.Player.Character
+    self:_SetStatus("Preparing to summon " .. (STACK_BOSS_LABELS[kind] or kind), "info")
+end
+
+function MainFarm:_CancelStackPreparation(message)
+    self.ActiveStackPrep = nil
+    self:_ClearTarget()
+    if self.MovementService then
+        self.MovementService:Cancel()
+    end
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if teleportFeature and teleportFeature.CancelFarmTravel then
+        teleportFeature:CancelFarmTravel()
+    end
+    if message then
+        self:_SetStatus(message, "info")
+    end
+end
+
+function MainFarm:_ChooseStackPreparation()
+    local settings = self.Context and self.Context.Config
+        and self.Context.Config.StackFarmSettings
+    if not settings then
+        return nil
+    end
+    local hasGods = self:_GetStackTool("God's Chalice") ~= nil
+    local hasSweet = self:_GetStackTool("Sweet Chalice") ~= nil
+    if settings.AttackRipIndra == true and settings.AttackDoughKing == true
+        and (hasGods or hasSweet)
+    then
+        if settings.PrioritizeRipIndra == true and hasGods then
+            return "RipIndra", "God's Chalice"
+        elseif settings.PrioritizeDoughKing == true then
+            return "DoughKing", hasSweet and "Sweet Chalice" or "God's Chalice"
+        end
+        local colors = self:_RefreshIndraColors()
+        if hasGods and type(colors.Unlocked) ~= "table" then
+            return nil
+        end
+        if hasGods and type(colors.Unlocked) == "table" then
+            local allUnlocked = true
+            for _, color in ipairs(INDRA_HAKI_COLORS) do
+                if colors.Unlocked[color.HiddenName] ~= true then
+                    allUnlocked = false
+                    break
+                end
+            end
+            if allUnlocked then
+                return "RipIndra", "God's Chalice"
+            end
+        end
+        return "DoughKing", hasSweet and "Sweet Chalice" or "God's Chalice"
+    elseif settings.AttackRipIndra == true and hasGods then
+        return "RipIndra", "God's Chalice"
+    elseif settings.AttackDoughKing == true and (hasGods or hasSweet) then
+        return "DoughKing", hasSweet and "Sweet Chalice" or "God's Chalice"
+    end
+
+    for _, kind in ipairs({ "SoulReaper", "Darkbeard" }) do
+        local setting = kind == "SoulReaper" and "AttackSoulReaper" or "AttackDarkbeard"
+        local toolName = kind == "SoulReaper" and "Hallow Essence" or "Fist of Darkness"
+        if settings[setting] == true and self:_GetStackTool(toolName) then
+            return kind, toolName
+        end
+    end
+    return nil
+end
+
+function MainFarm:_StepStackPreparation(session, root, prep)
+    local compatibility = self.Context and self.Context.Compatibility
+    local settings = self.Context and self.Context.Config
+        and self.Context.Config.StackFarmSettings or {}
+    local requiredSetting = prep.Kind == "RipIndra" and "AttackRipIndra"
+        or prep.Kind == "DoughKing" and "AttackDoughKing"
+        or prep.Kind == "SoulReaper" and "AttackSoulReaper"
+        or "AttackDarkbeard"
+    if settings[requiredSetting] ~= true then
+        self:_CancelStackPreparation()
+        return true
+    end
+
+    local bossQueueKind = prep.Kind
+    local queuedBoss, queueError = self.StackTaskQueue:TakePendingKind(bossQueueKind)
+    if queuedBoss then
+        queuedBoss.PreparationKind = prep.Kind
+        self:_BeginStackTask(queuedBoss)
+        return true
+    elseif queueError then
+        self:_CancelStackPreparation()
+        self:_SetStatus(queueError, "info")
+        return true
+    end
+
+    if prep.Kind == "DoughKing" then
+        local sweetChalice = self:_GetStackTool("Sweet Chalice")
+        local godsChalice = self:_GetStackTool("God's Chalice")
+        if not sweetChalice and not godsChalice and not prep.SummonIssued then
+            if prep.TradeStartedAt and os.clock() - prep.TradeStartedAt < 8 then
+                self:_HoldPosition(session)
+                self:_SetStatus("Waiting for Sweet Chalice to appear", "info")
+                return true
+            end
+            self:_CancelStackPreparation(
+                "Dough King preparation stopped because the Chalice is no longer held"
+            )
+            return true
+        end
+        if not sweetChalice then
+            local count, countError = compatibility:GetInventoryMaterialCount("Conjured Cocoa")
+            if count == nil then
+                self:_HoldPosition(session)
+                self:_SetStatus("Waiting to check Conjured Cocoa inventory", "warning")
+                return true
+            end
+            if count < 10 then
+                self:_StepFarmMaterials(session, root, "Conjured Cocoa")
+                return true
+            end
+            local trade = self:_StartStackRemoteRequest("SweetChaliceNpc", 3, "SweetChaliceNpc")
+            if trade.Pending or trade.LastOk then
+                prep.TradeStartedAt = prep.TradeStartedAt or os.clock()
+            end
+            if trade.LastOk and trade.LastValue ~= "Where are the items?"
+                and self:_GetStackTool("Sweet Chalice")
+            then
+                prep.Phase = "summon"
+                prep.TradeStartedAt = nil
+            else
+                self:_HoldPosition(session)
+                self:_SetStatus(
+                    countError and "Waiting for Conjured Cocoa inventory to sync"
+                        or "Trading God's Chalice for Sweet Chalice",
+                    "info"
+                )
+                return true
+            end
+        end
+
+        if not self:_GetStackTool("Sweet Chalice") and not prep.SummonIssued then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for Sweet Chalice before summoning Dough King", "info")
+            return true
+        end
+        if self:_GetStackTool("Sweet Chalice") then
+            prep.SweetChaliceSeen = true
+        end
+        if prep.Phase ~= "waitingBoss" then
+            local request = self:_StartStackRemoteRequest(
+                "CakePrinceSpawner",
+                4,
+                "CakePrinceSpawner"
+            )
+            if request.LastOk and type(request.LastValue) == "string"
+                and string.find(string.lower(request.LastValue), "open the portal now", 1, true)
+            then
+                self:_StartStackRemoteRequest(
+                    "DoughKingPortal",
+                    1,
+                    "CakePrinceSpawner"
+                )
+                prep.Phase = "waitingBoss"
+                prep.SummonIssued = true
+            elseif prep.Phase ~= "farmCakeMobs" then
+                prep.Phase = "farmCakeMobs"
+            end
+            if prep.SweetChaliceSeen
+                and not self:_GetStackTool("Sweet Chalice")
+                and (request.Pending or request.LastOk)
+            then
+                prep.Phase = "waitingBoss"
+                prep.SummonIssued = true
+            end
+        end
+        if prep.Phase == "farmCakeMobs" then
+            local farmSettings = self.Context.Config.FarmSettings
+            local profiles = farmSettings and farmSettings.FarmModeProfiles
+            local profile = profiles and profiles["Farm Cake Prince"]
+            if profile then
+                local cocoaProfile = table.clone(profile)
+                cocoaProfile.BossName = nil
+                cocoaProfile.IgnoreBossSetting = nil
+                local questState, activeTarget, evidence = self.QuestService:GetActiveQuestState()
+                self:_StepBossEventMode(
+                    session,
+                    root,
+                    "Dough King summon",
+                    cocoaProfile,
+                    questState,
+                    evidence or activeTarget
+                )
+            else
+                self:_HoldPosition(session)
+                self:_SetStatus("Cake Land target data is unavailable", "warning")
+            end
+            return true
+        end
+        self:_HoldPosition(session)
+        self:_SetStatus("Waiting for Dough King to appear", "info")
+        return true
+    elseif prep.Kind == "RipIndra" then
+        if not prep.SummonIssued and not self:_GetStackTool("God's Chalice") then
+            self:_CancelStackPreparation(
+                "Rip Indra preparation stopped because God's Chalice is no longer held"
+            )
+            return true
+        end
+        local colorState = self:_RefreshIndraColors()
+        local pads, detection = self:_FindIndraPads()
+        if not detection or not detection:IsA("BasePart") then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for Rip Indra's summoning area to load", "info")
+            return true
+        end
+        if type(colorState.Unlocked) ~= "table" then
+            self:_HoldPosition(session)
+            self:_SetStatus("Checking your unlocked Legendary Haki colors", "info")
+            return true
+        end
+        local missing = {}
+        local nextPad
+        for _, pad in ipairs(pads) do
+            if pad.Part.BrickColor.Name ~= "Lime green" then
+                if colorState.Unlocked[pad.Color.HiddenName] == true then
+                    nextPad = pad
+                    break
+                else
+                    table.insert(missing, pad.Color.Label)
+                end
+            end
+        end
+        if #missing > 0 and not prep.MissingNotified then
+            prep.MissingNotified = true
+            self:_SetStatus(
+                "Missing Legendary Haki color(s): " .. table.concat(missing, ", "),
+                "warning",
+                "Rip Indra needs the missing Haki color(s): " .. table.concat(missing, ", ")
+            )
+        end
+        if nextPad then
+            self:_ActivateIndraColor(prep, nextPad.Color)
+            self:_MoveTo(nextPad.Part.CFrame, session, 6, true, "Rip Indra Haki pad")
+            if (root.Position - nextPad.Part.Position).Magnitude <= 6
+                and not prep.TouchingPad
+            then
+                prep.TouchingPad = true
+                local touched = compatibility:TouchPart(root, nextPad.Part, function()
+                    return self.ActiveStackPrep == prep and session == self.Session
+                end)
+                prep.TouchingPad = false
+                if not touched then
+                    self:_SetStatus("Waiting to activate the Rip Indra Haki pad", "warning")
+                end
+            end
+            if #missing == 0 then
+                self:_SetStatus("Activating Rip Indra's Haki pads", "info")
+            end
+            return true
+        end
+        local allPressed = #pads >= 3
+        for _, pad in ipairs(pads) do
+            if pad.Part.BrickColor.Name ~= "Lime green" then
+                allPressed = false
+            end
+        end
+        if not allPressed then
+            self:_HoldPosition(session)
+            self:_SetStatus(
+                #missing > 0
+                    and "Waiting for another player to press the missing Haki pads"
+                    or "Waiting for Rip Indra's Haki pads",
+                "info"
+            )
+            return true
+        end
+        local chalice = self:_GetStackTool("God's Chalice")
+        if chalice and chalice.Parent ~= compatibility.Player.Character then
+            local character, humanoid = compatibility:GetCharacterParts()
+            if humanoid then
+                humanoid:EquipTool(chalice)
+            end
+        end
+        self:_MoveTo(detection.CFrame, session, 6, true, "Rip Indra summoning altar")
+        if (root.Position - detection.Position).Magnitude <= 6 and not prep.TouchingPad then
+            prep.TouchingPad = true
+            local touched = compatibility:TouchPart(root, detection, function()
+                return self.ActiveStackPrep == prep and session == self.Session
+            end)
+            prep.TouchingPad = false
+            if touched then
+                prep.SummonIssued = true
+                prep.Phase = "waitingBoss"
+            else
+                self:_SetStatus("Waiting to activate Rip Indra's summoning altar", "warning")
+            end
+        end
+        self:_SetStatus("Summoning Rip Indra", "info")
+        return true
+    elseif prep.Kind == "SoulReaper" or prep.Kind == "Darkbeard" then
+        if prep.Phase == "waitingBoss" then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for " .. STACK_BOSS_LABELS[prep.Kind] .. " to appear", "info")
+            return true
+        end
+        local map = compatibility.Workspace and compatibility.Workspace:FindFirstChild("Map")
+        local arenaName = prep.Kind == "SoulReaper" and "Haunted Castle" or "DarkbeardArena"
+        local arena = map and map:FindFirstChild(arenaName)
+        local summoner = arena and arena:FindFirstChild("Summoner")
+        local detection = summoner and summoner:FindFirstChild("Detection")
+        if not detection or not detection:IsA("BasePart") then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for the summoning area to load", "info")
+            return true
+        end
+        local item = self:_GetStackTool(prep.ToolName)
+        if item then
+            prep.HadSummonItem = true
+            local character, humanoid = compatibility:GetCharacterParts()
+            if humanoid and item.Parent ~= character then
+                humanoid:EquipTool(item)
+            end
+            self:_MoveTo(detection.CFrame, session, 6, true, STACK_BOSS_LABELS[prep.Kind])
+            if (root.Position - detection.Position).Magnitude <= 6 and not prep.TouchingPad then
+                prep.TouchingPad = true
+                local isCurrent = function()
+                    return self.ActiveStackPrep == prep and session == self.Session
+                end
+                local itemHandle = item:FindFirstChild("Handle")
+                if itemHandle and itemHandle:IsA("BasePart") then
+                    compatibility:TouchPart(itemHandle, detection, isCurrent)
+                end
+                local touched = compatibility:TouchPart(root, detection, isCurrent)
+                prep.TouchingPad = false
+                if touched then
+                    prep.ReachedSummoner = true
+                    prep.SummonIssued = true
+                    prep.Phase = "waitingBoss"
+                else
+                    self:_SetStatus("Waiting to activate the summoning altar", "warning")
+                end
+            end
+            self:_SetStatus("Using " .. prep.ToolName .. " to summon " .. STACK_BOSS_LABELS[prep.Kind], "info")
+            return true
+        end
+        if prep.HadSummonItem and prep.ReachedSummoner then
+            prep.SummonIssued = true
+            prep.Phase = "waitingBoss"
+        elseif prep.SummonIssued then
+            self:_HoldPosition(session)
+            self:_SetStatus("Waiting for " .. STACK_BOSS_LABELS[prep.Kind] .. " to appear", "info")
+            return true
+        else
+            self:_CancelStackPreparation("Summoning stopped because the item is no longer held")
+            return true
+        end
+    end
+
+    self:_HoldPosition(session)
+    return true
+end
+
 function MainFarm:_StepStackTasks(session)
     local queue = self.StackTaskQueue
     if not queue or not queue:HasEnabledTasks() then
@@ -15808,12 +16530,41 @@ function MainFarm:_StepStackTasks(session)
         return true
     end
 
+    if self.ActiveStackPrep and self.ActiveStackPrep.Character ~= character then
+        local prep = self.ActiveStackPrep
+        prep.Character = character
+        local hasRequiredItem
+        if prep.Kind == "DoughKing" then
+            hasRequiredItem = self:_GetStackTool("God's Chalice")
+                or self:_GetStackTool("Sweet Chalice")
+        else
+            hasRequiredItem = self:_GetStackTool(prep.ToolName)
+        end
+        if not hasRequiredItem and not prep.SummonIssued then
+            self:_CancelStackPreparation(
+                "Boss preparation stopped after your summon item was lost"
+            )
+        end
+    end
+
     local entry = self.ActiveStackTask
     if entry and not queue:IsEnabled(entry) then
         self:_FinishStackTask(entry, "Stack task turned off", false)
         return true
     end
-    if not entry then
+    local prep = self.ActiveStackPrep
+    if prep then
+        local setting = prep.Kind == "RipIndra" and "AttackRipIndra"
+            or prep.Kind == "DoughKing" and "AttackDoughKing"
+            or prep.Kind == "SoulReaper" and "AttackSoulReaper"
+            or "AttackDarkbeard"
+        local stackSettings = self.Context.Config.StackFarmSettings
+        if stackSettings[setting] ~= true then
+            self:_CancelStackPreparation()
+            prep = nil
+        end
+    end
+    if not entry and not prep then
         local teleportFeature = self.Context and self.Context.TeleportFeature
         local estimateTravelCost
         if teleportFeature
@@ -15830,6 +16581,18 @@ function MainFarm:_StepStackTasks(session)
         if entry then
             self:_BeginStackTask(entry)
         end
+    end
+
+    if not entry and not self.ActiveStackPrep then
+        self:_PollCakePrinceSpawner()
+        local prepKind, toolName = self:_ChooseStackPreparation()
+        if prepKind then
+            self:_BeginStackPreparation(prepKind, toolName)
+        end
+    end
+
+    if not entry and self.ActiveStackPrep then
+        return self:_StepStackPreparation(session, root, self.ActiveStackPrep)
     end
 
     if not entry then
@@ -18533,10 +19296,10 @@ function MainFarm:_StepBossEventMode(
     )
 end
 
-function MainFarm:_StepFarmMaterials(session, root)
+function MainFarm:_StepFarmMaterials(session, root, materialOverride)
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings or {}
     local materialNames = farmSettings.FarmMaterials
-    local selectedMaterial = farmSettings.FarmMaterial
+    local selectedMaterial = materialOverride or farmSettings.FarmMaterial
     local selectedIsValid = false
     if type(materialNames) == "table" then
         for _, materialName in ipairs(materialNames) do
@@ -19442,6 +20205,9 @@ function MainFarm:Initialize(context)
     self.MainFarmEnabled = false
     self.Session += 1
     self.ActiveStackTask = nil
+    self.ActiveStackPrep = nil
+    self.StackRemoteRequests = {}
+    self.IndraColorState = nil
     self.StackTaskStartedAt = 0
     self.StackInterruptedFarm = false
     if self.StackTaskQueue then
@@ -19462,9 +20228,29 @@ function MainFarm:Initialize(context)
         )
     else
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
+        if stackSettings.AttackRipIndra ~= true then
+            stackSettings.PrioritizeRipIndra = false
+        end
+        if stackSettings.AttackDoughKing ~= true then
+            stackSettings.PrioritizeDoughKing = false
+        end
+        if stackSettings.PrioritizeRipIndra == true
+            and stackSettings.PrioritizeDoughKing == true
+        then
+            stackSettings.PrioritizeRipIndra = false
+            stackSettings.PrioritizeDoughKing = false
+        end
+        local cakePrinceRequested = stackSettings.AutoAttackCakePrince == true
+        local cakePrinceAvailable = isStackTaskAvailableInCurrentSea(
+            context.Compatibility,
+            "CakePrince"
+        )
+        if cakePrinceRequested and not cakePrinceAvailable then
+            stackSettings.AutoAttackCakePrince = false
+        end
         self.StackTaskQueue:SetEnabled(
             "CakePrince",
-            stackSettings.AutoAttackCakePrince == true
+            cakePrinceRequested and cakePrinceAvailable
         )
         for _, taskDefinition in ipairs({
             { Kind = "EliteHunter", Setting = "AutoEliteHunter" },
@@ -19836,6 +20622,11 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
     end
 
     stackSettings[settingKey] = payload
+    if not payload and settingKey == "AttackRipIndra" then
+        stackSettings.PrioritizeRipIndra = false
+    elseif not payload and settingKey == "AttackDoughKing" then
+        stackSettings.PrioritizeDoughKing = false
+    end
     local queueReady, queueError = self.StackTaskQueue:SetEnabled(kind, payload)
     if not queueReady then
         stackSettings[settingKey] = not payload
@@ -19857,6 +20648,14 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
     if self.ActiveStackTask and self.ActiveStackTask.Kind == kind then
         self:_FinishStackTask(self.ActiveStackTask, "Stack task turned off", false)
     end
+    if self.ActiveStackPrep and (
+        (self.ActiveStackPrep.Kind == "RipIndra" and settingKey == "AttackRipIndra")
+            or (self.ActiveStackPrep.Kind == "DoughKing" and settingKey == "AttackDoughKing")
+            or (self.ActiveStackPrep.Kind == "SoulReaper" and settingKey == "AttackSoulReaper")
+            or (self.ActiveStackPrep.Kind == "Darkbeard" and settingKey == "AttackDarkbeard")
+    ) then
+        self:_CancelStackPreparation()
+    end
     if not self.MainFarmEnabled and not self:_HasEnabledStackTasks() then
         self:_StopWorker()
     else
@@ -19869,46 +20668,80 @@ function MainFarm:Handle(actionId, payload)
     if actionId == "farm.status.copy" then
         return self:CopyStatusReport()
     end
+    if actionId == "stack.ripIndra.prioritize"
+        or actionId == "stack.doughKing.prioritize"
+    then
+        local stackSettings = self.Context.Config and self.Context.Config.StackFarmSettings
+        if not stackSettings or type(payload) ~= "boolean" then
+            self:_SetStatus("Boss priority setting is unavailable or invalid", "error")
+            return false
+        end
+        local settingName = actionId == "stack.ripIndra.prioritize"
+            and "PrioritizeRipIndra"
+            or "PrioritizeDoughKing"
+        local parentSetting = actionId == "stack.ripIndra.prioritize"
+            and "AttackRipIndra"
+            or "AttackDoughKing"
+        if payload and stackSettings[parentSetting] ~= true then
+            self:_SetStatus(
+                "Turn on the matching boss task before setting its priority",
+                "error",
+                "Turn on the matching boss task before enabling this priority."
+            )
+            return false
+        end
+        stackSettings[settingName] = payload
+        if payload then
+            stackSettings[actionId == "stack.ripIndra.prioritize"
+                and "PrioritizeDoughKing"
+                or "PrioritizeRipIndra"] = false
+        end
+        self:_SetStatus(
+            payload and "Boss priority updated" or "Boss priority cleared",
+            "success"
+        )
+        return true
+    end
     if actionId == "stack.cakePrince.enabled" then
         return self:_SetStackTaskEnabled(
             "CakePrince",
             "AutoAttackCakePrince",
-            "Auto Attack Cake Prince",
+            "Auto attack/summon Cake Prince",
             payload
         )
     elseif actionId == "stack.eliteHunter.enabled" then
         return self:_SetStackTaskEnabled(
             "EliteHunter",
             "AutoEliteHunter",
-            "Auto Elite Hunter",
+            "Auto attack Elite Hunter",
             payload
         )
     elseif actionId == "stack.ripIndra.enabled" then
         return self:_SetStackTaskEnabled(
             "RipIndra",
             "AttackRipIndra",
-            "Attack Rip Indra when spawned",
+            "Auto attack/summon/press pads Rip Indra",
             payload
         )
     elseif actionId == "stack.soulReaper.enabled" then
         return self:_SetStackTaskEnabled(
             "SoulReaper",
             "AttackSoulReaper",
-            "Attack Soul Reaper when spawned",
+            "Auto attack/summon Soul Reaper",
             payload
         )
     elseif actionId == "stack.doughKing.enabled" then
         return self:_SetStackTaskEnabled(
             "DoughKing",
             "AttackDoughKing",
-            "Attack Dough King when spawned",
+            "Auto attack/summon Dough King",
             payload
         )
     elseif actionId == "stack.darkbeard.enabled" then
         return self:_SetStackTaskEnabled(
             "Darkbeard",
             "AttackDarkbeard",
-            "Attack Darkbeard when spawned",
+            "Auto attack/summon Darkbeard",
             payload
         )
     elseif actionId == "stack.fruit.enabled" then

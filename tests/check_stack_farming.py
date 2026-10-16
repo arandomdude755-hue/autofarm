@@ -53,6 +53,28 @@ require(
     and "AutoCollectBerries = false" in CONFIG,
     "Stack Farming tasks must default to off",
 )
+require(
+    'Label = "Bosses"' in CONFIG
+    and 'Label = "Second Sea"' not in CONFIG
+    and 'Label = "Third Sea"' not in CONFIG
+    and 'Setting = "AttackDarkbeard"' in CONFIG
+    and 'Setting = "AttackRipIndra"' in CONFIG
+    and 'Setting = "AttackSoulReaper"' in CONFIG
+    and 'Setting = "AttackDoughKing"' in CONFIG
+    and CONFIG.count('Setting = "AttackDarkbeard"') == 1
+    and "RequiredSea = 2" in CONFIG
+    and CONFIG.count("RequiredSea = 3") >= 5,
+    "boss settings should share one heading and hide sea-specific options outside their sea",
+)
+require(
+    "PrioritizeRipIndra = false" in CONFIG
+    and "PrioritizeDoughKing = false" in CONFIG
+    and 'Action = "stack.ripIndra.prioritize"' in CONFIG
+    and 'Action = "stack.doughKing.prioritize"' in CONFIG
+    and 'Description = "Choose Indra before Dough King when both are enabled."' in CONFIG
+    and "Conjured Cocoa" in CONFIG,
+    "boss priority controls should default off and explain their mutually exclusive priority",
+)
 
 require(
     'instance.Name == "Cake Prince"' in QUEUE
@@ -78,6 +100,37 @@ require(
     and "self:_ObserveSpawnedBoss(instance)" in QUEUE
     and "isSpawnedStackBoss(instance)" in QUEUE,
     "spawned boss stack tasks must discover Enemy models without summoning actions",
+)
+require(
+    "function StackTaskQueue:TakePendingKind(kind)" in QUEUE
+    and "table.remove(self.Pending, index)" in QUEUE
+    and "function MainFarm:_ChooseStackPreparation()" in MAIN_FARM
+    and "function MainFarm:_StepStackPreparation(session, root, prep)" in MAIN_FARM
+    and "self.StackTaskQueue:TakePendingKind(bossQueueKind)" in MAIN_FARM,
+    "summon preparation should claim its own spawned boss without reordering unrelated queued jobs",
+)
+require(
+    "CakePrince = 3" in MAIN_FARM
+    and 'isStackTaskAvailableInCurrentSea(' in MAIN_FARM
+    and "cakePrinceRequested and cakePrinceAvailable" in MAIN_FARM,
+    "Cake Prince automation should remain disabled outside its Third Sea",
+)
+require(
+    'compatibility:GetInventoryMaterialCount("Conjured Cocoa")' in MAIN_FARM
+    and "if count < 10 then" in MAIN_FARM
+    and 'commF:InvokeServer("getColors")' in MAIN_FARM
+    and 'commF:InvokeServer("activateColor", color.HiddenName)' in MAIN_FARM
+    and '"Hallow Essence"' in MAIN_FARM
+    and '"Fist of Darkness"' in MAIN_FARM
+    and "SweetChaliceNpc" in MAIN_FARM,
+    "summon preparation should use held summon items, cocoa inventory, and the referenced Indra pad flow",
+)
+require(
+    "if payload and stackSettings[parentSetting] ~= true then" in MAIN_FARM
+    and "PrioritizeRipIndra = false" in MAIN_FARM
+    and "PrioritizeDoughKing = false" in MAIN_FARM
+    and "Waiting for another player to press the missing Haki pads" in MAIN_FARM,
+    "priorities must require their parent toggle, stay exclusive, and wait safely for other players' pads",
 )
 require(
     "instance.Parent == self.EnemiesFolder" in QUEUE

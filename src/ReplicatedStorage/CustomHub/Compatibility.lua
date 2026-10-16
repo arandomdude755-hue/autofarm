@@ -413,6 +413,75 @@ function Compatibility:HasOwnedInventoryItem(itemName)
     return found == true
 end
 
+function Compatibility:GetInventoryMaterialCount(materialName)
+    if type(materialName) ~= "string" or materialName == "" then
+        return nil, "Material name is invalid"
+    end
+
+    local now = os.clock()
+    self.InventoryMaterialCountCache = self.InventoryMaterialCountCache or {}
+    local cached = self.InventoryMaterialCountCache[materialName]
+    if cached and now < cached.ExpiresAt then
+        return cached.Count
+    end
+
+    local itemServiceModule = self.ReplicatedStorage:FindFirstChild("ItemReplicationService")
+    local itemConfigModule = self.ReplicatedStorage:FindFirstChild("ItemConfig")
+    if not itemServiceModule or not itemConfigModule then
+        return nil, "Inventory lookup modules are unavailable"
+    end
+
+    local serviceOk, itemService = pcall(require, itemServiceModule)
+    local configOk, itemConfig = pcall(require, itemConfigModule)
+    local keys = serviceOk and type(itemService) == "table" and itemService.KEYS
+    local quantityKey = type(keys) == "table" and keys.QUANTITY
+    if not serviceOk or type(itemService) ~= "table"
+        or not configOk or type(itemConfig) ~= "table"
+        or quantityKey == nil
+        or type(itemService.GetItems) ~= "function"
+        or type(itemConfig.match) ~= "function"
+    then
+        return nil, "Inventory lookup APIs are unavailable"
+    end
+
+    local scanOk, count = pcall(function()
+        local total = 0
+        for _, item in itemService:GetItems(quantityKey) do
+            if item and tonumber(item.Value) and tonumber(item.Value) > 0 then
+                local matchOk, itemDefinition = pcall(function()
+                    return itemConfig.match(item.ItemId):unwrap()
+                end)
+                if matchOk and itemDefinition then
+                    local display = itemDefinition.Display
+                    local storageKey = itemDefinition.Index
+                        and itemDefinition.Index.StorageKey
+                    local debugLabel = itemDefinition.Index
+                        and itemDefinition.Index.DebugLabel
+                    local resolvedName = display
+                        and (display.Name or storageKey)
+                        or storageKey
+                    if type(debugLabel) == "string" then
+                        resolvedName = debugLabel:match("^(.-)%s*%[") or resolvedName
+                    end
+                    if resolvedName == materialName then
+                        total += tonumber(item.Value)
+                    end
+                end
+            end
+        end
+        return total
+    end)
+    if not scanOk then
+        return nil, "Inventory material scan failed: " .. tostring(count)
+    end
+
+    self.InventoryMaterialCountCache[materialName] = {
+        Count = count,
+        ExpiresAt = now + 1,
+    }
+    return count
+end
+
 function Compatibility:GetUnlockedTitleCheck(titleName)
     if type(titleName) ~= "string" or titleName == "" then
         return nil, "title name is unavailable", false

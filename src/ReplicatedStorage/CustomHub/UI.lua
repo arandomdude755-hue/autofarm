@@ -915,8 +915,8 @@ function UI:_UpdateControlGridLayout()
         viewport = Vector2.new(390, 844)
     end
     local landscape = viewport.X > viewport.Y
-    local rowHeight = self.Config.Layout.RowHeight
     for _, group in ipairs(self.ControlGroups) do
+        local rowHeight = group.RowHeight or self.Config.Layout.RowHeight
         local columnCount = 1
         if not (self.ActivePage and self.ActivePage.SingleColumn)
             and landscape
@@ -931,6 +931,22 @@ function UI:_UpdateControlGridLayout()
             or UDim2.new(1, 0, 0, rowHeight)
         self:_SyncControlGroupHeight(group)
     end
+end
+
+function UI:_IsRequiredSeaAvailable(control)
+    local requiredSea = tonumber(control and control.RequiredSea)
+    if not requiredSea then
+        return true
+    end
+    local method = requiredSea == 1 and "IsFirstSea"
+        or requiredSea == 2 and "IsSecondSea"
+        or requiredSea == 3 and "IsThirdSea"
+    local check = method and self.Compatibility and self.Compatibility[method]
+    if type(check) ~= "function" then
+        return false
+    end
+    local ok, available = pcall(check, self.Compatibility)
+    return ok and available == true
 end
 
 function UI:_TabMatchesSearch(tabName, query)
@@ -1356,7 +1372,9 @@ function UI:_ActivateControl(control)
             local settings = self:_GetControlSettings(control)
             currentValue = settings[control.Setting] == true
         end
-        return self.Dispatch(control.Action, not currentValue)
+        local result = self.Dispatch(control.Action, not currentValue)
+        self:_Refresh(self.State:GetSnapshot())
+        return result
     end
     return self.Dispatch(control.Action, true)
 end
@@ -1887,9 +1905,13 @@ function UI:_AddControl(control, parent)
         or control.Kind == "button"
             and 24
             or 0
+    local descriptionHeight = type(control.Description) == "string"
+            and control.Description ~= ""
+        and 18
+        or 0
     local row = create((isSelector or isSlider) and "Frame" or "TextButton", {
         Name = "Action_" .. control.Action:gsub("[^%w]", "_"),
-        Size = UDim2.new(1, 0, 0, layout.RowHeight),
+        Size = UDim2.new(1, 0, 0, layout.RowHeight + descriptionHeight),
         BackgroundColor3 = theme.Control,
         BackgroundTransparency = 0.18,
         BorderSizePixel = 0,
@@ -1946,7 +1968,9 @@ function UI:_AddControl(control, parent)
     create("TextLabel", {
         Name = "Title",
         Position = UDim2.fromOffset(layout.RowInset, titleTop),
-        Size = titleSize,
+        Size = descriptionHeight > 0
+            and UDim2.new(titleSize.X.Scale, titleSize.X.Offset, 0, 22)
+            or titleSize,
         BackgroundTransparency = 1,
         Font = theme.StrongFont,
         Text = control.Label,
@@ -1955,6 +1979,20 @@ function UI:_AddControl(control, parent)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
     }, row)
+    if descriptionHeight > 0 then
+        create("TextLabel", {
+            Name = "Description",
+            Position = UDim2.new(0, layout.RowInset, 0, 22),
+            Size = UDim2.new(1, -layout.RowInset * 2, 0, 15),
+            BackgroundTransparency = 1,
+            Font = theme.Font,
+            Text = control.Description,
+            TextColor3 = theme.MutedText,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+    end
     if control.Kind == "button" then
         create("TextLabel", {
             Name = "ActionIndicator",
@@ -2273,6 +2311,14 @@ function UI:_CreateControlGroup(group, layoutOrder)
     local headerHeight = group.HeaderControl
         and (layout.SectionHeaderHeight or 42)
         or 0
+    local hasDescription = false
+    for _, control in ipairs(group.Controls or {}) do
+        if type(control.Description) == "string" and control.Description ~= "" then
+            hasDescription = true
+            break
+        end
+    end
+    group.RowHeight = layout.RowHeight + (hasDescription and 18 or 0)
     local cardName = group.HeaderControl
         and self:_ControlNodeName(group.HeaderControl)
         or ("ControlGroup_" .. tostring(layoutOrder))
@@ -2368,7 +2414,7 @@ function UI:_CreateControlGroup(group, layoutOrder)
         BorderSizePixel = 0,
     }, group.Card)
     group.Layout = create("UIGridLayout", {
-        CellSize = UDim2.new(1, 0, 0, layout.RowHeight),
+        CellSize = UDim2.new(1, 0, 0, group.RowHeight),
         CellPadding = UDim2.fromOffset(7, 5),
         FillDirection = Enum.FillDirection.Horizontal,
         FillDirectionMaxCells = 1,
@@ -2430,9 +2476,16 @@ function UI:_RenderTab(tabName)
             self:_UpdateControlGridLayout()
         end
     )
+    local visibleControls = {}
+    for _, control in ipairs(page.Controls) do
+        if self:_IsRequiredSeaAvailable(control) then
+            table.insert(visibleControls, control)
+        end
+    end
+    self.ActiveControls = visibleControls
     local groups = {}
     local currentGroup
-    for _, control in ipairs(page.Controls) do
+    for _, control in ipairs(visibleControls) do
         if control.Kind == "sectionHeader" then
             currentGroup = {
                 HeaderControl = control,
@@ -2451,6 +2504,9 @@ function UI:_RenderTab(tabName)
     end
 
     for groupIndex, group in ipairs(groups) do
+        if #group.Controls == 0 then
+            continue
+        end
         self:_CreateControlGroup(group, groupIndex)
         for controlIndex, control in ipairs(group.Controls) do
             local row = self:_AddControl(control, group.ControlsFrame)
@@ -3210,7 +3266,18 @@ function UI:Mount()
             gameWorkspace:GetAttributeChangedSignal("MAP"),
             function()
                 self:_CloseDropdown()
-                self:_Refresh(self.State:GetSnapshot())
+                local pageHasSeaControls = false
+                for _, control in ipairs(self.ActivePage and self.ActivePage.Controls or {}) do
+                    if control.RequiredSea then
+                        pageHasSeaControls = true
+                        break
+                    end
+                end
+                if pageHasSeaControls and self.ActiveTab then
+                    self:_RenderTab(self.ActiveTab)
+                else
+                    self:_Refresh(self.State:GetSnapshot())
+                end
             end
         )
     end

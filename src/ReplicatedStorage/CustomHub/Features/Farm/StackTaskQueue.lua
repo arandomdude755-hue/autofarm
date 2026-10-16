@@ -771,6 +771,26 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.Berry == true
 end
 
+function StackTaskQueue:TakePendingKind(kind)
+    for index, entry in ipairs(self.Pending) do
+        if entry.Kind == kind then
+            local instance = entry.Instance
+            local isPresent = instance
+                and instance.Parent == self.EnemiesFolder
+                and isSpawnedStackBoss(instance)
+            table.remove(self.Pending, index)
+            self.PendingByInstance[instance] = nil
+            if self:IsEnabled(entry) and isPresent then
+                self.ActiveByInstance[instance] = true
+                return entry
+            end
+            self.CompletedByInstance[instance] = true
+            return nil, "The boss was defeated before it could be reached"
+        end
+    end
+    return nil
+end
+
 function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
     table.sort(self.Pending, function(left, right)
         return left.QueueSequence < right.QueueSequence
