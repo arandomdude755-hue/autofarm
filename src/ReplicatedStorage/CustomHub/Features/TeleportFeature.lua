@@ -1416,6 +1416,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
         local stackActive = stackSettings.AutoAttackCakePrince == true
             or stackSettings.TeleportToFruit == true
+            or stackSettings.AutoCollectBerries == true
         if mainFarm.MainFarmEnabled then
             self:_SetStatus(
                 "Travel unavailable while Main Farming is active.",

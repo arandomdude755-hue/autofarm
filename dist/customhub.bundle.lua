@@ -487,6 +487,7 @@ local Config = {
     StackFarmSettings = {
         AutoAttackCakePrince = false,
         TeleportToFruit = false,
+        AutoCollectBerries = false,
     },
     Layout = {
         MobileWidth = 0.86,
@@ -752,6 +753,13 @@ local Config = {
                     Label = "Teleport To Fruit",
                     Action = "stack.fruit.enabled",
                     Setting = "TeleportToFruit",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Collect Berries",
+                    Action = "stack.berry.enabled",
+                    Setting = "AutoCollectBerries",
                     SettingsKey = "StackFarmSettings",
                 },
             },
@@ -9881,6 +9889,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
         local stackActive = stackSettings.AutoAttackCakePrince == true
             or stackSettings.TeleportToFruit == true
+            or stackSettings.AutoCollectBerries == true
         if mainFarm.MainFarmEnabled then
             self:_SetStatus(
                 "Travel unavailable while Main Farming is active.",
@@ -14378,6 +14387,7 @@ StackTaskQueue.__index = StackTaskQueue
 local TASK_KIND = {
     CakePrince = true,
     Fruit = true,
+    Berry = true,
 }
 
 local function isFruitCandidate(instance)
@@ -14400,12 +14410,62 @@ local function isCakePrinceCandidate(instance)
         and instance.Name == "Cake Prince"
 end
 
-function StackTaskQueue.new(workspaceService)
+local function hasBerrySpawnData(bush)
+    if not bush then
+        return false
+    end
+    for _, value in pairs(bush:GetAttributes()) do
+        if value ~= nil and value ~= false and value ~= "" then
+            return true
+        end
+    end
+    return false
+end
+
+local function findBerryPickup(bush)
+    if not bush then
+        return nil, nil
+    end
+    for _, child in ipairs(bush:GetChildren()) do
+        local prompt
+        if child:IsA("ProximityPrompt") then
+            prompt = child
+        else
+            prompt = child:FindFirstChildWhichIsA("ProximityPrompt", true)
+        end
+        if prompt then
+            return child:IsA("ProximityPrompt") and child.Parent or child, prompt
+        end
+    end
+    return nil, nil
+end
+
+local function instancePivot(instance)
+    if not instance then
+        return nil
+    end
+    if instance:IsA("BasePart") then
+        return instance.CFrame
+    elseif instance:IsA("Model") then
+        return instance:GetPivot()
+    end
+    local cframe = instance:GetAttribute("CFrame")
+    if typeof(cframe) == "CFrame" then
+        return cframe
+    elseif typeof(cframe) == "Vector3" then
+        return CFrame.new(cframe)
+    end
+    return nil
+end
+
+function StackTaskQueue.new(workspaceService, collectionService)
     return setmetatable({
         Workspace = workspaceService,
+        CollectionService = collectionService,
         Enabled = {
             CakePrince = false,
             Fruit = false,
+            Berry = false,
         },
         Pending = {},
         PendingByInstance = setmetatable({}, { __mode = "k" }),
@@ -14414,6 +14474,9 @@ function StackTaskQueue.new(workspaceService)
         KindByInstance = setmetatable({}, { __mode = "k" }),
         SpawnOrderByInstance = setmetatable({}, { __mode = "k" }),
         FruitWatchers = setmetatable({}, { __mode = "k" }),
+        BerryWatchers = setmetatable({}, { __mode = "k" }),
+        BerryActiveByBush = setmetatable({}, { __mode = "k" }),
+        BerryPickupByBush = setmetatable({}, { __mode = "k" }),
         Sequence = 0,
         Connections = {},
         EnemiesConnection = nil,
@@ -14427,6 +14490,19 @@ function StackTaskQueue:_DisconnectFruitWatcher(instance)
         return
     end
     self.FruitWatchers[instance] = nil
+    for _, connection in ipairs(connections) do
+        if connection.Connected then
+            connection:Disconnect()
+        end
+    end
+end
+
+function StackTaskQueue:_DisconnectBerryWatcher(instance)
+    local connections = self.BerryWatchers[instance]
+    if not connections then
+        return
+    end
+    self.BerryWatchers[instance] = nil
     for _, connection in ipairs(connections) do
         if connection.Connected then
             connection:Disconnect()
@@ -14512,6 +14588,134 @@ function StackTaskQueue:_ObserveCakePrince(instance)
     self:_Queue("CakePrince", instance)
 end
 
+function StackTaskQueue:_ForgetBerryBush(bush)
+    self:_DisconnectBerryWatcher(bush)
+    self:_RemovePendingInstance("Berry", bush)
+    self.BerryActiveByBush[bush] = nil
+    self.BerryPickupByBush[bush] = nil
+    self.PendingByInstance[bush] = nil
+    self.CompletedByInstance[bush] = nil
+    self.KindByInstance[bush] = nil
+    self.SpawnOrderByInstance[bush] = nil
+end
+
+function StackTaskQueue:_ObserveBerry(bush)
+    if not self.CollectionService
+        or not bush
+        or not self.CollectionService:HasTag(bush, "BerryBush")
+    then
+        return
+    end
+
+    local parent = bush.Parent
+    if not parent then
+        return
+    end
+    if parent:FindFirstChild("IgnoredBerry") or parent:FindFirstChild("Ignored") then
+        self:_RemovePendingInstance("Berry", bush)
+        self.CompletedByInstance[bush] = nil
+        self.BerryActiveByBush[bush] = false
+        self.KindByInstance[bush] = nil
+        self.SpawnOrderByInstance[bush] = nil
+        return
+    end
+
+    local berryModel = findBerryPickup(bush)
+    local active = hasBerrySpawnData(bush) or berryModel ~= nil
+    if not active then
+        if self.BerryActiveByBush[bush] ~= false then
+            self:_RemovePendingInstance("Berry", bush)
+            self.CompletedByInstance[bush] = nil
+            self.KindByInstance[bush] = nil
+            self.SpawnOrderByInstance[bush] = nil
+        end
+        self.BerryActiveByBush[bush] = false
+        return
+    end
+
+    if self.BerryActiveByBush[bush] == false then
+        self.CompletedByInstance[bush] = nil
+        self.KindByInstance[bush] = nil
+        self.SpawnOrderByInstance[bush] = nil
+    end
+    self.BerryActiveByBush[bush] = true
+    local previousPickup = self.BerryPickupByBush[bush]
+    if berryModel and berryModel ~= previousPickup then
+        self.BerryPickupByBush[bush] = berryModel
+        self.CompletedByInstance[bush] = nil
+    elseif previousPickup and not previousPickup:IsDescendantOf(bush) then
+        self.BerryPickupByBush[bush] = nil
+    end
+    if not self.Enabled.Berry then
+        return
+    end
+
+    self:_RememberSpawn("Berry", bush)
+    if not self.BerryWatchers[bush] then
+        local connections = {}
+        self.BerryWatchers[bush] = connections
+        table.insert(connections, bush.AttributeChanged:Connect(function()
+            self:_ObserveBerry(bush)
+        end))
+        table.insert(connections, bush.DescendantAdded:Connect(function()
+            self:_ObserveBerry(bush)
+        end))
+        table.insert(connections, bush.DescendantRemoving:Connect(function()
+            task.defer(function()
+                if self.BerryWatchers[bush] then
+                    self:_ObserveBerry(bush)
+                end
+            end)
+        end))
+        table.insert(connections, bush.AncestryChanged:Connect(function(_, newParent)
+            if not newParent then
+                self:_ForgetBerryBush(bush)
+            end
+        end))
+    end
+    self:_Queue("Berry", bush)
+end
+
+function StackTaskQueue:_RemovePendingInstance(kind, instance)
+    for index = #self.Pending, 1, -1 do
+        local entry = self.Pending[index]
+        if entry.Kind == kind and entry.Instance == instance then
+            self.PendingByInstance[instance] = nil
+            table.remove(self.Pending, index)
+        end
+    end
+end
+
+function StackTaskQueue:IsBerryBush(bush)
+    return self.CollectionService ~= nil
+        and bush ~= nil
+        and self.CollectionService:HasTag(bush, "BerryBush")
+end
+
+function StackTaskQueue:IsBerryActive(bush)
+    if not self:IsBerryBush(bush) then
+        return false
+    end
+    local parent = bush.Parent
+    if not parent or parent:FindFirstChild("IgnoredBerry") or parent:FindFirstChild("Ignored") then
+        return false
+    end
+    local model = findBerryPickup(bush)
+    return hasBerrySpawnData(bush) or model ~= nil
+end
+
+function StackTaskQueue:GetBerryPickup(bush)
+    local model, prompt = findBerryPickup(bush)
+    local destination = instancePivot(model)
+    if not destination then
+        destination = instancePivot(bush and bush.Parent)
+    end
+    if not destination then
+        destination = instancePivot(bush)
+    end
+    return model, prompt, destination
+end
+
 function StackTaskQueue:_WatchEnemies(folder)
     if not folder or folder == self.EnemiesFolder then
         return
@@ -14546,6 +14750,22 @@ function StackTaskQueue:Initialize()
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
     end
+
+    local collectionService = self.CollectionService
+    if collectionService then
+        table.insert(
+            self.Connections,
+            collectionService:GetInstanceAddedSignal("BerryBush"):Connect(function(bush)
+                self:_ObserveBerry(bush)
+            end)
+        )
+        table.insert(
+            self.Connections,
+            collectionService:GetInstanceRemovedSignal("BerryBush"):Connect(function(bush)
+                self:_ForgetBerryBush(bush)
+            end)
+        )
+    end
     return true
 end
 
@@ -14567,6 +14787,13 @@ function StackTaskQueue:_QueueExisting(kind)
                 self:_ObserveCakePrince(instance)
             end
         end
+    elseif kind == "Berry" then
+        local collectionService = self.CollectionService
+        if collectionService then
+            for _, bush in ipairs(collectionService:GetTagged("BerryBush")) do
+                self:_ObserveBerry(bush)
+            end
+        end
     end
 end
 
@@ -14586,6 +14813,9 @@ function StackTaskQueue:SetEnabled(kind, enabled)
     end
 
     enabled = enabled == true
+    if enabled and kind == "Berry" and not self.CollectionService then
+        return false, "Berry detection is unavailable"
+    end
     if self.Enabled[kind] == enabled then
         return true
     end
@@ -14598,6 +14828,10 @@ function StackTaskQueue:SetEnabled(kind, enabled)
         if kind == "Fruit" then
             for instance in pairs(self.FruitWatchers) do
                 self:_DisconnectFruitWatcher(instance)
+            end
+        elseif kind == "Berry" then
+            for bush in pairs(self.BerryWatchers) do
+                self:_DisconnectBerryWatcher(bush)
             end
         end
         for instance, observedKind in pairs(self.KindByInstance) do
@@ -14734,7 +14968,9 @@ local function optimizeFruitRun(entries, currentPosition, estimateTravelCost)
 end
 
 function StackTaskQueue:HasEnabledTasks()
-    return self.Enabled.CakePrince == true or self.Enabled.Fruit == true
+    return self.Enabled.CakePrince == true
+        or self.Enabled.Fruit == true
+        or self.Enabled.Berry == true
 end
 
 function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
@@ -14815,6 +15051,9 @@ function StackTaskQueue:Cleanup()
     for instance in pairs(self.FruitWatchers) do
         self:_DisconnectFruitWatcher(instance)
     end
+    for bush in pairs(self.BerryWatchers) do
+        self:_DisconnectBerryWatcher(bush)
+    end
     table.clear(self.Connections)
     table.clear(self.Pending)
     self.PendingByInstance = setmetatable({}, { __mode = "k" })
@@ -14823,7 +15062,11 @@ function StackTaskQueue:Cleanup()
     self.KindByInstance = setmetatable({}, { __mode = "k" })
     self.SpawnOrderByInstance = setmetatable({}, { __mode = "k" })
     self.FruitWatchers = setmetatable({}, { __mode = "k" })
+    self.BerryWatchers = setmetatable({}, { __mode = "k" })
+    self.BerryActiveByBush = setmetatable({}, { __mode = "k" })
+    self.BerryPickupByBush = setmetatable({}, { __mode = "k" })
     self.EnemiesFolder = nil
+    self.CollectionService = nil
     self.Workspace = nil
 end
 
@@ -14918,6 +15161,17 @@ local function boundedReason(value)
         text = text:sub(1, 117) .. "..."
     end
     return text
+end
+
+local function releaseBerryPrompt(entry)
+    local prompt = entry and entry.ActiveBerryPrompt
+    if not prompt then
+        return
+    end
+    entry.ActiveBerryPrompt = nil
+    pcall(function()
+        prompt:InputHoldEnd()
+    end)
 end
 
 local function questDataSummary(label, snapshot)
@@ -15045,6 +15299,8 @@ function MainFarm:_GetStackTaskLabel(entry)
         return "Cake Prince"
     elseif entry and entry.Kind == "Fruit" then
         return entry.Instance and entry.Instance.Name or "spawned fruit"
+    elseif entry and entry.Kind == "Berry" then
+        return "Berry collection"
     end
     return "stack task"
 end
@@ -15086,6 +15342,7 @@ function MainFarm:_BeginStackTask(entry)
 end
 
 function MainFarm:_FinishStackTask(entry, reason, markCompleted)
+    releaseBerryPrompt(entry)
     if self.StackTaskQueue then
         self.StackTaskQueue:Complete(entry, markCompleted)
     end
@@ -15173,7 +15430,7 @@ function MainFarm:_StepStackTasks(session)
         if self.MainFarmEnabled then
             return false
         end
-        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
+        self:_SetStatus("Stack Farming is on; waiting for Cake Prince, fruit or berries", "info")
         return true
     end
 
@@ -15213,6 +15470,102 @@ function MainFarm:_StepStackTasks(session)
         self:_EngageModeTarget(target, true, root, session, "stack")
         if not self.EnemyService:IsAlive(target) then
             self:_FinishStackTask(entry)
+        end
+        return true
+    elseif entry.Kind == "Berry" then
+        if not queue:IsBerryBush(target) or not queue:IsBerryActive(target) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+
+        local berryModel, prompt, destination = queue:GetBerryPickup(target)
+        if entry.BerryModel and not entry.BerryModel:IsDescendantOf(target) then
+            entry.BerryModel = nil
+            if berryModel then
+                entry.BerryModel = berryModel
+                entry.PromptAttempts = 0
+                entry.NextPromptAttemptAt = 0
+            else
+                self:_FinishStackTask(entry)
+                return true
+            end
+        elseif berryModel and not entry.BerryModel then
+            entry.BerryModel = berryModel
+        end
+
+        if not destination then
+            self:_FinishStackTask(entry, "Berry location is unavailable")
+            return true
+        end
+
+        local distance = (root.Position - destination.Position).Magnitude
+        local moved, moveResult = self:_MoveTo(
+            destination,
+            session,
+            2.5,
+            true,
+            "berry"
+        )
+        if not moved then
+            self:_SetStatus("Waiting to travel to berry: " .. tostring(moveResult), "warning")
+            return true
+        end
+
+        if distance > 8 then
+            entry.BerryNearbySince = nil
+            self:_SetStatus("Traveling to berry", "info")
+            return true
+        end
+
+        entry.BerryNearbySince = entry.BerryNearbySince or os.clock()
+        if prompt and prompt.Enabled then
+            if entry.ActiveBerryPrompt
+                and os.clock() >= (entry.BerryPromptReleaseAt or math.huge)
+            then
+                releaseBerryPrompt(entry)
+                entry.NextPromptAttemptAt = os.clock() + 0.8
+            end
+
+            if not entry.ActiveBerryPrompt
+                and os.clock() >= (entry.NextPromptAttemptAt or 0)
+            then
+                local began, beginError = pcall(function()
+                    prompt:InputHoldBegin()
+                end)
+                if began then
+                    entry.ActiveBerryPrompt = prompt
+                    entry.BerryModel = berryModel
+                    entry.BerryPromptReleaseAt = os.clock()
+                        + math.max(0.1, tonumber(prompt.HoldDuration) or 0)
+                    entry.PromptAttempts = (entry.PromptAttempts or 0) + 1
+                    entry.NextPromptAttemptAt = entry.BerryPromptReleaseAt + 0.8
+                    self:_SetStatus("Collecting berry", "info")
+                else
+                    entry.PromptAttempts = (entry.PromptAttempts or 0) + 1
+                    entry.NextPromptAttemptAt = os.clock() + 1
+                    self:_SetStatus(
+                        "Could not activate the berry pickup prompt: " .. tostring(beginError),
+                        "warning"
+                    )
+                end
+            end
+
+            if (entry.PromptAttempts or 0) >= 5
+                and os.clock() >= (entry.NextPromptAttemptAt or 0)
+            then
+                self:_FinishStackTask(
+                    entry,
+                    "Berry pickup did not respond; continuing Stack Farming"
+                )
+            end
+        else
+            self:_SetStatus("At berry bush; waiting for its pickup to load", "info")
+            if os.clock() - entry.BerryNearbySince >= STACK_TASK_LOAD_TIMEOUT then
+                self:_FinishStackTask(
+                    entry,
+                    "Berry pickup did not load; continuing Stack Farming"
+                )
+            end
         end
         return true
     elseif entry.Kind == "Fruit" then
@@ -18608,7 +18961,8 @@ function MainFarm:Initialize(context)
         self.StackTaskQueue:Cleanup()
     end
     self.StackTaskQueue = StackTaskQueue.new(
-        context.Compatibility and context.Compatibility.Workspace
+        context.Compatibility and context.Compatibility.Workspace,
+        context.Compatibility and context.Compatibility.CollectionService
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then
@@ -18627,6 +18981,10 @@ function MainFarm:Initialize(context)
         self.StackTaskQueue:SetEnabled(
             "Fruit",
             stackSettings.TeleportToFruit == true
+        )
+        self.StackTaskQueue:SetEnabled(
+            "Berry",
+            stackSettings.AutoCollectBerries == true
         )
     end
     self.Character = nil
@@ -19006,6 +19364,13 @@ function MainFarm:Handle(actionId, payload)
             "Teleport To Fruit",
             payload
         )
+    elseif actionId == "stack.berry.enabled" then
+        return self:_SetStackTaskEnabled(
+            "Berry",
+            "AutoCollectBerries",
+            "Collect Berries",
+            payload
+        )
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     if actionId == "farm.mastery.enabled" then
@@ -19380,10 +19745,12 @@ function MainFarm:Cleanup()
     if stackSettings then
         stackSettings.AutoAttackCakePrince = false
         stackSettings.TeleportToFruit = false
+        stackSettings.AutoCollectBerries = false
     end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
+        self.StackTaskQueue:SetEnabled("Berry", false)
     end
     self:_StopWorker()
     if self.StackTaskQueue then

@@ -33,11 +33,14 @@ require(
 require(
     'Action = "stack.cakePrince.enabled"' in CONFIG
     and 'Action = "stack.fruit.enabled"' in CONFIG
+    and 'Action = "stack.berry.enabled"' in CONFIG
     and "SpecialHop" not in CONFIG,
-    "Stack Farming must expose Cake Prince and fruit only, with no hop controls",
+    "Stack Farming must expose Cake Prince, fruit and berries without hop controls",
 )
 require(
-    "AutoAttackCakePrince = false" in CONFIG and "TeleportToFruit = false" in CONFIG,
+    "AutoAttackCakePrince = false" in CONFIG
+    and "TeleportToFruit = false" in CONFIG
+    and "AutoCollectBerries = false" in CONFIG,
     "Stack Farming tasks must default to off",
 )
 
@@ -45,6 +48,14 @@ require(
     'instance.Name == "Cake Prince"' in QUEUE
     and 'string.lower(instance.Name), "fruit"' in QUEUE,
     "the event queue must detect Cake Prince and fruit candidates",
+)
+require(
+    '"BerryBush"' in QUEUE
+    and 'GetInstanceAddedSignal("BerryBush")' in QUEUE
+    and 'GetInstanceRemovedSignal("BerryBush")' in QUEUE
+    and "AttributeChanged:Connect" in QUEUE
+    and "function StackTaskQueue:GetBerryPickup" in QUEUE,
+    "berry collection should detect tagged, active bushes from events and resolve their pickup target",
 )
 require(
     "workspaceService.ChildAdded:Connect" in QUEUE
@@ -88,6 +99,13 @@ require(
     "stack jobs must use existing boss combat and shared farm travel",
 )
 require(
+    'prompt:InputHoldBegin()' in MAIN_FARM
+    and 'prompt:InputHoldEnd()' in MAIN_FARM
+    and 'self:_MoveTo(' in MAIN_FARM
+    and '"berry"' in MAIN_FARM,
+    "berry pickup must travel through the shared movement service and use the prompt",
+)
+require(
     'entry.Kind == "Fruit" and target.Parent ~= workspaceService' in MAIN_FARM
     and "if entry.HadHandle then" in MAIN_FARM,
     "fruit pickup/reparenting must finish the active task instead of waiting indefinitely",
@@ -110,6 +128,10 @@ require(
     "Turn off the active Stack Farming task before starting Travel."
     in TELEPORT,
     "manual travel must explain the Stack Farming conflict to the player",
+)
+require(
+    "AutoCollectBerries == true" in TELEPORT,
+    "berry collection must also prevent conflicting manual travel",
 )
 
 print("PASS: Main Farming and Stack Farming are separate nested pages")

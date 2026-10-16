@@ -4,6 +4,7 @@ StackTaskQueue.__index = StackTaskQueue
 local TASK_KIND = {
     CakePrince = true,
     Fruit = true,
+    Berry = true,
 }
 
 local function isFruitCandidate(instance)
@@ -26,12 +27,62 @@ local function isCakePrinceCandidate(instance)
         and instance.Name == "Cake Prince"
 end
 
-function StackTaskQueue.new(workspaceService)
+local function hasBerrySpawnData(bush)
+    if not bush then
+        return false
+    end
+    for _, value in pairs(bush:GetAttributes()) do
+        if value ~= nil and value ~= false and value ~= "" then
+            return true
+        end
+    end
+    return false
+end
+
+local function findBerryPickup(bush)
+    if not bush then
+        return nil, nil
+    end
+    for _, child in ipairs(bush:GetChildren()) do
+        local prompt
+        if child:IsA("ProximityPrompt") then
+            prompt = child
+        else
+            prompt = child:FindFirstChildWhichIsA("ProximityPrompt", true)
+        end
+        if prompt then
+            return child:IsA("ProximityPrompt") and child.Parent or child, prompt
+        end
+    end
+    return nil, nil
+end
+
+local function instancePivot(instance)
+    if not instance then
+        return nil
+    end
+    if instance:IsA("BasePart") then
+        return instance.CFrame
+    elseif instance:IsA("Model") then
+        return instance:GetPivot()
+    end
+    local cframe = instance:GetAttribute("CFrame")
+    if typeof(cframe) == "CFrame" then
+        return cframe
+    elseif typeof(cframe) == "Vector3" then
+        return CFrame.new(cframe)
+    end
+    return nil
+end
+
+function StackTaskQueue.new(workspaceService, collectionService)
     return setmetatable({
         Workspace = workspaceService,
+        CollectionService = collectionService,
         Enabled = {
             CakePrince = false,
             Fruit = false,
+            Berry = false,
         },
         Pending = {},
         PendingByInstance = setmetatable({}, { __mode = "k" }),
@@ -40,6 +91,9 @@ function StackTaskQueue.new(workspaceService)
         KindByInstance = setmetatable({}, { __mode = "k" }),
         SpawnOrderByInstance = setmetatable({}, { __mode = "k" }),
         FruitWatchers = setmetatable({}, { __mode = "k" }),
+        BerryWatchers = setmetatable({}, { __mode = "k" }),
+        BerryActiveByBush = setmetatable({}, { __mode = "k" }),
+        BerryPickupByBush = setmetatable({}, { __mode = "k" }),
         Sequence = 0,
         Connections = {},
         EnemiesConnection = nil,
@@ -53,6 +107,19 @@ function StackTaskQueue:_DisconnectFruitWatcher(instance)
         return
     end
     self.FruitWatchers[instance] = nil
+    for _, connection in ipairs(connections) do
+        if connection.Connected then
+            connection:Disconnect()
+        end
+    end
+end
+
+function StackTaskQueue:_DisconnectBerryWatcher(instance)
+    local connections = self.BerryWatchers[instance]
+    if not connections then
+        return
+    end
+    self.BerryWatchers[instance] = nil
     for _, connection in ipairs(connections) do
         if connection.Connected then
             connection:Disconnect()
@@ -138,6 +205,134 @@ function StackTaskQueue:_ObserveCakePrince(instance)
     self:_Queue("CakePrince", instance)
 end
 
+function StackTaskQueue:_ForgetBerryBush(bush)
+    self:_DisconnectBerryWatcher(bush)
+    self:_RemovePendingInstance("Berry", bush)
+    self.BerryActiveByBush[bush] = nil
+    self.BerryPickupByBush[bush] = nil
+    self.PendingByInstance[bush] = nil
+    self.CompletedByInstance[bush] = nil
+    self.KindByInstance[bush] = nil
+    self.SpawnOrderByInstance[bush] = nil
+end
+
+function StackTaskQueue:_ObserveBerry(bush)
+    if not self.CollectionService
+        or not bush
+        or not self.CollectionService:HasTag(bush, "BerryBush")
+    then
+        return
+    end
+
+    local parent = bush.Parent
+    if not parent then
+        return
+    end
+    if parent:FindFirstChild("IgnoredBerry") or parent:FindFirstChild("Ignored") then
+        self:_RemovePendingInstance("Berry", bush)
+        self.CompletedByInstance[bush] = nil
+        self.BerryActiveByBush[bush] = false
+        self.KindByInstance[bush] = nil
+        self.SpawnOrderByInstance[bush] = nil
+        return
+    end
+
+    local berryModel = findBerryPickup(bush)
+    local active = hasBerrySpawnData(bush) or berryModel ~= nil
+    if not active then
+        if self.BerryActiveByBush[bush] ~= false then
+            self:_RemovePendingInstance("Berry", bush)
+            self.CompletedByInstance[bush] = nil
+            self.KindByInstance[bush] = nil
+            self.SpawnOrderByInstance[bush] = nil
+        end
+        self.BerryActiveByBush[bush] = false
+        return
+    end
+
+    if self.BerryActiveByBush[bush] == false then
+        self.CompletedByInstance[bush] = nil
+        self.KindByInstance[bush] = nil
+        self.SpawnOrderByInstance[bush] = nil
+    end
+    self.BerryActiveByBush[bush] = true
+    local previousPickup = self.BerryPickupByBush[bush]
+    if berryModel and berryModel ~= previousPickup then
+        self.BerryPickupByBush[bush] = berryModel
+        self.CompletedByInstance[bush] = nil
+    elseif previousPickup and not previousPickup:IsDescendantOf(bush) then
+        self.BerryPickupByBush[bush] = nil
+    end
+    if not self.Enabled.Berry then
+        return
+    end
+
+    self:_RememberSpawn("Berry", bush)
+    if not self.BerryWatchers[bush] then
+        local connections = {}
+        self.BerryWatchers[bush] = connections
+        table.insert(connections, bush.AttributeChanged:Connect(function()
+            self:_ObserveBerry(bush)
+        end))
+        table.insert(connections, bush.DescendantAdded:Connect(function()
+            self:_ObserveBerry(bush)
+        end))
+        table.insert(connections, bush.DescendantRemoving:Connect(function()
+            task.defer(function()
+                if self.BerryWatchers[bush] then
+                    self:_ObserveBerry(bush)
+                end
+            end)
+        end))
+        table.insert(connections, bush.AncestryChanged:Connect(function(_, newParent)
+            if not newParent then
+                self:_ForgetBerryBush(bush)
+            end
+        end))
+    end
+    self:_Queue("Berry", bush)
+end
+
+function StackTaskQueue:_RemovePendingInstance(kind, instance)
+    for index = #self.Pending, 1, -1 do
+        local entry = self.Pending[index]
+        if entry.Kind == kind and entry.Instance == instance then
+            self.PendingByInstance[instance] = nil
+            table.remove(self.Pending, index)
+        end
+    end
+end
+
+function StackTaskQueue:IsBerryBush(bush)
+    return self.CollectionService ~= nil
+        and bush ~= nil
+        and self.CollectionService:HasTag(bush, "BerryBush")
+end
+
+function StackTaskQueue:IsBerryActive(bush)
+    if not self:IsBerryBush(bush) then
+        return false
+    end
+    local parent = bush.Parent
+    if not parent or parent:FindFirstChild("IgnoredBerry") or parent:FindFirstChild("Ignored") then
+        return false
+    end
+    local model = findBerryPickup(bush)
+    return hasBerrySpawnData(bush) or model ~= nil
+end
+
+function StackTaskQueue:GetBerryPickup(bush)
+    local model, prompt = findBerryPickup(bush)
+    local destination = instancePivot(model)
+    if not destination then
+        destination = instancePivot(bush and bush.Parent)
+    end
+    if not destination then
+        destination = instancePivot(bush)
+    end
+    return model, prompt, destination
+end
+
 function StackTaskQueue:_WatchEnemies(folder)
     if not folder or folder == self.EnemiesFolder then
         return
@@ -172,6 +367,22 @@ function StackTaskQueue:Initialize()
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
     end
+
+    local collectionService = self.CollectionService
+    if collectionService then
+        table.insert(
+            self.Connections,
+            collectionService:GetInstanceAddedSignal("BerryBush"):Connect(function(bush)
+                self:_ObserveBerry(bush)
+            end)
+        )
+        table.insert(
+            self.Connections,
+            collectionService:GetInstanceRemovedSignal("BerryBush"):Connect(function(bush)
+                self:_ForgetBerryBush(bush)
+            end)
+        )
+    end
     return true
 end
 
@@ -193,6 +404,13 @@ function StackTaskQueue:_QueueExisting(kind)
                 self:_ObserveCakePrince(instance)
             end
         end
+    elseif kind == "Berry" then
+        local collectionService = self.CollectionService
+        if collectionService then
+            for _, bush in ipairs(collectionService:GetTagged("BerryBush")) do
+                self:_ObserveBerry(bush)
+            end
+        end
     end
 end
 
@@ -212,6 +430,9 @@ function StackTaskQueue:SetEnabled(kind, enabled)
     end
 
     enabled = enabled == true
+    if enabled and kind == "Berry" and not self.CollectionService then
+        return false, "Berry detection is unavailable"
+    end
     if self.Enabled[kind] == enabled then
         return true
     end
@@ -224,6 +445,10 @@ function StackTaskQueue:SetEnabled(kind, enabled)
         if kind == "Fruit" then
             for instance in pairs(self.FruitWatchers) do
                 self:_DisconnectFruitWatcher(instance)
+            end
+        elseif kind == "Berry" then
+            for bush in pairs(self.BerryWatchers) do
+                self:_DisconnectBerryWatcher(bush)
             end
         end
         for instance, observedKind in pairs(self.KindByInstance) do
@@ -360,7 +585,9 @@ local function optimizeFruitRun(entries, currentPosition, estimateTravelCost)
 end
 
 function StackTaskQueue:HasEnabledTasks()
-    return self.Enabled.CakePrince == true or self.Enabled.Fruit == true
+    return self.Enabled.CakePrince == true
+        or self.Enabled.Fruit == true
+        or self.Enabled.Berry == true
 end
 
 function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
@@ -441,6 +668,9 @@ function StackTaskQueue:Cleanup()
     for instance in pairs(self.FruitWatchers) do
         self:_DisconnectFruitWatcher(instance)
     end
+    for bush in pairs(self.BerryWatchers) do
+        self:_DisconnectBerryWatcher(bush)
+    end
     table.clear(self.Connections)
     table.clear(self.Pending)
     self.PendingByInstance = setmetatable({}, { __mode = "k" })
@@ -449,7 +679,11 @@ function StackTaskQueue:Cleanup()
     self.KindByInstance = setmetatable({}, { __mode = "k" })
     self.SpawnOrderByInstance = setmetatable({}, { __mode = "k" })
     self.FruitWatchers = setmetatable({}, { __mode = "k" })
+    self.BerryWatchers = setmetatable({}, { __mode = "k" })
+    self.BerryActiveByBush = setmetatable({}, { __mode = "k" })
+    self.BerryPickupByBush = setmetatable({}, { __mode = "k" })
     self.EnemiesFolder = nil
+    self.CollectionService = nil
     self.Workspace = nil
 end
 

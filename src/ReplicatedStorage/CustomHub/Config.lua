@@ -458,6 +458,7 @@ local Config = {
     StackFarmSettings = {
         AutoAttackCakePrince = false,
         TeleportToFruit = false,
+        AutoCollectBerries = false,
     },
     Layout = {
         MobileWidth = 0.86,
@@ -723,6 +724,13 @@ local Config = {
                     Label = "Teleport To Fruit",
                     Action = "stack.fruit.enabled",
                     Setting = "TeleportToFruit",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Collect Berries",
+                    Action = "stack.berry.enabled",
+                    Setting = "AutoCollectBerries",
                     SettingsKey = "StackFarmSettings",
                 },
             },

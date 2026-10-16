@@ -85,6 +85,17 @@ local function boundedReason(value)
     return text
 end
 
+local function releaseBerryPrompt(entry)
+    local prompt = entry and entry.ActiveBerryPrompt
+    if not prompt then
+        return
+    end
+    entry.ActiveBerryPrompt = nil
+    pcall(function()
+        prompt:InputHoldEnd()
+    end)
+end
+
 local function questDataSummary(label, snapshot)
     if type(snapshot) ~= "table" then
         return label .. ": unavailable"
@@ -210,6 +221,8 @@ function MainFarm:_GetStackTaskLabel(entry)
         return "Cake Prince"
     elseif entry and entry.Kind == "Fruit" then
         return entry.Instance and entry.Instance.Name or "spawned fruit"
+    elseif entry and entry.Kind == "Berry" then
+        return "Berry collection"
     end
     return "stack task"
 end
@@ -251,6 +264,7 @@ function MainFarm:_BeginStackTask(entry)
 end
 
 function MainFarm:_FinishStackTask(entry, reason, markCompleted)
+    releaseBerryPrompt(entry)
     if self.StackTaskQueue then
         self.StackTaskQueue:Complete(entry, markCompleted)
     end
@@ -338,7 +352,7 @@ function MainFarm:_StepStackTasks(session)
         if self.MainFarmEnabled then
             return false
         end
-        self:_SetStatus("Stack Farming is on; waiting for Cake Prince or a fruit", "info")
+        self:_SetStatus("Stack Farming is on; waiting for Cake Prince, fruit or berries", "info")
         return true
     end
 
@@ -378,6 +392,102 @@ function MainFarm:_StepStackTasks(session)
         self:_EngageModeTarget(target, true, root, session, "stack")
         if not self.EnemyService:IsAlive(target) then
             self:_FinishStackTask(entry)
+        end
+        return true
+    elseif entry.Kind == "Berry" then
+        if not queue:IsBerryBush(target) or not queue:IsBerryActive(target) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+
+        local berryModel, prompt, destination = queue:GetBerryPickup(target)
+        if entry.BerryModel and not entry.BerryModel:IsDescendantOf(target) then
+            entry.BerryModel = nil
+            if berryModel then
+                entry.BerryModel = berryModel
+                entry.PromptAttempts = 0
+                entry.NextPromptAttemptAt = 0
+            else
+                self:_FinishStackTask(entry)
+                return true
+            end
+        elseif berryModel and not entry.BerryModel then
+            entry.BerryModel = berryModel
+        end
+
+        if not destination then
+            self:_FinishStackTask(entry, "Berry location is unavailable")
+            return true
+        end
+
+        local distance = (root.Position - destination.Position).Magnitude
+        local moved, moveResult = self:_MoveTo(
+            destination,
+            session,
+            2.5,
+            true,
+            "berry"
+        )
+        if not moved then
+            self:_SetStatus("Waiting to travel to berry: " .. tostring(moveResult), "warning")
+            return true
+        end
+
+        if distance > 8 then
+            entry.BerryNearbySince = nil
+            self:_SetStatus("Traveling to berry", "info")
+            return true
+        end
+
+        entry.BerryNearbySince = entry.BerryNearbySince or os.clock()
+        if prompt and prompt.Enabled then
+            if entry.ActiveBerryPrompt
+                and os.clock() >= (entry.BerryPromptReleaseAt or math.huge)
+            then
+                releaseBerryPrompt(entry)
+                entry.NextPromptAttemptAt = os.clock() + 0.8
+            end
+
+            if not entry.ActiveBerryPrompt
+                and os.clock() >= (entry.NextPromptAttemptAt or 0)
+            then
+                local began, beginError = pcall(function()
+                    prompt:InputHoldBegin()
+                end)
+                if began then
+                    entry.ActiveBerryPrompt = prompt
+                    entry.BerryModel = berryModel
+                    entry.BerryPromptReleaseAt = os.clock()
+                        + math.max(0.1, tonumber(prompt.HoldDuration) or 0)
+                    entry.PromptAttempts = (entry.PromptAttempts or 0) + 1
+                    entry.NextPromptAttemptAt = entry.BerryPromptReleaseAt + 0.8
+                    self:_SetStatus("Collecting berry", "info")
+                else
+                    entry.PromptAttempts = (entry.PromptAttempts or 0) + 1
+                    entry.NextPromptAttemptAt = os.clock() + 1
+                    self:_SetStatus(
+                        "Could not activate the berry pickup prompt: " .. tostring(beginError),
+                        "warning"
+                    )
+                end
+            end
+
+            if (entry.PromptAttempts or 0) >= 5
+                and os.clock() >= (entry.NextPromptAttemptAt or 0)
+            then
+                self:_FinishStackTask(
+                    entry,
+                    "Berry pickup did not respond; continuing Stack Farming"
+                )
+            end
+        else
+            self:_SetStatus("At berry bush; waiting for its pickup to load", "info")
+            if os.clock() - entry.BerryNearbySince >= STACK_TASK_LOAD_TIMEOUT then
+                self:_FinishStackTask(
+                    entry,
+                    "Berry pickup did not load; continuing Stack Farming"
+                )
+            end
         end
         return true
     elseif entry.Kind == "Fruit" then
@@ -3773,7 +3883,8 @@ function MainFarm:Initialize(context)
         self.StackTaskQueue:Cleanup()
     end
     self.StackTaskQueue = StackTaskQueue.new(
-        context.Compatibility and context.Compatibility.Workspace
+        context.Compatibility and context.Compatibility.Workspace,
+        context.Compatibility and context.Compatibility.CollectionService
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then
@@ -3792,6 +3903,10 @@ function MainFarm:Initialize(context)
         self.StackTaskQueue:SetEnabled(
             "Fruit",
             stackSettings.TeleportToFruit == true
+        )
+        self.StackTaskQueue:SetEnabled(
+            "Berry",
+            stackSettings.AutoCollectBerries == true
         )
     end
     self.Character = nil
@@ -4171,6 +4286,13 @@ function MainFarm:Handle(actionId, payload)
             "Teleport To Fruit",
             payload
         )
+    elseif actionId == "stack.berry.enabled" then
+        return self:_SetStackTaskEnabled(
+            "Berry",
+            "AutoCollectBerries",
+            "Collect Berries",
+            payload
+        )
     end
     local farmSettings = self.Context.Config and self.Context.Config.FarmSettings
     if actionId == "farm.mastery.enabled" then
@@ -4545,10 +4667,12 @@ function MainFarm:Cleanup()
     if stackSettings then
         stackSettings.AutoAttackCakePrince = false
         stackSettings.TeleportToFruit = false
+        stackSettings.AutoCollectBerries = false
     end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
+        self.StackTaskQueue:SetEnabled("Berry", false)
     end
     self:_StopWorker()
     if self.StackTaskQueue then
