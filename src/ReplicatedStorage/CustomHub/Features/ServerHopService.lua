@@ -8,6 +8,15 @@ local PAGE_DELAY = 0.5
 local TELEPORT_TIMEOUT = 25
 local SESSION_LIFETIME = 3600
 local MAX_VISITED_SERVERS = 300
+local MAX_PERSISTED_VISITED_SERVERS = 40
+
+local function shortError(value)
+    local message = tostring(value or "unknown error"):gsub("[%c]", " ")
+    if #message > 180 then
+        message = message:sub(1, 177) .. "..."
+    end
+    return message
+end
 
 local function validJobId(value)
     return type(value) == "string"
@@ -16,11 +25,13 @@ local function validJobId(value)
         and not value:find("[%c]")
 end
 
-function ServerHopService.new(compatibility, settingsPersistence, setStatus)
+function ServerHopService.new(compatibility, settingsPersistence, setStatus, coordinator)
     return setmetatable({
         Compatibility = compatibility,
         SettingsPersistence = settingsPersistence,
         SetStatus = setStatus,
+        Coordinator = coordinator,
+        CoordinatorLease = nil,
         Settings = nil,
         Session = nil,
         ResumePending = false,
@@ -41,6 +52,17 @@ function ServerHopService:_SetStatus(message, kind)
     if type(self.SetStatus) == "function" then
         pcall(self.SetStatus, message, kind or "info")
     end
+end
+
+function ServerHopService:_ReleaseCoordinatorLease()
+    if self.Coordinator and self.CoordinatorLease then
+        self.Coordinator:Release(self.CoordinatorLease)
+    end
+    self.CoordinatorLease = nil
+end
+
+function ServerHopService:OwnsLease(lease)
+    return lease ~= nil and self.CoordinatorLease == lease
 end
 
 function ServerHopService:_ReadModes()
@@ -112,6 +134,13 @@ function ServerHopService:_SaveSession()
     if not copy then
         return false, "Hop session is unavailable"
     end
+    if #copy.Visited > MAX_PERSISTED_VISITED_SERVERS then
+        local recent = {}
+        for index = #copy.Visited - MAX_PERSISTED_VISITED_SERVERS + 1, #copy.Visited do
+            recent[#recent + 1] = copy.Visited[index]
+        end
+        copy.Visited = recent
+    end
     copy.ExpiresAt = os.time() + SESSION_LIFETIME
     self.Session.ExpiresAt = copy.ExpiresAt
     local ok, saved, saveError = pcall(
@@ -134,6 +163,7 @@ function ServerHopService:_ClearSavedSession()
     self.PendingJobId = nil
     self.PendingDeadline = 0
     self.InFlight = false
+    self:_ReleaseCoordinatorLease()
 end
 
 function ServerHopService:_EnsureSession()
@@ -220,13 +250,17 @@ function ServerHopService:_FailPending(message)
     end
     self.NextAttemptAt = os.clock() + RETRY_DELAY
     self:_SetStatus(message or "That server could not be joined; trying another.", "warning")
+    self:_ReleaseCoordinatorLease()
 end
 
-function ServerHopService:_OnTeleportInitFailed(player, _, errorMessage)
+function ServerHopService:_OnTeleportInitFailed(player, teleportResult, errorMessage)
     if player ~= self.Compatibility.Player or not self.PendingJobId then
         return
     end
-    self:_FailPending("Could not join that server; trying another.")
+    local reason = errorMessage or teleportResult or "Roblox rejected the join"
+    self:_FailPending(
+        "Roblox rejected the server join (" .. shortError(reason) .. "); trying another."
+    )
 end
 
 function ServerHopService:Initialize(settings)
@@ -361,37 +395,57 @@ function ServerHopService:_BeginFetch()
     if not session then
         return
     end
+    if self.Coordinator and not self.CoordinatorLease then
+        local lease = self.Coordinator:TryAcquire(
+            "StackFarming",
+            "Checking public servers",
+            "StackFarm"
+        )
+        if not lease then
+            return
+        end
+        self.CoordinatorLease = lease
+    end
     self.Fetching = true
     local cursor = session.Cursor
     local generation = self.Generation
     self:_SetStatus("Checking public servers for " .. self:_ModeLabel(), "info")
     task.spawn(function()
-        local callOk, result = pcall(function()
+        local callOk, result, fetchError = pcall(function()
             return self.Compatibility:GetPublicServers(cursor)
         end)
         if not callOk then
+            fetchError = result
             result = nil
         end
         if self.Destroyed then
             self.Fetching = false
+            self:_ReleaseCoordinatorLease()
             return
         end
         self.Fetching = false
         if generation ~= self.Generation then
+            self:_ReleaseCoordinatorLease()
             return
         end
         if not self:_HasEnabledMode() then
+            self:_ReleaseCoordinatorLease()
             return
         end
         if not result then
             if not self.LastErrorStatus then
                 self.LastErrorStatus = true
                 self:_SetStatus(
-                    "The public server list is unavailable right now; retrying shortly.",
+                    "Can't check public servers for place "
+                        .. tostring(game.PlaceId)
+                        .. " ("
+                        .. shortError(fetchError)
+                        .. "); retrying shortly.",
                     "warning"
                 )
             end
             self.NextAttemptAt = os.clock() + 12
+            self:_ReleaseCoordinatorLease()
             return
         end
 
@@ -423,6 +477,7 @@ function ServerHopService:_BeginFetch()
                     self:_SetStatus("Still checking public servers", "info")
                 end
                 self.NextAttemptAt = os.clock() + pause
+                self:_ReleaseCoordinatorLease()
                 return
             end
 
@@ -431,6 +486,7 @@ function ServerHopService:_BeginFetch()
             self.PageCount = 0
             self.NextAttemptAt = os.clock() + 8
             self:_SetStatus("No new public servers found; checking again shortly", "warning")
+            self:_ReleaseCoordinatorLease()
             return
         end
 
@@ -447,6 +503,7 @@ function ServerHopService:_BeginFetch()
                 "Server hopping can't continue because the search session couldn't be saved.",
                 "error"
             )
+            self:_ReleaseCoordinatorLease()
             return
         end
 
@@ -454,11 +511,18 @@ function ServerHopService:_BeginFetch()
         self.PendingDeadline = os.clock() + TELEPORT_TIMEOUT
         self.InFlight = true
         self:_SetStatus("Joining another public server to check for targets", "info")
-        local teleportCallOk, joined = pcall(function()
+        local teleportCallOk, joined, joinError = pcall(function()
             return self.Compatibility:TeleportToPublicServer(jobId)
         end)
         if not teleportCallOk or not joined then
-            self:_FailPending("Could not join that server; trying another.")
+            if not teleportCallOk then
+                joinError = joined
+            end
+            self:_FailPending(
+                "Couldn't start the server hop ("
+                    .. shortError(joinError)
+                    .. "); trying another."
+            )
         end
     end)
 end
@@ -479,6 +543,7 @@ function ServerHopService:Step()
             self.PendingJobId = nil
             self.PendingDeadline = 0
             self.NextAttemptAt = os.clock() + ARRIVAL_SCAN_DELAY
+            self:_ReleaseCoordinatorLease()
             return false
         end
         if os.clock() >= self.PendingDeadline then
@@ -498,6 +563,7 @@ function ServerHopService:Destroy()
     self.Destroyed = true
     self.Generation += 1
     self.Fetching = false
+    self:_ReleaseCoordinatorLease()
     if self.TeleportFailureConnection then
         self.TeleportFailureConnection:Disconnect()
         self.TeleportFailureConnection = nil

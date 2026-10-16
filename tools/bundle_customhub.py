@@ -25,6 +25,7 @@ MODULES = (
             "require(script.Features.TeleportFeature)": '__bundleLoad("CustomHub.Features.TeleportFeature")',
             "require(script.Features.StatusFeature)": '__bundleLoad("CustomHub.Features.StatusFeature")',
             "require(script.Features.Farm.MovementService)": '__bundleLoad("CustomHub.Features.Farm.MovementService")',
+            "require(script.Features.TaskCoordinator)": '__bundleLoad("CustomHub.Features.TaskCoordinator")',
         },
     ),
     ("CustomHub.UI", "src/ReplicatedStorage/CustomHub/UI.lua", {}),
@@ -85,6 +86,11 @@ MODULES = (
     (
         "CustomHub.Features.ServerHopService",
         "src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua",
+        {},
+    ),
+    (
+        "CustomHub.Features.TaskCoordinator",
+        "src/ReplicatedStorage/CustomHub/Features/TaskCoordinator.lua",
         {},
     ),
     (

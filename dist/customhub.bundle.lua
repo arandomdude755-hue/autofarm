@@ -767,6 +767,16 @@ local Config = {
                 },
                 {
                     Kind = "settingToggle",
+                    Label = "Hop for Elite Hunter",
+                    Action = "stack.hop.eliteHunter.enabled",
+                    Setting = "HopForEliteHunter",
+                    SettingsKey = "StackFarmSettings",
+                    ParentSetting = "AutoEliteHunter",
+                    RequiredSea = 3,
+                    Description = "Requires Auto attack Elite Hunter to be on.",
+                },
+                {
+                    Kind = "settingToggle",
                     Label = "Auto attack/summon Darkbeard",
                     Action = "stack.darkbeard.enabled",
                     Setting = "AttackDarkbeard",
@@ -834,26 +844,14 @@ local Config = {
                     SettingsKey = "StackFarmSettings",
                 },
                 {
-                    Kind = "sectionHeader",
-                    Label = "Server search",
-                },
-                {
-                    Kind = "settingToggle",
-                    Label = "Hop for Elite Hunter",
-                    Action = "stack.hop.eliteHunter.enabled",
-                    Setting = "HopForEliteHunter",
-                    SettingsKey = "StackFarmSettings",
-                    RequiredSea = 3,
-                    Description = "Checks this server first, then searches other public servers.",
-                },
-                {
                     Kind = "settingToggle",
                     Label = "Hop for berries",
                     Action = "stack.hop.berry.enabled",
                     Setting = "HopForBerries",
                     SettingsKey = "StackFarmSettings",
+                    ParentSetting = "AutoCollectBerries",
                     RequiredSea = 3,
-                    Description = "Collects available berries here before searching other servers.",
+                    Description = "Requires Collect Berries to be on.",
                 },
             },
         },
@@ -1586,7 +1584,7 @@ function Compatibility:GetPublicServers(cursor)
 
     local url = "https://games.roblox.com/v1/games/"
         .. tostring(math.floor(placeId))
-        .. "/servers/Public?sortOrder=Asc&limit=100"
+        .. "/servers/Public?sortOrder=Asc&limit=25"
     if type(cursor) == "string" and cursor ~= "" then
         local encodeOk, encodedCursor = pcall(function()
             return self.HttpService:UrlEncode(cursor)
@@ -1607,7 +1605,10 @@ function Compatibility:GetPublicServers(cursor)
         if requestOk and type(response) == "table" then
             local statusCode = tonumber(response.StatusCode or response.Status)
             if statusCode and (statusCode < 200 or statusCode >= 300) then
-                return nil, "Roblox server list returned HTTP " .. tostring(statusCode)
+                return nil, "Roblox server list returned HTTP "
+                    .. tostring(statusCode)
+                    .. " for place "
+                    .. tostring(math.floor(placeId))
             end
             responseBody = response.Body
         elseif not requestOk then
@@ -3155,6 +3156,7 @@ local MainFarm = __bundleLoad("CustomHub.Features.MainFarm")
 local TeleportFeature = __bundleLoad("CustomHub.Features.TeleportFeature")
 local StatusFeature = __bundleLoad("CustomHub.Features.StatusFeature")
 local MovementService = __bundleLoad("CustomHub.Features.Farm.MovementService")
+local TaskCoordinator = __bundleLoad("CustomHub.Features.TaskCoordinator")
 
 local FeatureManager = {}
 FeatureManager.__index = FeatureManager
@@ -3163,6 +3165,7 @@ function FeatureManager.new(state, compatibility, config, settingsPersistence)
     local movementService = MovementService.new(compatibility, function(message, kind)
         state:SetStatus(message, kind or "info")
     end)
+    local taskCoordinator = TaskCoordinator.new()
     return setmetatable({
         State = state,
         Modules = { MainFarm, TeleportFeature, StatusFeature, PlaceholderFeatures },
@@ -3173,6 +3176,7 @@ function FeatureManager.new(state, compatibility, config, settingsPersistence)
             Config = config,
             SettingsPersistence = settingsPersistence,
             MovementService = movementService,
+            TaskCoordinator = taskCoordinator,
             MainFarm = MainFarm,
             TeleportFeature = TeleportFeature,
         },
@@ -3320,6 +3324,9 @@ function FeatureManager:Cleanup()
             self.State:SetStatus("Feature cleanup error: " .. tostring(err), "error")
         end
         self.InitializedModules[index] = nil
+    end
+    if self.Context and self.Context.TaskCoordinator then
+        self.Context.TaskCoordinator:Cleanup()
     end
 end
 
@@ -10769,6 +10776,10 @@ function TeleportFeature:_FinishTravel(request, message, kind)
     end
     self:_SetFeatureEnabled(request.Action, false)
     self:_SetStatus(message, kind)
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and request.CoordinatorLease then
+        coordinator:Release(request.CoordinatorLease)
+    end
 end
 
 function TeleportFeature:Cancel(message, keepActionEnabled)
@@ -10791,6 +10802,10 @@ function TeleportFeature:Cancel(message, keepActionEnabled)
         self:_SetStatus("Updating travel destination.", "info")
     else
         self:_SetStatus("Travel cancelled.", "info")
+    end
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and request.CoordinatorLease then
+        coordinator:Release(request.CoordinatorLease)
     end
     return true
 end
@@ -10993,39 +11008,14 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local context = self.Context
     local compatibility = context and context.Compatibility
     local mainFarm = context and context.MainFarm
-    if mainFarm and mainFarm.Running then
+    if mainFarm and mainFarm.MainFarmEnabled then
         self:_SetFeatureEnabled(actionId, false)
-        local stackSettings = context.Config and context.Config.StackFarmSettings or {}
-        local stackActive = stackSettings.AutoAttackCakePrince == true
-            or stackSettings.AutoEliteHunter == true
-            or stackSettings.AttackRipIndra == true
-            or stackSettings.AttackSoulReaper == true
-            or stackSettings.AttackDoughKing == true
-            or stackSettings.AttackDarkbeard == true
-            or stackSettings.TeleportToFruit == true
-            or stackSettings.AutoCollectBerries == true
-            or stackSettings.HopForEliteHunter == true
-            or stackSettings.HopForBerries == true
-        if mainFarm.MainFarmEnabled then
-            self:_SetStatus(
-                "Travel unavailable while Main Farming is active.",
-                "error",
-                "Turn off Start Farm first. Travel and farming can't run together."
-            )
-        elseif stackActive then
-            self:_SetStatus(
-                "Travel unavailable while Stack Farming is active.",
-                "error",
-                "Turn off the active Stack Farming task before starting Travel."
-            )
-        else
-            self:_SetStatus(
-                "Travel unavailable while farming is active.",
-                "error",
-                "Stop the active farming task before starting Travel."
-            )
-        end
-        return false, "Auto Farm is running"
+        self:_SetStatus(
+            "Travel unavailable while Main Farming is active.",
+            "error",
+            "Turn off Start Farm first. Travel and farming can't run together."
+        )
+        return false, "Main Farming is active"
     end
     if self.ActiveTravel then
         if self.ActiveTravel.Action == actionId then
@@ -11046,6 +11036,37 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         return false, "Character is unavailable"
     end
 
+    local coordinator = context and context.TaskCoordinator
+    if not coordinator then
+        self:_SetFeatureEnabled(actionId, false)
+        self:_SetStatus("Travel is temporarily unavailable.", "error")
+        return false, "Task coordination is unavailable"
+    end
+    local request
+    local coordinatorLease, blockingTask = coordinator:TryAcquire(
+        "Travel",
+        "Travel to " .. destinationLabel,
+        "Background",
+        function(preemptingGroup, preemptingLabel)
+            if request and self.ActiveTravel == request then
+                local message = preemptingGroup == "StackFarm"
+                    and "Travel stopped so Stack Farming can finish its task."
+                    or "Travel stopped so " .. tostring(preemptingLabel or "another task")
+                        .. " can use the character."
+                self:Cancel(message, false)
+            end
+        end
+    )
+    if not coordinatorLease then
+        self:_SetFeatureEnabled(actionId, false)
+        self:_SetStatus(
+            "Travel is waiting for " .. tostring(blockingTask and blockingTask.Label or "current work"),
+            "warning",
+            "Let the current task finish before starting another trip."
+        )
+        return false, "Another task is active"
+    end
+
     local collisionCallOk, collisionReady, collisionError = pcall(function()
         return self.MovementService:SetFarmCollisionSuppression(true)
     end)
@@ -11054,6 +11075,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         collisionReady = false
     end
     if not collisionReady then
+        coordinator:Release(coordinatorLease)
         self:_SetFeatureEnabled(actionId, false)
         self:_SetStatus("Travel collision setup failed: " .. tostring(collisionError), "error")
         return false, collisionError
@@ -11073,7 +11095,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     end
 
     self.Generation += 1
-    local request = {
+    request = {
         Generation = self.Generation,
         Character = character,
         StartedAt = os.clock(),
@@ -11084,6 +11106,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         GatewayPlanLabel = gatewayPlanLabel,
         SpecialTravelRoute = specialRoute,
         StallRetries = 0,
+        CoordinatorLease = coordinatorLease,
     }
     self.ActiveTravel = request
     self:_SetFeatureEnabled(actionId, true)
@@ -16414,6 +16437,15 @@ local PAGE_DELAY = 0.5
 local TELEPORT_TIMEOUT = 25
 local SESSION_LIFETIME = 3600
 local MAX_VISITED_SERVERS = 300
+local MAX_PERSISTED_VISITED_SERVERS = 40
+
+local function shortError(value)
+    local message = tostring(value or "unknown error"):gsub("[%c]", " ")
+    if #message > 180 then
+        message = message:sub(1, 177) .. "..."
+    end
+    return message
+end
 
 local function validJobId(value)
     return type(value) == "string"
@@ -16422,11 +16454,13 @@ local function validJobId(value)
         and not value:find("[%c]")
 end
 
-function ServerHopService.new(compatibility, settingsPersistence, setStatus)
+function ServerHopService.new(compatibility, settingsPersistence, setStatus, coordinator)
     return setmetatable({
         Compatibility = compatibility,
         SettingsPersistence = settingsPersistence,
         SetStatus = setStatus,
+        Coordinator = coordinator,
+        CoordinatorLease = nil,
         Settings = nil,
         Session = nil,
         ResumePending = false,
@@ -16447,6 +16481,17 @@ function ServerHopService:_SetStatus(message, kind)
     if type(self.SetStatus) == "function" then
         pcall(self.SetStatus, message, kind or "info")
     end
+end
+
+function ServerHopService:_ReleaseCoordinatorLease()
+    if self.Coordinator and self.CoordinatorLease then
+        self.Coordinator:Release(self.CoordinatorLease)
+    end
+    self.CoordinatorLease = nil
+end
+
+function ServerHopService:OwnsLease(lease)
+    return lease ~= nil and self.CoordinatorLease == lease
 end
 
 function ServerHopService:_ReadModes()
@@ -16518,6 +16563,13 @@ function ServerHopService:_SaveSession()
     if not copy then
         return false, "Hop session is unavailable"
     end
+    if #copy.Visited > MAX_PERSISTED_VISITED_SERVERS then
+        local recent = {}
+        for index = #copy.Visited - MAX_PERSISTED_VISITED_SERVERS + 1, #copy.Visited do
+            recent[#recent + 1] = copy.Visited[index]
+        end
+        copy.Visited = recent
+    end
     copy.ExpiresAt = os.time() + SESSION_LIFETIME
     self.Session.ExpiresAt = copy.ExpiresAt
     local ok, saved, saveError = pcall(
@@ -16540,6 +16592,7 @@ function ServerHopService:_ClearSavedSession()
     self.PendingJobId = nil
     self.PendingDeadline = 0
     self.InFlight = false
+    self:_ReleaseCoordinatorLease()
 end
 
 function ServerHopService:_EnsureSession()
@@ -16626,13 +16679,17 @@ function ServerHopService:_FailPending(message)
     end
     self.NextAttemptAt = os.clock() + RETRY_DELAY
     self:_SetStatus(message or "That server could not be joined; trying another.", "warning")
+    self:_ReleaseCoordinatorLease()
 end
 
-function ServerHopService:_OnTeleportInitFailed(player, _, errorMessage)
+function ServerHopService:_OnTeleportInitFailed(player, teleportResult, errorMessage)
     if player ~= self.Compatibility.Player or not self.PendingJobId then
         return
     end
-    self:_FailPending("Could not join that server; trying another.")
+    local reason = errorMessage or teleportResult or "Roblox rejected the join"
+    self:_FailPending(
+        "Roblox rejected the server join (" .. shortError(reason) .. "); trying another."
+    )
 end
 
 function ServerHopService:Initialize(settings)
@@ -16767,37 +16824,57 @@ function ServerHopService:_BeginFetch()
     if not session then
         return
     end
+    if self.Coordinator and not self.CoordinatorLease then
+        local lease = self.Coordinator:TryAcquire(
+            "StackFarming",
+            "Checking public servers",
+            "StackFarm"
+        )
+        if not lease then
+            return
+        end
+        self.CoordinatorLease = lease
+    end
     self.Fetching = true
     local cursor = session.Cursor
     local generation = self.Generation
     self:_SetStatus("Checking public servers for " .. self:_ModeLabel(), "info")
     task.spawn(function()
-        local callOk, result = pcall(function()
+        local callOk, result, fetchError = pcall(function()
             return self.Compatibility:GetPublicServers(cursor)
         end)
         if not callOk then
+            fetchError = result
             result = nil
         end
         if self.Destroyed then
             self.Fetching = false
+            self:_ReleaseCoordinatorLease()
             return
         end
         self.Fetching = false
         if generation ~= self.Generation then
+            self:_ReleaseCoordinatorLease()
             return
         end
         if not self:_HasEnabledMode() then
+            self:_ReleaseCoordinatorLease()
             return
         end
         if not result then
             if not self.LastErrorStatus then
                 self.LastErrorStatus = true
                 self:_SetStatus(
-                    "The public server list is unavailable right now; retrying shortly.",
+                    "Can't check public servers for place "
+                        .. tostring(game.PlaceId)
+                        .. " ("
+                        .. shortError(fetchError)
+                        .. "); retrying shortly.",
                     "warning"
                 )
             end
             self.NextAttemptAt = os.clock() + 12
+            self:_ReleaseCoordinatorLease()
             return
         end
 
@@ -16829,6 +16906,7 @@ function ServerHopService:_BeginFetch()
                     self:_SetStatus("Still checking public servers", "info")
                 end
                 self.NextAttemptAt = os.clock() + pause
+                self:_ReleaseCoordinatorLease()
                 return
             end
 
@@ -16837,6 +16915,7 @@ function ServerHopService:_BeginFetch()
             self.PageCount = 0
             self.NextAttemptAt = os.clock() + 8
             self:_SetStatus("No new public servers found; checking again shortly", "warning")
+            self:_ReleaseCoordinatorLease()
             return
         end
 
@@ -16853,6 +16932,7 @@ function ServerHopService:_BeginFetch()
                 "Server hopping can't continue because the search session couldn't be saved.",
                 "error"
             )
+            self:_ReleaseCoordinatorLease()
             return
         end
 
@@ -16860,11 +16940,18 @@ function ServerHopService:_BeginFetch()
         self.PendingDeadline = os.clock() + TELEPORT_TIMEOUT
         self.InFlight = true
         self:_SetStatus("Joining another public server to check for targets", "info")
-        local teleportCallOk, joined = pcall(function()
+        local teleportCallOk, joined, joinError = pcall(function()
             return self.Compatibility:TeleportToPublicServer(jobId)
         end)
         if not teleportCallOk or not joined then
-            self:_FailPending("Could not join that server; trying another.")
+            if not teleportCallOk then
+                joinError = joined
+            end
+            self:_FailPending(
+                "Couldn't start the server hop ("
+                    .. shortError(joinError)
+                    .. "); trying another."
+            )
         end
     end)
 end
@@ -16885,6 +16972,7 @@ function ServerHopService:Step()
             self.PendingJobId = nil
             self.PendingDeadline = 0
             self.NextAttemptAt = os.clock() + ARRIVAL_SCAN_DELAY
+            self:_ReleaseCoordinatorLease()
             return false
         end
         if os.clock() >= self.PendingDeadline then
@@ -16904,6 +16992,7 @@ function ServerHopService:Destroy()
     self.Destroyed = true
     self.Generation += 1
     self.Fetching = false
+    self:_ReleaseCoordinatorLease()
     if self.TeleportFailureConnection then
         self.TeleportFailureConnection:Disconnect()
         self.TeleportFailureConnection = nil
@@ -16912,6 +17001,117 @@ end
 
 return ServerHopService
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua
+end
+
+__bundleFactories["CustomHub.Features.TaskCoordinator"] = function()
+-- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/TaskCoordinator.lua
+local TaskCoordinator = {}
+TaskCoordinator.__index = TaskCoordinator
+
+local VALID_GROUPS = {
+    MainFarm = true,
+    Background = true,
+    StackFarm = true,
+    Protected = true,
+}
+
+function TaskCoordinator.new()
+    return setmetatable({
+        Current = nil,
+        NextLeaseId = 0,
+        Destroyed = false,
+    }, TaskCoordinator)
+end
+
+-- Background work is normal Main Farming or user-directed Travel. Stack work
+-- may pause either; task-owned Protected work may pause manual Travel only.
+function TaskCoordinator:TryAcquire(owner, label, group, onPreempt)
+    if self.Destroyed then
+        return nil, "Task coordination has stopped"
+    end
+    if type(owner) ~= "string" or owner == "" then
+        return nil, "Task owner is required"
+    end
+    if type(label) ~= "string" or label == "" then
+        return nil, "Task label is required"
+    end
+    if not VALID_GROUPS[group] then
+        return nil, "Unsupported task group"
+    end
+
+    local current = self.Current
+    if current then
+        if current.Owner == owner
+            and current.Label == label
+            and current.Group == group
+        then
+            return current
+        end
+        local canPreemptMainFarm = group == "StackFarm"
+            and current.Group == "MainFarm"
+        local canPreemptBackground = (
+                group == "StackFarm" or group == "Protected"
+            )
+            and current.Group == "Background"
+        if canPreemptMainFarm or canPreemptBackground then
+            self.Current = nil
+            if type(current.OnPreempt) == "function" then
+                pcall(current.OnPreempt, group, label)
+            end
+        else
+            return nil, current
+        end
+    end
+
+    self.NextLeaseId += 1
+    local lease = {
+        Id = self.NextLeaseId,
+        Owner = owner,
+        Label = label,
+        Group = group,
+        OnPreempt = onPreempt,
+    }
+    self.Current = lease
+    return lease
+end
+
+function TaskCoordinator:CanRunStack(stackLease)
+    local current = self.Current
+    if not current then
+        return true
+    end
+    if current == stackLease
+        or current.Group == "MainFarm"
+        or current.Group == "Background"
+    then
+        return true
+    end
+    return false, current
+end
+
+function TaskCoordinator:GetCurrent()
+    return self.Current
+end
+
+function TaskCoordinator:IsCurrent(lease)
+    return lease ~= nil and self.Current == lease
+end
+
+function TaskCoordinator:Release(lease)
+    if not lease or self.Current ~= lease then
+        return false
+    end
+    self.Current = nil
+    return true
+end
+
+function TaskCoordinator:Cleanup()
+    self.Destroyed = true
+    self.Current = nil
+end
+
+return TaskCoordinator
+-- END SOURCE: src/ReplicatedStorage/CustomHub/Features/TaskCoordinator.lua
 end
 
 __bundleFactories["CustomHub.Features.MainFarm"] = function()
@@ -17000,6 +17200,8 @@ local MainFarm = {
     Context = nil,
     StackTaskQueue = nil,
     ActiveStackTask = nil,
+    ActiveStackLease = nil,
+    ActiveMainFarmLease = nil,
     StackTaskStartedAt = 0,
     StackInterruptedFarm = false,
     ServerHopService = nil,
@@ -17172,6 +17374,27 @@ function MainFarm:_HasEnabledStackTasks()
     return self.StackTaskQueue ~= nil and self.StackTaskQueue:HasEnabledTasks()
 end
 
+function MainFarm:_HasProtectedTaskLease()
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    local current = coordinator and coordinator:GetCurrent()
+    return current ~= nil
+        and current.Group ~= "MainFarm"
+        and current.Group ~= "StackFarm",
+        current
+end
+
+function MainFarm:_ReleaseMainFarmLease()
+    if not self.ActiveMainFarmLease then
+        return false
+    end
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator then
+        coordinator:Release(self.ActiveMainFarmLease)
+    end
+    self.ActiveMainFarmLease = nil
+    return true
+end
+
 function MainFarm:_GetStackTaskLabel(entry)
     if entry and entry.Kind == "CakePrince" then
         return "Cake Prince"
@@ -17188,7 +17411,21 @@ function MainFarm:_GetStackTaskLabel(entry)
 end
 
 function MainFarm:_BeginStackTask(entry)
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    local lease = self.ActiveStackLease
+    if not lease and coordinator then
+        lease = coordinator:TryAcquire(
+            "StackFarming",
+            self:_GetStackTaskLabel(entry),
+            "StackFarm"
+        )
+        if not lease then
+            return false
+        end
+    end
+    self.ActiveStackLease = lease
     self.ActiveStackTask = entry
+    entry.CoordinatorLease = lease
     self.StackTaskStartedAt = os.clock()
     self.StackInterruptedFarm = self.MainFarmEnabled == true
     if self.ServerHopService then
@@ -17271,6 +17508,13 @@ function MainFarm:_FinishStackTask(entry, reason, markCompleted)
     end
     if reason then
         self:_SetStatus(reason, "warning")
+    end
+    if self.ActiveStackLease then
+        local coordinator = self.Context and self.Context.TaskCoordinator
+        if coordinator then
+            coordinator:Release(self.ActiveStackLease)
+        end
+        self.ActiveStackLease = nil
     end
 end
 
@@ -17574,6 +17818,18 @@ function MainFarm:_ActivateIndraColor(prep, color)
 end
 
 function MainFarm:_BeginStackPreparation(kind, toolName)
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and not self.ActiveStackLease then
+        local lease = coordinator:TryAcquire(
+            "StackFarming",
+            "Preparing " .. (STACK_BOSS_LABELS[kind] or kind),
+            "StackFarm"
+        )
+        if not lease then
+            return false
+        end
+        self.ActiveStackLease = lease
+    end
     self.ActiveStackPrep = {
         Kind = kind,
         ToolName = toolName,
@@ -17605,6 +17861,13 @@ function MainFarm:_CancelStackPreparation(message)
     end
     if message then
         self:_SetStatus(message, "info")
+    end
+    if not self.ActiveStackTask and self.ActiveStackLease then
+        local coordinator = self.Context and self.Context.TaskCoordinator
+        if coordinator then
+            coordinator:Release(self.ActiveStackLease)
+        end
+        self.ActiveStackLease = nil
     end
 end
 
@@ -17963,6 +18226,25 @@ function MainFarm:_StepStackTasks(session)
     local queue = self.StackTaskQueue
     if not queue or not queue:HasEnabledTasks() then
         return false
+    end
+
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator then
+        local canRun, blockingTask = coordinator:CanRunStack(self.ActiveStackLease)
+        if not canRun then
+            local hopService = self.ServerHopService
+            if hopService and hopService:OwnsLease(blockingTask) then
+                hopService:Step()
+                return true
+            end
+            self:_SetStatus(
+                "Stack Farming is waiting for "
+                    .. tostring(blockingTask and blockingTask.Label or "another task")
+                    .. " to finish",
+                "info"
+            )
+            return true
+        end
     end
 
     local compatibility = self.Context and self.Context.Compatibility
@@ -21544,6 +21826,25 @@ function MainFarm:_Run(session)
                 return
             end
             if self.MainFarmEnabled then
+                local coordinator = self.Context and self.Context.TaskCoordinator
+                if coordinator then
+                    local lease, blockingTask = coordinator:TryAcquire(
+                        "MainFarming",
+                        "Main Farming",
+                        "MainFarm"
+                    )
+                    if not lease then
+                        self.ActiveMainFarmLease = nil
+                        self:_SetStatus(
+                            "Main Farming is waiting for "
+                                .. tostring(blockingTask and blockingTask.Label or "another task")
+                                .. " to finish",
+                            "info"
+                        )
+                        return
+                    end
+                    self.ActiveMainFarmLease = lease
+                end
                 self:_Step(session)
             else
                 if self.MovementService then
@@ -21664,6 +21965,8 @@ function MainFarm:Initialize(context)
     self.MainFarmEnabled = false
     self.Session += 1
     self.ActiveStackTask = nil
+    self.ActiveStackLease = nil
+    self.ActiveMainFarmLease = nil
     self.ActiveStackPrep = nil
     self.StackRemoteRequests = {}
     self.IndraColorState = nil
@@ -21694,6 +21997,14 @@ function MainFarm:Initialize(context)
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
         local hopEliteRequested = stackSettings.HopForEliteHunter == true
         local hopBerryRequested = stackSettings.HopForBerries == true
+        if hopEliteRequested and stackSettings.AutoEliteHunter ~= true then
+            stackSettings.HopForEliteHunter = false
+            hopEliteRequested = false
+        end
+        if hopBerryRequested and stackSettings.AutoCollectBerries ~= true then
+            stackSettings.HopForBerries = false
+            hopBerryRequested = false
+        end
         if hopEliteRequested
             and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
         then
@@ -21738,9 +22049,6 @@ function MainFarm:Initialize(context)
             { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
         }) do
             local requested = stackSettings[taskDefinition.Setting] == true
-            if taskDefinition.Kind == "EliteHunter" then
-                requested = requested or hopEliteRequested
-            end
             local available = isStackTaskAvailableInCurrentSea(
                 context.Compatibility,
                 taskDefinition.Kind
@@ -21756,7 +22064,7 @@ function MainFarm:Initialize(context)
         )
         self.StackTaskQueue:SetEnabled(
             "Berry",
-            stackSettings.AutoCollectBerries == true or hopBerryRequested
+            stackSettings.AutoCollectBerries == true
         )
         self.StackTaskQueue:SetEnabled("HopEliteHunter", hopEliteRequested)
         self.StackTaskQueue:SetEnabled("HopBerry", hopBerryRequested)
@@ -21765,7 +22073,8 @@ function MainFarm:Initialize(context)
             context.SettingsPersistence,
             function(message, kind)
                 self:_SetStatus(message, kind or "info")
-            end
+            end,
+            context.TaskCoordinator
         )
         self.ServerHopService:Initialize(stackSettings)
         self.ResumeServerHop = self.ServerHopService:ShouldResume()
@@ -21991,6 +22300,9 @@ function MainFarm:_StopWorker()
     if self.ActiveStackTask then
         self:_FinishStackTask(self.ActiveStackTask)
     end
+    if self.ActiveStackPrep then
+        self:_CancelStackPreparation()
+    end
     self.Session += 1
     self.Running = false
     self:_EndQuestDiagnosticWait("stopped_before_confirmation", os.clock())
@@ -21998,7 +22310,8 @@ function MainFarm:_StopWorker()
     if teleportFeature and teleportFeature.CancelFarmTravel then
         teleportFeature:CancelFarmTravel()
     end
-    if self.MovementService then
+    local protectedTaskActive = self:_HasProtectedTaskLease()
+    if self.MovementService and not protectedTaskActive then
         self.MovementService:Cancel()
         self.MovementService:SetFarmCollisionSuppression(false)
     end
@@ -22055,6 +22368,7 @@ function MainFarm:_StopWorker()
     if self.Context and self.Context.State then
         self.Context.State:SetFeatureEnabled("farm.main", false)
     end
+    self:_ReleaseMainFarmLease()
     return true
 end
 
@@ -22067,7 +22381,8 @@ function MainFarm:Stop()
     if self:_HasEnabledStackTasks() then
         if not self.ActiveStackTask then
             self:_ClearTarget()
-            if self.MovementService then
+            local protectedTaskActive = self:_HasProtectedTaskLease()
+            if self.MovementService and not protectedTaskActive then
                 self.MovementService:Cancel()
             end
             local teleportFeature = self.Context and self.Context.TeleportFeature
@@ -22079,6 +22394,7 @@ function MainFarm:Stop()
             end
             self:_ResetSpawnSearch(nil)
         end
+        self:_ReleaseMainFarmLease()
         self:_SetStatus("Main Farming is off; Stack Farming will continue", "info")
         return true
     end
@@ -22120,17 +22436,20 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         return true
     end
 
-    local teleportFeature = self.Context and self.Context.TeleportFeature
-    if payload and teleportFeature and teleportFeature:IsTraveling() then
-        self:_SetStatus(
-            "Stack Farming unavailable while Travel is active",
-            "error",
-            "Turn off Travel to Island or Travel to NPC before starting Stack Farming."
-        )
-        return false
-    end
-
     stackSettings[settingKey] = payload
+    if not payload and kind == "EliteHunter" and stackSettings.HopForEliteHunter == true then
+        stackSettings.HopForEliteHunter = false
+        if self.ServerHopService then
+            self.ServerHopService:SetEnabled("EliteHunter", false)
+        end
+        self.StackTaskQueue:SetEnabled("HopEliteHunter", false)
+    elseif not payload and kind == "Berry" and stackSettings.HopForBerries == true then
+        stackSettings.HopForBerries = false
+        if self.ServerHopService then
+            self.ServerHopService:SetEnabled("Berry", false)
+        end
+        self.StackTaskQueue:SetEnabled("HopBerry", false)
+    end
     if not payload and settingKey == "AttackRipIndra" then
         stackSettings.PrioritizeRipIndra = false
     elseif not payload and settingKey == "AttackDoughKing" then
@@ -22194,6 +22513,17 @@ function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, l
     if stackSettings[settingKey] == payload then
         return true
     end
+    if payload and stackSettings[localSettingKey] ~= true then
+        local parentLabel = mode == "EliteHunter"
+            and "Auto attack Elite Hunter"
+            or "Collect Berries"
+        self:_SetStatus(
+            "Turn on " .. parentLabel .. " first",
+            "error",
+            "Server hopping is a sub-option. Turn on " .. parentLabel .. " first."
+        )
+        return false
+    end
     if payload and not isStackTaskAvailableInCurrentSea(
         self.Context.Compatibility,
         "EliteHunter"
@@ -22204,19 +22534,6 @@ function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, l
             "Elite Hunter and berry server search only works in Third Sea."
         )
         return false
-    end
-
-    local teleportFeature = self.Context and self.Context.TeleportFeature
-    if payload and teleportFeature then
-        if teleportFeature.IsTraveling and teleportFeature:IsTraveling() then
-            teleportFeature:Cancel(
-                "Server search started; current travel was stopped.",
-                false
-            )
-        end
-        if teleportFeature.CancelFarmTravel then
-            teleportFeature:CancelFarmTravel()
-        end
     end
 
     local previousQueueEnabled = queue.Enabled[queueKind] == true
@@ -22235,7 +22552,7 @@ function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, l
 
     local queueReady, queueError = queue:SetEnabled(queueKind, payload)
     if queueReady then
-        local localTaskEnabled = stackSettings[localSettingKey] == true or payload
+        local localTaskEnabled = stackSettings[localSettingKey] == true
         queueReady, queueError = queue:SetEnabled(localKind, localTaskEnabled)
     end
     if not queueReady then

@@ -288,7 +288,7 @@ function Compatibility:GetPublicServers(cursor)
 
     local url = "https://games.roblox.com/v1/games/"
         .. tostring(math.floor(placeId))
-        .. "/servers/Public?sortOrder=Asc&limit=100"
+        .. "/servers/Public?sortOrder=Asc&limit=25"
     if type(cursor) == "string" and cursor ~= "" then
         local encodeOk, encodedCursor = pcall(function()
             return self.HttpService:UrlEncode(cursor)
@@ -309,7 +309,10 @@ function Compatibility:GetPublicServers(cursor)
         if requestOk and type(response) == "table" then
             local statusCode = tonumber(response.StatusCode or response.Status)
             if statusCode and (statusCode < 200 or statusCode >= 300) then
-                return nil, "Roblox server list returned HTTP " .. tostring(statusCode)
+                return nil, "Roblox server list returned HTTP "
+                    .. tostring(statusCode)
+                    .. " for place "
+                    .. tostring(math.floor(placeId))
             end
             responseBody = response.Body
         elseif not requestOk then

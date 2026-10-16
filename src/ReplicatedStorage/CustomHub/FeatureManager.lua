@@ -3,6 +3,7 @@ local MainFarm = require(script.Features.MainFarm)
 local TeleportFeature = require(script.Features.TeleportFeature)
 local StatusFeature = require(script.Features.StatusFeature)
 local MovementService = require(script.Features.Farm.MovementService)
+local TaskCoordinator = require(script.Features.TaskCoordinator)
 
 local FeatureManager = {}
 FeatureManager.__index = FeatureManager
@@ -11,6 +12,7 @@ function FeatureManager.new(state, compatibility, config, settingsPersistence)
     local movementService = MovementService.new(compatibility, function(message, kind)
         state:SetStatus(message, kind or "info")
     end)
+    local taskCoordinator = TaskCoordinator.new()
     return setmetatable({
         State = state,
         Modules = { MainFarm, TeleportFeature, StatusFeature, PlaceholderFeatures },
@@ -21,6 +23,7 @@ function FeatureManager.new(state, compatibility, config, settingsPersistence)
             Config = config,
             SettingsPersistence = settingsPersistence,
             MovementService = movementService,
+            TaskCoordinator = taskCoordinator,
             MainFarm = MainFarm,
             TeleportFeature = TeleportFeature,
         },
@@ -168,6 +171,9 @@ function FeatureManager:Cleanup()
             self.State:SetStatus("Feature cleanup error: " .. tostring(err), "error")
         end
         self.InitializedModules[index] = nil
+    end
+    if self.Context and self.Context.TaskCoordinator then
+        self.Context.TaskCoordinator:Cleanup()
     end
 end
 

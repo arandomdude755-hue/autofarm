@@ -1187,6 +1187,10 @@ function TeleportFeature:_FinishTravel(request, message, kind)
     end
     self:_SetFeatureEnabled(request.Action, false)
     self:_SetStatus(message, kind)
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and request.CoordinatorLease then
+        coordinator:Release(request.CoordinatorLease)
+    end
 end
 
 function TeleportFeature:Cancel(message, keepActionEnabled)
@@ -1209,6 +1213,10 @@ function TeleportFeature:Cancel(message, keepActionEnabled)
         self:_SetStatus("Updating travel destination.", "info")
     else
         self:_SetStatus("Travel cancelled.", "info")
+    end
+    local coordinator = self.Context and self.Context.TaskCoordinator
+    if coordinator and request.CoordinatorLease then
+        coordinator:Release(request.CoordinatorLease)
     end
     return true
 end
@@ -1411,39 +1419,14 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     local context = self.Context
     local compatibility = context and context.Compatibility
     local mainFarm = context and context.MainFarm
-    if mainFarm and mainFarm.Running then
+    if mainFarm and mainFarm.MainFarmEnabled then
         self:_SetFeatureEnabled(actionId, false)
-        local stackSettings = context.Config and context.Config.StackFarmSettings or {}
-        local stackActive = stackSettings.AutoAttackCakePrince == true
-            or stackSettings.AutoEliteHunter == true
-            or stackSettings.AttackRipIndra == true
-            or stackSettings.AttackSoulReaper == true
-            or stackSettings.AttackDoughKing == true
-            or stackSettings.AttackDarkbeard == true
-            or stackSettings.TeleportToFruit == true
-            or stackSettings.AutoCollectBerries == true
-            or stackSettings.HopForEliteHunter == true
-            or stackSettings.HopForBerries == true
-        if mainFarm.MainFarmEnabled then
-            self:_SetStatus(
-                "Travel unavailable while Main Farming is active.",
-                "error",
-                "Turn off Start Farm first. Travel and farming can't run together."
-            )
-        elseif stackActive then
-            self:_SetStatus(
-                "Travel unavailable while Stack Farming is active.",
-                "error",
-                "Turn off the active Stack Farming task before starting Travel."
-            )
-        else
-            self:_SetStatus(
-                "Travel unavailable while farming is active.",
-                "error",
-                "Stop the active farming task before starting Travel."
-            )
-        end
-        return false, "Auto Farm is running"
+        self:_SetStatus(
+            "Travel unavailable while Main Farming is active.",
+            "error",
+            "Turn off Start Farm first. Travel and farming can't run together."
+        )
+        return false, "Main Farming is active"
     end
     if self.ActiveTravel then
         if self.ActiveTravel.Action == actionId then
@@ -1464,6 +1447,37 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         return false, "Character is unavailable"
     end
 
+    local coordinator = context and context.TaskCoordinator
+    if not coordinator then
+        self:_SetFeatureEnabled(actionId, false)
+        self:_SetStatus("Travel is temporarily unavailable.", "error")
+        return false, "Task coordination is unavailable"
+    end
+    local request
+    local coordinatorLease, blockingTask = coordinator:TryAcquire(
+        "Travel",
+        "Travel to " .. destinationLabel,
+        "Background",
+        function(preemptingGroup, preemptingLabel)
+            if request and self.ActiveTravel == request then
+                local message = preemptingGroup == "StackFarm"
+                    and "Travel stopped so Stack Farming can finish its task."
+                    or "Travel stopped so " .. tostring(preemptingLabel or "another task")
+                        .. " can use the character."
+                self:Cancel(message, false)
+            end
+        end
+    )
+    if not coordinatorLease then
+        self:_SetFeatureEnabled(actionId, false)
+        self:_SetStatus(
+            "Travel is waiting for " .. tostring(blockingTask and blockingTask.Label or "current work"),
+            "warning",
+            "Let the current task finish before starting another trip."
+        )
+        return false, "Another task is active"
+    end
+
     local collisionCallOk, collisionReady, collisionError = pcall(function()
         return self.MovementService:SetFarmCollisionSuppression(true)
     end)
@@ -1472,6 +1486,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         collisionReady = false
     end
     if not collisionReady then
+        coordinator:Release(coordinatorLease)
         self:_SetFeatureEnabled(actionId, false)
         self:_SetStatus("Travel collision setup failed: " .. tostring(collisionError), "error")
         return false, collisionError
@@ -1491,7 +1506,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     end
 
     self.Generation += 1
-    local request = {
+    request = {
         Generation = self.Generation,
         Character = character,
         StartedAt = os.clock(),
@@ -1502,6 +1517,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         GatewayPlanLabel = gatewayPlanLabel,
         SpecialTravelRoute = specialRoute,
         StallRetries = 0,
+        CoordinatorLease = coordinatorLease,
     }
     self.ActiveTravel = request
     self:_SetFeatureEnabled(actionId, true)

@@ -41,8 +41,14 @@ require(
     and 'Action = "stack.berry.enabled"' in CONFIG
     and 'Action = "stack.hop.eliteHunter.enabled"' in CONFIG
     and 'Action = "stack.hop.berry.enabled"' in CONFIG
+    and 'ParentSetting = "AutoEliteHunter"' in CONFIG
+    and 'ParentSetting = "AutoCollectBerries"' in CONFIG
+    and CONFIG.index('Action = "stack.eliteHunter.enabled"')
+    < CONFIG.index('Action = "stack.hop.eliteHunter.enabled"')
+    and CONFIG.index('Action = "stack.berry.enabled"')
+    < CONFIG.index('Action = "stack.hop.berry.enabled"')
     and "SpecialHop" not in CONFIG,
-    "Stack Farming must expose supported local tasks and explicit Elite Hunter/berry hop controls",
+    "hop controls must be children directly below their corresponding Stack Farming parents",
 )
 require(
     "AutoAttackCakePrince = false" in CONFIG
@@ -135,6 +141,12 @@ require(
     and "PrioritizeDoughKing = false" in MAIN_FARM
     and "Waiting for another player to press the missing Haki pads" in MAIN_FARM,
     "priorities must require their parent toggle, stay exclusive, and wait safely for other players' pads",
+)
+require(
+    'if payload and stackSettings[localSettingKey] ~= true then' in MAIN_FARM
+    and 'stackSettings.HopForEliteHunter = false' in MAIN_FARM
+    and 'stackSettings.HopForBerries = false' in MAIN_FARM,
+    "server hopping must require its parent toggle and turn off when its parent is disabled",
 )
 require(
     "instance.Parent == self.EnemiesFolder" in QUEUE
@@ -239,20 +251,26 @@ require(
     "stack jobs must be able to run on the shared worker while Main Farming is off",
 )
 require(
-    "Turn off the active Stack Farming task before starting Travel."
-    in TELEPORT,
-    "manual travel must explain the Stack Farming conflict to the player",
+    "coordinator:TryAcquire(" in TELEPORT
+    and '"Background"' in TELEPORT
+    and "function(preemptingGroup, preemptingLabel)" in TELEPORT
+    and "Stack Farming is waiting for " in MAIN_FARM
+    and "coordinator:CanRunStack(self.ActiveStackLease)" in MAIN_FARM,
+    "manual travel is low priority while task-owned travel remains under its task lease",
 )
 require(
-    "AutoCollectBerries == true" in TELEPORT
-    and "AutoEliteHunter == true" in TELEPORT
-    and "HopForEliteHunter == true" in TELEPORT
-    and "HopForBerries == true" in TELEPORT
-    and "AttackRipIndra == true" in TELEPORT
-    and "AttackSoulReaper == true" in TELEPORT
-    and "AttackDoughKing == true" in TELEPORT
-    and "AttackDarkbeard == true" in TELEPORT,
-    "berry collection and Elite Hunter must prevent conflicting manual travel",
+    all(setting in MAIN_FARM for setting in (
+        "AutoCollectBerries",
+        "AutoEliteHunter",
+        "HopForEliteHunter",
+        "HopForBerries",
+        "AttackRipIndra",
+        "AttackSoulReaper",
+        "AttackDoughKing",
+        "AttackDarkbeard",
+    ))
+    and "TaskCoordinator" in TELEPORT,
+    "all Stack Farming jobs must use shared task ownership rather than per-toggle travel checks",
 )
 
 print("PASS: Main Farming and Stack Farming are separate nested pages")

@@ -39,7 +39,10 @@ require(
 require(
     "games.roblox.com/v1/games/" in COMPATIBILITY
     and "function Compatibility:GetPublicServers(cursor)" in COMPATIBILITY
+    and '"/servers/Public?sortOrder=Asc&limit=25"' in COMPATIBILITY
     and "function Compatibility:TeleportToPublicServer(jobId)" in COMPATIBILITY
+    and "local placeId = tonumber(game.PlaceId)" in COMPATIBILITY
+    and "game.PlaceId,\n            jobId," in COMPATIBILITY
     and "playing < maxPlayers" in HOP
     and "not self:_IsVisited(jobId)" in HOP
     and "math.random(1, #candidates)" in HOP,
@@ -59,10 +62,19 @@ require(
 require(
     'self.StackTaskQueue:SetEnabled("HopEliteHunter", hopEliteRequested)' in MAIN_FARM
     and 'self.StackTaskQueue:SetEnabled("HopBerry", hopBerryRequested)' in MAIN_FARM
-    and "requested = requested or hopEliteRequested" in MAIN_FARM
-    and "stackSettings.AutoCollectBerries == true or hopBerryRequested" in MAIN_FARM
+    and "stackSettings.AutoEliteHunter ~= true" in MAIN_FARM
+    and "stackSettings.AutoCollectBerries ~= true" in MAIN_FARM
+    and "stackSettings[localSettingKey] ~= true" in MAIN_FARM
+    and "localTaskEnabled = stackSettings[localSettingKey] == true" in MAIN_FARM
     and "hopService:Step()" in MAIN_FARM,
-    "hop jobs must share the existing stack queue and perform local tasks before the next hop",
+    "hop jobs must require their parent task and share its local queue behavior",
+)
+require(
+    "MAX_PERSISTED_VISITED_SERVERS = 40" in HOP
+    and "shortError(reason)" in HOP
+    and "shortError(fetchError)" in HOP
+    and "shortError(joinError)" in HOP,
+    "hop should reduce pre-join persistence work and preserve the actual Roblox join/fetch errors",
 )
 require(
     "function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)" in COMPATIBILITY

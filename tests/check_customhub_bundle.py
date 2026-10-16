@@ -30,6 +30,7 @@ SOURCE_FILES = (
     "src/ReplicatedStorage/CustomHub/Features/Farm/CombatService.lua",
     "src/ReplicatedStorage/CustomHub/Features/Farm/StackTaskQueue.lua",
     "src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua",
+    "src/ReplicatedStorage/CustomHub/Features/TaskCoordinator.lua",
     "src/ReplicatedStorage/CustomHub/Features/MainFarm.lua",
     "src/ReplicatedStorage/CustomHub/init.lua",
 )
@@ -52,6 +53,7 @@ MODULE_IDS = {
     "CustomHub.Features.Farm.CombatService",
     "CustomHub.Features.Farm.StackTaskQueue",
     "CustomHub.Features.ServerHopService",
+    "CustomHub.Features.TaskCoordinator",
     "CustomHub.Features.MainFarm",
     "CustomHub",
 }
