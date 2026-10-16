@@ -413,7 +413,7 @@ local Config = {
     TravelNpcsForCurrentSea = travelNpcsForCurrentSea,
     Defaults = {
         SelectedTab = "Main",
-        Compact = false,
+        Compact = true,
         UiSize = "Large",
         StatusMaxCharacters = 88,
     },
@@ -448,7 +448,7 @@ local Config = {
         BringMobCountMin = 2,
         BringMobCountMax = 6,
         BringMobCountStep = 1,
-        AutoBuso = false,
+        AutoBuso = true,
         UseFarmSkills = false,
         FarmSkillHoldSeconds = 0.5,
         FarmSkillFastRelease = false,

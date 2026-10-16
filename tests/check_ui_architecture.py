@@ -210,8 +210,8 @@ require("function State:SetUiSize(size)" in STATE
         and "layout.UiSizeFootprints" in MANAGER
         and "self.State:SetUiSize(payload)" in MANAGER,
         "UI size selection must update state and reset to its default")
-require("Compact = false" in CONFIG,
-        "default sizing should use the large panel while compact mode stays opt-in")
+require("Compact = true" in CONFIG and 'UiSize = "Large"' in CONFIG,
+        "default sizing should retain the large footprint with compact layout enabled")
 require('Name = "PageDescription"' not in UI_MODULE
         and 'Name = "SectionHeader"' not in UI_MODULE
         and 'Name = "Detail"' not in UI_MODULE,

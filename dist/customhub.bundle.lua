@@ -442,7 +442,7 @@ local Config = {
     TravelNpcsForCurrentSea = travelNpcsForCurrentSea,
     Defaults = {
         SelectedTab = "Main",
-        Compact = false,
+        Compact = true,
         UiSize = "Large",
         StatusMaxCharacters = 88,
     },
@@ -477,7 +477,7 @@ local Config = {
         BringMobCountMin = 2,
         BringMobCountMax = 6,
         BringMobCountStep = 1,
-        AutoBuso = false,
+        AutoBuso = true,
         UseFarmSkills = false,
         FarmSkillHoldSeconds = 0.5,
         FarmSkillFastRelease = false,
@@ -3025,7 +3025,9 @@ function SettingsPersistence.new(config, compatibility)
         Storage = nil,
         Path = nil,
         HopPath = nil,
+        InterfacePath = nil,
         InterfacePreferences = nil,
+        InterfaceNeedsSave = false,
         Rules = {},
         LastSnapshot = nil,
         HopSession = nil,
@@ -3088,6 +3090,7 @@ function SettingsPersistence:_InitializeStorage()
     local userIdText = tostring(userId)
     self.Path = SETTINGS_FOLDER .. "/settings_" .. userIdText .. ".json"
     self.HopPath = HOP_SESSION_FILE_PREFIX .. userIdText .. ".json"
+    self.InterfacePath = SETTINGS_FOLDER .. "/ui_settings.json"
 end
 
 function SettingsPersistence:SetState(state)
@@ -3102,6 +3105,9 @@ function SettingsPersistence:SetState(state)
         end
     end
     self.LastSnapshot = self:_Capture()
+    if self.InterfaceNeedsSave then
+        self:Save()
+    end
 end
 
 function SettingsPersistence:_ValidateSetting(control, value)
@@ -3207,6 +3213,71 @@ function SettingsPersistence:_ApplySavedSettings(data)
     end
 end
 
+function SettingsPersistence:_LoadSharedInterface(legacyPreferences)
+    local preferences = type(legacyPreferences) == "table"
+        and copyTable(legacyPreferences)
+        or {}
+    self.InterfaceNeedsSave = false
+
+    if not self.Storage or not self.InterfacePath then
+        self.InterfacePreferences = preferences
+        return
+    end
+
+    local fileExists
+    if type(self.Storage.Exists) == "function" then
+        local existsOk, exists = pcall(self.Storage.Exists, self.InterfacePath)
+        if existsOk and type(exists) == "boolean" then
+            fileExists = exists
+        end
+    end
+    if fileExists == false then
+        self.InterfacePreferences = preferences
+        self.InterfaceNeedsSave = true
+        return
+    end
+
+    local readOk, content = pcall(self.Storage.Read, self.InterfacePath)
+    if not readOk or type(content) ~= "string" or content == "" then
+        self.InterfacePreferences = preferences
+        self.InterfaceNeedsSave = true
+        return
+    end
+
+    local decodeOk, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    local interface = decodeOk and type(data) == "table"
+        and type(data.Interface) == "table"
+        and data.Interface
+        or nil
+    if not interface then
+        self.InterfacePreferences = preferences
+        self.InterfaceNeedsSave = true
+        return
+    end
+
+    local defaults = self.Config and self.Config.Defaults
+    local footprints = self.Config
+        and self.Config.Layout
+        and self.Config.Layout.UiSizeFootprints
+    if type(interface.UiSize) == "string"
+        and type(footprints) == "table"
+        and type(footprints[interface.UiSize]) == "number"
+    then
+        preferences.UiSize = interface.UiSize
+    end
+    if type(interface.Compact) == "boolean" then
+        preferences.Compact = interface.Compact
+    end
+
+    self.InterfacePreferences = preferences
+    self.InterfaceNeedsSave = not (
+        (type(defaults) == "table" and type(preferences.UiSize) == "string")
+        and type(preferences.Compact) == "boolean"
+    )
+end
+
 function SettingsPersistence:_LoadHopSession(legacySession)
     self.HopSession = validateHopSession(legacySession)
     if not self.Storage or not self.HopPath then
@@ -3258,6 +3329,7 @@ function SettingsPersistence:Load()
 
     if fileExists == false then
         self:_LoadHopSession(nil)
+        self:_LoadSharedInterface(nil)
         self.LastSnapshot = self:_Capture()
         return true
     end
@@ -3265,6 +3337,7 @@ function SettingsPersistence:Load()
     local readOk, content = pcall(self.Storage.Read, self.Path)
     if not readOk or type(content) ~= "string" or content == "" then
         self:_LoadHopSession(nil)
+        self:_LoadSharedInterface(nil)
         self.LastSnapshot = self:_Capture()
         if fileExists == true then
             self.LoadWarning = "Saved settings could not be read; defaults are active."
@@ -3277,6 +3350,7 @@ function SettingsPersistence:Load()
     end)
     if not decodeOk or type(data) ~= "table" then
         self:_LoadHopSession(nil)
+        self:_LoadSharedInterface(nil)
         self.LoadWarning = "Saved settings are invalid; defaults are active."
         self.LastSnapshot = self:_Capture()
         return true
@@ -3286,11 +3360,13 @@ function SettingsPersistence:Load()
     if version > SCHEMA_VERSION then
         self.ReadOnly = true
         self.LoadWarning = "Saved settings are newer than this hub; auto-save is paused."
+        self:_LoadSharedInterface(nil)
         self.LastSnapshot = self:_Capture()
         return true
     end
 
     self:_ApplySavedSettings(data)
+    self:_LoadSharedInterface(self.InterfacePreferences)
     self:_LoadHopSession(data.HopSession)
     self.LoadedFromFile = true
     self.LastSnapshot = self:_Capture()
@@ -3318,26 +3394,74 @@ function SettingsPersistence:Save(force)
     end
 
     local snapshot = self:_Capture()
-    if not force and self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+    local previousSnapshot = self.LastSnapshot
+    local settingsChanged = force
+        or not previousSnapshot
+        or not deepEqual(snapshot.Settings, previousSnapshot.Settings)
+    local interfaceChanged = force
+        or self.InterfaceNeedsSave
+        or not previousSnapshot
+        or not deepEqual(snapshot.Interface, previousSnapshot.Interface)
+    if not settingsChanged and not interfaceChanged then
         return true
     end
 
-    local encodeOk, content = pcall(function()
-        return game:GetService("HttpService"):JSONEncode(snapshot)
-    end)
-    if not encodeOk or type(content) ~= "string" then
-        self:_ReportSaveError("Could not encode settings")
-        return false, tostring(content)
+    if settingsChanged then
+        local settingsDocument = {
+            SchemaVersion = SCHEMA_VERSION,
+            Settings = snapshot.Settings,
+        }
+        local encodeOk, content = pcall(function()
+            return game:GetService("HttpService"):JSONEncode(settingsDocument)
+        end)
+        if not encodeOk or type(content) ~= "string" then
+            self:_ReportSaveError("Could not encode settings")
+            return false, tostring(content)
+        end
+
+        local writeOk, writeResult, writeError = pcall(
+            self.Storage.Write,
+            self.Path,
+            content
+        )
+        if not writeOk or writeResult ~= true then
+            local err = writeOk and writeError or writeResult
+            self:_ReportSaveError(err)
+            return false, tostring(err or "Local settings file could not be written")
+        end
     end
 
-    local writeOk, writeResult, writeError = pcall(self.Storage.Write, self.Path, content)
-    if not writeOk or writeResult ~= true then
-        local err = writeOk and writeError or writeResult
-        self:_ReportSaveError(err)
-        return false, tostring(err or "Local settings file could not be written")
+    if interfaceChanged then
+        if not self.InterfacePath then
+            self:_ReportSaveError("Shared UI settings path is unavailable")
+            return false, "Shared UI settings path is unavailable"
+        end
+        local interfaceDocument = {
+            SchemaVersion = 1,
+            Interface = snapshot.Interface,
+        }
+        local encodeOk, content = pcall(function()
+            return game:GetService("HttpService"):JSONEncode(interfaceDocument)
+        end)
+        if not encodeOk or type(content) ~= "string" then
+            self:_ReportSaveError("Could not encode shared UI settings")
+            return false, tostring(content)
+        end
+
+        local writeOk, writeResult, writeError = pcall(
+            self.Storage.Write,
+            self.InterfacePath,
+            content
+        )
+        if not writeOk or writeResult ~= true then
+            local err = writeOk and writeError or writeResult
+            self:_ReportSaveError(err)
+            return false, tostring(err or "Shared UI settings could not be written")
+        end
     end
 
     self.LastSnapshot = snapshot
+    self.InterfaceNeedsSave = false
     self.LoadWarning = nil
     return true
 end

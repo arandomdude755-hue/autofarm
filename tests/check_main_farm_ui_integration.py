@@ -121,7 +121,7 @@ require('Label = "Bring mobs"' in farm_settings_config
         and 'Label = "Auto turn on Buso"' in farm_settings_config
         and 'Action = "farm.settings.autoBuso"' in farm_settings_config
         and 'Setting = "AutoBuso"' in farm_settings_config
-        and "AutoBuso = false" in CONFIG
+        and "AutoBuso = true" in CONFIG
         and 'Label = "Use skills while farming"' in CONFIG
         and 'Action = "farm.skills.enabled"' in CONFIG
         and 'Setting = "UseFarmSkills"' in CONFIG
@@ -133,7 +133,7 @@ require('Label = "Bring mobs"' in farm_settings_config
         and 'Action = "farm.skills.fastRelease"' in CONFIG
         and 'Action = "farm.skills." .. category.Token .. "." .. keyName' in CONFIG
         and 'Setting = settingName' in CONFIG,
-        "Farm settings must expose opt-in Bring mobs and Auto Buso controls")
+        "Farm settings must expose opt-in Bring mobs and default-enabled Auto Buso controls")
 require(
     'Label = "Instant accept quest (RISK)"' in farm_settings_config
     and 'Action = "farm.settings.instantQuest"' in farm_settings_config

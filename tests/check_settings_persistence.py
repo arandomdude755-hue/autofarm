@@ -8,6 +8,9 @@ HUB = (ROOT / "src/ReplicatedStorage/CustomHub/init.lua").read_text(encoding="ut
 FEATURE_MANAGER = (
     ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"
 ).read_text(encoding="utf-8")
+CONFIG = (ROOT / "src/ReplicatedStorage/CustomHub/Config.lua").read_text(
+    encoding="utf-8"
+)
 
 
 def require(condition, message):
@@ -55,8 +58,20 @@ require(
 require(
     'self.Path = SETTINGS_FOLDER .. "/settings_" .. userIdText .. ".json"' in PERSISTENCE
     and 'self.HopPath = HOP_SESSION_FILE_PREFIX .. userIdText .. ".json"' in PERSISTENCE
+    and 'self.InterfacePath = SETTINGS_FOLDER .. "/ui_settings.json"' in PERSISTENCE
     and 'type(setting) == "string"' in PERSISTENCE,
-    "settings and hop-session files must be per-user and load only known UI setting keys",
+    "gameplay settings and hop sessions must stay per-user while UI preferences use a shared file",
+)
+require(
+    "function SettingsPersistence:_LoadSharedInterface(legacyPreferences)" in PERSISTENCE
+    and "self:_LoadSharedInterface(self.InterfacePreferences)" in PERSISTENCE
+    and "Settings = snapshot.Settings" in PERSISTENCE
+    and "Interface = snapshot.Interface" in PERSISTENCE,
+    "legacy interface preferences must migrate into the shared UI file without sharing gameplay settings",
+)
+require(
+    "Compact = true" in CONFIG and "AutoBuso = true" in CONFIG,
+    "Compact layout and Auto Buso should be enabled by default",
 )
 
-print("PASS: versioned per-user settings load/save and transient-state exclusion")
+print("PASS: per-user gameplay settings, shared UI preferences, and safe defaults")
