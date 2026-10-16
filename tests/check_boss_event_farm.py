@@ -271,4 +271,4 @@ print("PASS: Bone, Cake Prince, and Tiki modes are configured with sea and level
 print("PASS: quest target names and quest giver data come from live quest catalogs")
 print("PASS: special modes use validated quest acceptance and existing spawn availability")
 print("PASS: Tiki event actions are ownership-gated and scoped to the puzzle phase")
-print("PASS: unverified server hopping remains unavailable")
+print("PASS: event farming stays separate from Stack Farming server search")

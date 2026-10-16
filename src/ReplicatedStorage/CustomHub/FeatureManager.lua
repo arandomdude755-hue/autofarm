@@ -45,10 +45,41 @@ function FeatureManager:Initialize()
         end
         table.insert(self.InitializedModules, featureModule)
     end
+    local mainFarm = self.Context and self.Context.MainFarm
+    if mainFarm and type(mainFarm.ResumePendingHop) == "function" then
+        local resumeOk, resumeResult, resumeError = pcall(
+            mainFarm.ResumePendingHop,
+            mainFarm
+        )
+        if not resumeOk or resumeResult == false and resumeError then
+            self.State:SetStatus(
+                "Server search could not resume: "
+                    .. tostring(resumeOk and resumeError or resumeResult),
+                "warning"
+            )
+        end
+    end
     return true
 end
 
 function FeatureManager:Dispatch(actionId, payload)
+    if actionId == "settings.team.select" then
+        local startupSettings = self.Context.Config
+            and self.Context.Config.StartupSettings
+        if not startupSettings or (payload ~= "Marines" and payload ~= "Pirates") then
+            self.State:SetStatus("Team selection setting is unavailable.", "error")
+            return false, "Unsupported team"
+        end
+        startupSettings.Team = payload
+        self:_ScheduleSettingsSave()
+        local compatibility = self.Context.Compatibility
+        if compatibility then
+            compatibility:SelectTeamIfPrompted(payload, 0.2)
+        end
+        self.State:SetStatus("Team to auto-select: " .. payload, "success")
+        return true
+    end
+
     if actionId == "settings.uiSize.select" then
         local layout = self.Context.Config and self.Context.Config.Layout
         local footprints = layout and layout.UiSizeFootprints

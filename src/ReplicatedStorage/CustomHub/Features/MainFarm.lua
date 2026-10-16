@@ -3,6 +3,7 @@ local EnemyService = require(script.Parent.Farm.EnemyService)
 local MovementService = require(script.Parent.Farm.MovementService)
 local CombatService = require(script.Parent.Farm.CombatService)
 local StackTaskQueue = require(script.Parent.Farm.StackTaskQueue)
+local ServerHopService = require(script.Parent.ServerHopService)
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
@@ -83,6 +84,7 @@ local MainFarm = {
     ActiveStackTask = nil,
     StackTaskStartedAt = 0,
     StackInterruptedFarm = false,
+    ServerHopService = nil,
 }
 
 local function diagnosticScalar(value)
@@ -271,6 +273,9 @@ function MainFarm:_BeginStackTask(entry)
     self.ActiveStackTask = entry
     self.StackTaskStartedAt = os.clock()
     self.StackInterruptedFarm = self.MainFarmEnabled == true
+    if self.ServerHopService then
+        self.ServerHopService:OnStackTaskStarted(entry.Kind)
+    end
 
     self:_ClearTarget()
     if self.MovementService then
@@ -1121,6 +1126,17 @@ function MainFarm:_StepStackTasks(session)
     end
 
     if not entry then
+        local hopService = self.ServerHopService
+        if hopService and hopService:HasEnabledModes() then
+            local teleportStarted = hopService:Step()
+            if teleportStarted then
+                return true
+            end
+            if not self.MainFarmEnabled then
+                return true
+            end
+            return false
+        end
         if self.MainFarmEnabled then
             return false
         end
@@ -4735,6 +4751,11 @@ function MainFarm:Initialize(context)
     self.IndraColorState = nil
     self.StackTaskStartedAt = 0
     self.StackInterruptedFarm = false
+    self.ResumeServerHop = false
+    if self.ServerHopService then
+        self.ServerHopService:Destroy()
+        self.ServerHopService = nil
+    end
     if self.StackTaskQueue then
         self.StackTaskQueue:Cleanup()
     end
@@ -4753,6 +4774,20 @@ function MainFarm:Initialize(context)
         )
     else
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
+        local hopEliteRequested = stackSettings.HopForEliteHunter == true
+        local hopBerryRequested = stackSettings.HopForBerries == true
+        if hopEliteRequested
+            and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
+        then
+            stackSettings.HopForEliteHunter = false
+            hopEliteRequested = false
+        end
+        if hopBerryRequested
+            and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
+        then
+            stackSettings.HopForBerries = false
+            hopBerryRequested = false
+        end
         if stackSettings.AttackRipIndra ~= true then
             stackSettings.PrioritizeRipIndra = false
         end
@@ -4785,6 +4820,9 @@ function MainFarm:Initialize(context)
             { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
         }) do
             local requested = stackSettings[taskDefinition.Setting] == true
+            if taskDefinition.Kind == "EliteHunter" then
+                requested = requested or hopEliteRequested
+            end
             local available = isStackTaskAvailableInCurrentSea(
                 context.Compatibility,
                 taskDefinition.Kind
@@ -4800,8 +4838,21 @@ function MainFarm:Initialize(context)
         )
         self.StackTaskQueue:SetEnabled(
             "Berry",
-            stackSettings.AutoCollectBerries == true
+            stackSettings.AutoCollectBerries == true or hopBerryRequested
         )
+        self.StackTaskQueue:SetEnabled("HopEliteHunter", hopEliteRequested)
+        self.StackTaskQueue:SetEnabled("HopBerry", hopBerryRequested)
+        self.ServerHopService = ServerHopService.new(
+            context.Compatibility,
+            context.SettingsPersistence,
+            function(message, kind)
+                self:_SetStatus(message, kind or "info")
+            end
+        )
+        self.ServerHopService:Initialize(stackSettings)
+        self.ResumeServerHop = self.ServerHopService:ShouldResume()
+        self.ServerHopPausedOnLoad = (hopEliteRequested or hopBerryRequested)
+            and not self.ResumeServerHop
     end
     self.Character = nil
     self.Target = nil
@@ -4965,6 +5016,21 @@ function MainFarm:_StartWorker()
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     task.spawn(self._Run, self, session)
+    return true
+end
+
+function MainFarm:ResumePendingHop()
+    if not self.ResumeServerHop or not self.ServerHopService then
+        return false
+    end
+    local workerReady, workerError = self:_StartWorker()
+    if not workerReady then
+        self.ServerHopService:CancelResume()
+        self.ResumeServerHop = false
+        return false, workerError
+    end
+    self.ServerHopService:ConsumeResume()
+    self.ResumeServerHop = false
     return true
 end
 
@@ -5152,7 +5218,12 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
     elseif not payload and settingKey == "AttackDoughKing" then
         stackSettings.PrioritizeDoughKing = false
     end
-    local queueReady, queueError = self.StackTaskQueue:SetEnabled(kind, payload)
+    local enabledByHop = kind == "EliteHunter"
+            and stackSettings.HopForEliteHunter == true
+        or kind == "Berry"
+            and stackSettings.HopForBerries == true
+    local effectiveEnabled = payload or enabledByHop
+    local queueReady, queueError = self.StackTaskQueue:SetEnabled(kind, effectiveEnabled)
     if not queueReady then
         stackSettings[settingKey] = not payload
         self:_SetStatus("Stack Farming setting error: " .. tostring(queueError), "error")
@@ -5170,7 +5241,10 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         return true
     end
 
-    if self.ActiveStackTask and self.ActiveStackTask.Kind == kind then
+    if not effectiveEnabled
+        and self.ActiveStackTask
+        and self.ActiveStackTask.Kind == kind
+    then
         self:_FinishStackTask(self.ActiveStackTask, "Stack task turned off", false)
     end
     if self.ActiveStackPrep and (
@@ -5185,6 +5259,109 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         self:_StopWorker()
     else
         self:_SetStatus("Stack task disabled: " .. label, "info")
+    end
+    return true
+end
+
+function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, localSettingKey, payload)
+    local stackSettings = self.Context
+        and self.Context.Config
+        and self.Context.Config.StackFarmSettings
+    local service = self.ServerHopService
+    local queue = self.StackTaskQueue
+    if not stackSettings or not service or not queue or type(payload) ~= "boolean" then
+        self:_SetStatus("Server search setting is unavailable or invalid", "error")
+        return false
+    end
+    if stackSettings[settingKey] == payload then
+        return true
+    end
+    if payload and not isStackTaskAvailableInCurrentSea(
+        self.Context.Compatibility,
+        "EliteHunter"
+    ) then
+        self:_SetStatus(
+            "Server search is only available in Third Sea",
+            "error",
+            "Elite Hunter and berry server search only works in Third Sea."
+        )
+        return false
+    end
+
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if payload and teleportFeature then
+        if teleportFeature.IsTraveling and teleportFeature:IsTraveling() then
+            teleportFeature:Cancel(
+                "Server search started; current travel was stopped.",
+                false
+            )
+        end
+        if teleportFeature.CancelFarmTravel then
+            teleportFeature:CancelFarmTravel()
+        end
+    end
+
+    local previousQueueEnabled = queue.Enabled[queueKind] == true
+    local previousLocalQueueEnabled = queue.Enabled[localKind] == true
+    stackSettings[settingKey] = payload
+    local serviceReady, serviceError = service:SetEnabled(mode, payload)
+    if not serviceReady then
+        stackSettings[settingKey] = not payload
+        self:_SetStatus(
+            "Server search could not start: " .. tostring(serviceError),
+            "error",
+            tostring(serviceError)
+        )
+        return false
+    end
+
+    local queueReady, queueError = queue:SetEnabled(queueKind, payload)
+    if queueReady then
+        local localTaskEnabled = stackSettings[localSettingKey] == true or payload
+        queueReady, queueError = queue:SetEnabled(localKind, localTaskEnabled)
+    end
+    if not queueReady then
+        stackSettings[settingKey] = not payload
+        service:SetEnabled(mode, not payload)
+        queue:SetEnabled(queueKind, previousQueueEnabled)
+        queue:SetEnabled(localKind, previousLocalQueueEnabled)
+        self:_SetStatus("Server search setting error: " .. tostring(queueError), "error")
+        return false
+    end
+
+    if payload then
+        local workerReady, workerError = self:_StartWorker()
+        if not workerReady then
+            stackSettings[settingKey] = false
+            service:SetEnabled(mode, false)
+            queue:SetEnabled(queueKind, previousQueueEnabled)
+            queue:SetEnabled(localKind, previousLocalQueueEnabled)
+            return false, workerError
+        end
+        self:_SetStatus(
+            mode == "EliteHunter"
+                and "Elite Hunter search enabled"
+                or "Berry search enabled",
+            "success"
+        )
+        return true
+    end
+
+    if self.ActiveStackTask
+        and self.ActiveStackTask.Kind == localKind
+        and stackSettings[localSettingKey] ~= true
+    then
+        self:_FinishStackTask(self.ActiveStackTask, "Server search turned off", false)
+    end
+    if not self.MainFarmEnabled and not self:_HasEnabledStackTasks() then
+        self:_StopWorker()
+    else
+        self:_SetStatus(
+            mode == "EliteHunter"
+                and "Elite Hunter search disabled"
+                or "Berry search disabled",
+            "info"
+        )
     end
     return true
 end
@@ -5241,6 +5418,15 @@ function MainFarm:Handle(actionId, payload)
             "Auto attack Elite Hunter",
             payload
         )
+    elseif actionId == "stack.hop.eliteHunter.enabled" then
+        return self:_SetServerHopEnabled(
+            "EliteHunter",
+            "HopForEliteHunter",
+            "HopEliteHunter",
+            "EliteHunter",
+            "AutoEliteHunter",
+            payload
+        )
     elseif actionId == "stack.ripIndra.enabled" then
         return self:_SetStackTaskEnabled(
             "RipIndra",
@@ -5281,6 +5467,15 @@ function MainFarm:Handle(actionId, payload)
             "Berry",
             "AutoCollectBerries",
             "Collect Berries",
+            payload
+        )
+    elseif actionId == "stack.hop.berry.enabled" then
+        return self:_SetServerHopEnabled(
+            "Berry",
+            "HopForBerries",
+            "HopBerry",
+            "Berry",
+            "AutoCollectBerries",
             payload
         )
     end
@@ -5664,6 +5859,10 @@ function MainFarm:Cleanup()
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
+    if self.ServerHopService then
+        self.ServerHopService:Destroy()
+        self.ServerHopService = nil
+    end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
         self.StackTaskQueue:SetEnabled("EliteHunter", false)
@@ -5673,6 +5872,8 @@ function MainFarm:Cleanup()
         self.StackTaskQueue:SetEnabled("Darkbeard", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
+        self.StackTaskQueue:SetEnabled("HopEliteHunter", false)
+        self.StackTaskQueue:SetEnabled("HopBerry", false)
     end
     self:_StopWorker()
     if self.StackTaskQueue then

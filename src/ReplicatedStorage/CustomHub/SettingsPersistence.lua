@@ -1,7 +1,7 @@
 local SettingsPersistence = {}
 SettingsPersistence.__index = SettingsPersistence
 
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 local SETTINGS_FOLDER = "CustomHub"
 local SAVE_DEBOUNCE_SECONDS = 0.6
 local SETTING_KINDS = {
@@ -67,6 +67,64 @@ local function deepEqual(left, right)
     return true
 end
 
+local function copyTable(value)
+    if type(value) ~= "table" then
+        return value
+    end
+    local result = {}
+    for key, child in pairs(value) do
+        result[key] = copyTable(child)
+    end
+    return result
+end
+
+local function validateHopSession(value)
+    if type(value) ~= "table"
+        or tonumber(value.PlaceId) == nil
+        or tonumber(value.PlaceId) <= 0
+        or type(value.ExpiresAt) ~= "number"
+        or value.ExpiresAt <= os.time()
+        or value.ExpiresAt > os.time() + 86400
+        or type(value.Modes) ~= "table"
+    then
+        return nil
+    end
+
+    local modes = {
+        EliteHunter = value.Modes.EliteHunter == true,
+        Berry = value.Modes.Berry == true,
+    }
+    if not modes.EliteHunter and not modes.Berry then
+        return nil
+    end
+
+    local visited = {}
+    if type(value.Visited) == "table" then
+        for _, jobId in ipairs(value.Visited) do
+            if isSimpleString(jobId) then
+                visited[#visited + 1] = jobId
+                if #visited >= 300 then
+                    break
+                end
+            end
+        end
+    end
+
+    local session = {
+        PlaceId = math.floor(tonumber(value.PlaceId)),
+        ExpiresAt = math.floor(value.ExpiresAt),
+        Modes = modes,
+        Visited = visited,
+    }
+    if isSimpleString(value.PendingJobId) then
+        session.PendingJobId = value.PendingJobId
+    end
+    if type(value.Cursor) == "string" and #value.Cursor <= 2048 then
+        session.Cursor = value.Cursor
+    end
+    return session
+end
+
 function SettingsPersistence.new(config, compatibility)
     local self = setmetatable({
         Config = config,
@@ -77,6 +135,8 @@ function SettingsPersistence.new(config, compatibility)
         InterfacePreferences = nil,
         Rules = {},
         LastSnapshot = nil,
+        HopSession = nil,
+        LastHopSession = nil,
         SaveGeneration = 0,
         Destroyed = false,
         ReadOnly = false,
@@ -106,6 +166,7 @@ function SettingsPersistence:_BuildRules()
                 if group == "FarmSettings"
                     or group == "StackFarmSettings"
                     or group == "TravelSettings"
+                    or group == "StartupSettings"
                 then
                     self.Rules[group] = self.Rules[group] or {}
                     self.Rules[group][setting] = control
@@ -298,6 +359,8 @@ function SettingsPersistence:Load()
     end
 
     self:_ApplySavedSettings(data)
+    self.HopSession = validateHopSession(data.HopSession)
+    self.LastHopSession = copyTable(self.HopSession)
     self.LoadedFromFile = true
     self.LastSnapshot = self:_Capture()
     return true
@@ -315,7 +378,7 @@ function SettingsPersistence:_ReportSaveError(message)
     end
 end
 
-function SettingsPersistence:Save()
+function SettingsPersistence:Save(force)
     if self.Destroyed or self.ReadOnly then
         return false, "Settings persistence is paused"
     end
@@ -324,12 +387,21 @@ function SettingsPersistence:Save()
     end
 
     local snapshot = self:_Capture()
-    if self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+    local hopSession = copyTable(self.HopSession)
+    if not force
+        and self.LastSnapshot
+        and deepEqual(snapshot, self.LastSnapshot)
+        and deepEqual(hopSession, self.LastHopSession)
+    then
         return true
     end
 
+    local document = copyTable(snapshot)
+    if hopSession then
+        document.HopSession = hopSession
+    end
     local encodeOk, content = pcall(function()
-        return game:GetService("HttpService"):JSONEncode(snapshot)
+        return game:GetService("HttpService"):JSONEncode(document)
     end)
     if not encodeOk or type(content) ~= "string" then
         self:_ReportSaveError("Could not encode settings")
@@ -344,8 +416,41 @@ function SettingsPersistence:Save()
     end
 
     self.LastSnapshot = snapshot
+    self.LastHopSession = copyTable(hopSession)
     self.LoadWarning = nil
     return true
+end
+
+function SettingsPersistence:CanPersistHopSession()
+    return not self.Destroyed
+        and not self.ReadOnly
+        and self.Storage ~= nil
+        and self.Path ~= nil
+end
+
+function SettingsPersistence:GetHopSession()
+    return copyTable(self.HopSession)
+end
+
+function SettingsPersistence:SetHopSession(session)
+    if not self:CanPersistHopSession() then
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+    local validated = validateHopSession(session)
+    if not validated then
+        return false, "Hop session data is invalid or expired"
+    end
+    self.HopSession = validated
+    return self:Save(true)
+end
+
+function SettingsPersistence:ClearHopSession()
+    if not self:CanPersistHopSession() then
+        self.HopSession = nil
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+    self.HopSession = nil
+    return self:Save(true)
 end
 
 function SettingsPersistence:ScheduleSave()

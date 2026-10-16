@@ -458,6 +458,7 @@ local Config = {
     StackFarmSettings = {
         AutoAttackCakePrince = false,
         AutoEliteHunter = false,
+        HopForEliteHunter = false,
         AttackRipIndra = false,
         AttackSoulReaper = false,
         AttackDoughKing = false,
@@ -466,6 +467,10 @@ local Config = {
         PrioritizeDoughKing = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
+        HopForBerries = false,
+    },
+    StartupSettings = {
+        Team = "Marines",
     },
     Layout = {
         MobileWidth = 0.86,
@@ -799,6 +804,28 @@ local Config = {
                     Setting = "AutoCollectBerries",
                     SettingsKey = "StackFarmSettings",
                 },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Server search",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Hop for Elite Hunter",
+                    Action = "stack.hop.eliteHunter.enabled",
+                    Setting = "HopForEliteHunter",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                    Description = "Checks this server first, then searches other public servers.",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Hop for berries",
+                    Action = "stack.hop.berry.enabled",
+                    Setting = "HopForBerries",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                    Description = "Collects available berries here before searching other servers.",
+                },
             },
         },
         Player = {
@@ -956,6 +983,14 @@ local Config = {
                 {
                     Kind = "sectionHeader",
                     Label = "Interface",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Team to auto-select",
+                    Action = "settings.team.select",
+                    Setting = "Team",
+                    SettingsKey = "StartupSettings",
+                    Options = { "Marines", "Pirates" },
                 },
                 {
                     Kind = "settingDropdown",

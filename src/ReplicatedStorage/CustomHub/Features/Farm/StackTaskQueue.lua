@@ -10,6 +10,8 @@ local TASK_KIND = {
     Darkbeard = true,
     Fruit = true,
     Berry = true,
+    HopEliteHunter = true,
+    HopBerry = true,
 }
 
 local SPAWNED_BOSS_KINDS = {
@@ -129,6 +131,8 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
             Darkbeard = false,
             Fruit = false,
             Berry = false,
+            HopEliteHunter = false,
+            HopBerry = false,
         },
         Pending = {},
         PendingByInstance = setmetatable({}, { __mode = "k" }),
@@ -612,7 +616,9 @@ function StackTaskQueue:SetEnabled(kind, enabled)
     self.Enabled[kind] = enabled
 
     if enabled then
-        self:_QueueExisting(kind)
+        if kind ~= "HopEliteHunter" and kind ~= "HopBerry" then
+            self:_QueueExisting(kind)
+        end
     else
         self:_RemovePending(kind)
         if kind == "Fruit" then
@@ -769,6 +775,8 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.Darkbeard == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
+        or self.Enabled.HopEliteHunter == true
+        or self.Enabled.HopBerry == true
 end
 
 function StackTaskQueue:TakePendingKind(kind)

@@ -39,8 +39,10 @@ require(
     and 'Action = "stack.darkbeard.enabled"' in CONFIG
     and 'Action = "stack.fruit.enabled"' in CONFIG
     and 'Action = "stack.berry.enabled"' in CONFIG
+    and 'Action = "stack.hop.eliteHunter.enabled"' in CONFIG
+    and 'Action = "stack.hop.berry.enabled"' in CONFIG
     and "SpecialHop" not in CONFIG,
-    "Stack Farming must expose the supported bosses, fruit and berries without hop controls",
+    "Stack Farming must expose supported local tasks and explicit Elite Hunter/berry hop controls",
 )
 require(
     "AutoAttackCakePrince = false" in CONFIG
@@ -50,7 +52,9 @@ require(
     and "AttackDoughKing = false" in CONFIG
     and "AttackDarkbeard = false" in CONFIG
     and "TeleportToFruit = false" in CONFIG
-    and "AutoCollectBerries = false" in CONFIG,
+    and "AutoCollectBerries = false" in CONFIG
+    and "HopForEliteHunter = false" in CONFIG
+    and "HopForBerries = false" in CONFIG,
     "Stack Farming tasks must default to off",
 )
 require(
@@ -242,6 +246,8 @@ require(
 require(
     "AutoCollectBerries == true" in TELEPORT
     and "AutoEliteHunter == true" in TELEPORT
+    and "HopForEliteHunter == true" in TELEPORT
+    and "HopForBerries == true" in TELEPORT
     and "AttackRipIndra == true" in TELEPORT
     and "AttackSoulReaper == true" in TELEPORT
     and "AttackDoughKing == true" in TELEPORT
@@ -252,3 +258,4 @@ require(
 print("PASS: Main Farming and Stack Farming are separate nested pages")
 print("PASS: stack jobs share one worker; fruit batches use gateway-aware route ordering")
 print("PASS: standalone stack jobs and travel conflict handling are wired")
+print("PASS: Stack Farming server search runs through the shared task queue")

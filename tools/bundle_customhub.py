@@ -83,6 +83,11 @@ MODULES = (
         {},
     ),
     (
+        "CustomHub.Features.ServerHopService",
+        "src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua",
+        {},
+    ),
+    (
         "CustomHub.Features.MainFarm",
         "src/ReplicatedStorage/CustomHub/Features/MainFarm.lua",
         {
@@ -91,6 +96,7 @@ MODULES = (
             "require(script.Parent.Farm.MovementService)": '__bundleLoad("CustomHub.Features.Farm.MovementService")',
             "require(script.Parent.Farm.CombatService)": '__bundleLoad("CustomHub.Features.Farm.CombatService")',
             "require(script.Parent.Farm.StackTaskQueue)": '__bundleLoad("CustomHub.Features.Farm.StackTaskQueue")',
+            "require(script.Parent.ServerHopService)": '__bundleLoad("CustomHub.Features.ServerHopService")',
         },
     ),
     (

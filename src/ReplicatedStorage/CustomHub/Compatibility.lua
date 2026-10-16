@@ -4,6 +4,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
+local HttpService = game:GetService("HttpService")
 
 local Compatibility = {}
 Compatibility.__index = Compatibility
@@ -23,6 +24,7 @@ function Compatibility.new()
         Workspace = Workspace,
         RunService = RunService,
         CollectionService = CollectionService,
+        HttpService = HttpService,
         NpcManager = nil,
         NpcCatalogNames = nil,
     }, Compatibility)
@@ -162,6 +164,213 @@ function Compatibility:GetPlayerGui()
         return nil, "PlayerGui is unavailable"
     end
     return playerGui
+end
+
+function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
+    if teamName ~= "Marines" and teamName ~= "Pirates" then
+        return false, "Unsupported team"
+    end
+    local player = self.Player
+    if not player then
+        return false, "LocalPlayer is unavailable"
+    end
+
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then
+        return false, "PlayerGui is unavailable"
+    end
+
+    local timeout = math.clamp(tonumber(timeoutSeconds) or 6, 0, 8)
+    local deadline = os.clock() + timeout
+    local attempted = false
+    while os.clock() <= deadline do
+        local main = playerGui:FindFirstChild("Main (minimal)")
+            or playerGui:FindFirstChild("Main")
+        local chooseTeam = main and main:FindFirstChild("ChooseTeam")
+        if chooseTeam and chooseTeam.Visible then
+            local container = chooseTeam:FindFirstChild("Container")
+            local teamCard = container and container:FindFirstChild(teamName)
+            local frame = teamCard and teamCard:FindFirstChild("Frame")
+            local button = frame and frame:FindFirstChildWhichIsA("GuiButton", true)
+            if not button and teamCard then
+                button = teamCard:FindFirstChildWhichIsA("GuiButton", true)
+            end
+
+            if button then
+                attempted = true
+                local inputOk = pcall(function()
+                    local guiService = game:GetService("GuiService")
+                    local inputManager = game:GetService("VirtualInputManager")
+                    guiService.SelectedObject = button
+                    inputManager:SendKeyEvent(
+                        true,
+                        Enum.KeyCode.Return,
+                        false,
+                        button
+                    )
+                    inputManager:SendKeyEvent(
+                        false,
+                        Enum.KeyCode.Return,
+                        false,
+                        button
+                    )
+                    guiService.SelectedObject = nil
+                end)
+                if not inputOk then
+                    pcall(function()
+                        button:Activate()
+                    end)
+                else
+                    task.wait(0.1)
+                    if chooseTeam.Visible then
+                        pcall(function()
+                            button:Activate()
+                        end)
+                    end
+                end
+                task.wait(0.35)
+            else
+                task.wait(0.1)
+            end
+        elseif player.Team then
+            return true, "A team is already selected"
+        else
+            task.wait(0.1)
+        end
+
+        if not (chooseTeam and chooseTeam.Visible) then
+            if player.Team then
+                return true, "Team selected"
+            elseif attempted then
+                return true, "Team selection accepted"
+            end
+        end
+    end
+
+    if player.Team then
+        return true, "A team is already selected"
+    end
+    return false, attempted
+        and ("Could not confirm the " .. teamName .. " team selection")
+        or "Team selection screen was not found"
+end
+
+function Compatibility:_GetHttpRequestFunction()
+    local ok, requestFunction = pcall(function()
+        if type(request) == "function" then
+            return request
+        end
+        if type(http_request) == "function" then
+            return http_request
+        end
+        if type(syn) == "table" and type(syn.request) == "function" then
+            return syn.request
+        end
+        if type(http) == "table" and type(http.request) == "function" then
+            return http.request
+        end
+        if type(fluxus) == "table" and type(fluxus.request) == "function" then
+            return fluxus.request
+        end
+        return nil
+    end)
+    if not ok then
+        return nil
+    end
+    return type(requestFunction) == "function" and requestFunction or nil
+end
+
+function Compatibility:GetPublicServers(cursor)
+    local placeId = tonumber(game.PlaceId)
+    if not placeId or placeId <= 0 then
+        return nil, "Current place id is unavailable"
+    end
+
+    local url = "https://games.roblox.com/v1/games/"
+        .. tostring(math.floor(placeId))
+        .. "/servers/Public?sortOrder=Asc&limit=100"
+    if type(cursor) == "string" and cursor ~= "" then
+        local encodeOk, encodedCursor = pcall(function()
+            return self.HttpService:UrlEncode(cursor)
+        end)
+        if not encodeOk then
+            return nil, "Could not encode the server-list cursor"
+        end
+        url = url .. "&cursor=" .. encodedCursor
+    end
+
+    local responseBody
+    local requestFunction = self:_GetHttpRequestFunction()
+    if requestFunction then
+        local requestOk, response = pcall(requestFunction, {
+            Url = url,
+            Method = "GET",
+        })
+        if requestOk and type(response) == "table" then
+            local statusCode = tonumber(response.StatusCode or response.Status)
+            if statusCode and (statusCode < 200 or statusCode >= 300) then
+                return nil, "Roblox server list returned HTTP " .. tostring(statusCode)
+            end
+            responseBody = response.Body
+        elseif not requestOk then
+            return nil, tostring(response)
+        end
+    end
+
+    if type(responseBody) ~= "string" or responseBody == "" then
+        local httpOk, body = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if not httpOk or type(body) ~= "string" then
+            return nil, "Public server list access is unavailable"
+        end
+        responseBody = body
+    end
+
+    local decodeOk, data = pcall(function()
+        return self.HttpService:JSONDecode(responseBody)
+    end)
+    if not decodeOk or type(data) ~= "table" or type(data.data) ~= "table" then
+        return nil, "Roblox returned an invalid public server list"
+    end
+    return {
+        Servers = data.data,
+        NextCursor = type(data.nextPageCursor) == "string"
+            and data.nextPageCursor
+            or nil,
+    }
+end
+
+function Compatibility:TeleportToPublicServer(jobId)
+    if type(jobId) ~= "string" or jobId == "" then
+        return false, "Server id is unavailable"
+    end
+    if jobId == tostring(game.JobId) then
+        return false, "This is already the current server"
+    end
+
+    local teleportService
+    local serviceOk, service = pcall(function()
+        return game:GetService("TeleportService")
+    end)
+    if serviceOk then
+        teleportService = service
+    end
+    if not teleportService or not self.Player then
+        return false, "Server joining is unavailable"
+    end
+
+    local teleportOk, teleportError = pcall(function()
+        teleportService:TeleportToPlaceInstance(
+            game.PlaceId,
+            jobId,
+            self.Player
+        )
+    end)
+    if not teleportOk then
+        return false, tostring(teleportError)
+    end
+    return true
 end
 
 function Compatibility:GetUnparentedInstances()

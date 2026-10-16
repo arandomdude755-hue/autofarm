@@ -46,6 +46,20 @@ function Hub:Start()
 
     if activeHub and activeHub ~= self then
         activeHub:Destroy()
+        self.SettingsPersistence:Load()
+        self.SettingsPersistence:SetState(self.State)
+    end
+
+    local startupSettings = Config.StartupSettings or {}
+    local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
+    local teamSelected, teamSelectionResult = self.Compatibility:SelectTeamIfPrompted(
+        teamName,
+        6
+    )
+    if not teamSelected then
+        self.TeamSelectionWarning = teamSelectionResult
+    else
+        self.TeamSelectionWarning = nil
     end
 
     local initialized, initError = self.FeatureManager:Initialize()
@@ -81,10 +95,23 @@ function Hub:Start()
     self.Started = true
     activeHub = self
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
+    local mainFarm = self.FeatureManager
+        and self.FeatureManager.Context
+        and self.FeatureManager.Context.MainFarm
     local settingsWarning = self.SettingsPersistence
         and self.SettingsPersistence:GetStartupWarning()
     if settingsWarning then
         self.State:SetStatus(settingsWarning, "warning")
+    elseif self.TeamSelectionWarning then
+        self.State:SetStatus(
+            "Could not auto-select a team: " .. tostring(self.TeamSelectionWarning),
+            "warning"
+        )
+    elseif mainFarm and mainFarm.ServerHopPausedOnLoad then
+        self.State:SetStatus(
+            "Saved server search is paused after reload. Turn its toggle off and back on to start again.",
+            "warning"
+        )
     end
     return true
 end

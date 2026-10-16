@@ -16,7 +16,7 @@ def require(condition, message):
 
 
 require(
-    "local SCHEMA_VERSION = 1" in PERSISTENCE
+    "local SCHEMA_VERSION = 2" in PERSISTENCE
     and "function SettingsPersistence:Load()" in PERSISTENCE
     and "function SettingsPersistence:ScheduleSave()" in PERSISTENCE
     and "function SettingsPersistence:Flush()" in PERSISTENCE,
@@ -40,6 +40,12 @@ require(
     and "statusValues" not in PERSISTENCE
     and "ActiveStackTask" not in PERSISTENCE,
     "transient automation state must not be restored from the saved preferences file",
+)
+require(
+    "function SettingsPersistence:SetHopSession(session)" in PERSISTENCE
+    and "function SettingsPersistence:GetHopSession()" in PERSISTENCE
+    and "function SettingsPersistence:CanPersistHopSession()" in PERSISTENCE,
+    "only a pending hop token may resume a search after a server teleport",
 )
 require(
     "function FeatureManager:_ScheduleSettingsSave()" in FEATURE_MANAGER

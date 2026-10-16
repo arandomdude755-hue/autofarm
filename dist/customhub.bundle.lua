@@ -487,6 +487,7 @@ local Config = {
     StackFarmSettings = {
         AutoAttackCakePrince = false,
         AutoEliteHunter = false,
+        HopForEliteHunter = false,
         AttackRipIndra = false,
         AttackSoulReaper = false,
         AttackDoughKing = false,
@@ -495,6 +496,10 @@ local Config = {
         PrioritizeDoughKing = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
+        HopForBerries = false,
+    },
+    StartupSettings = {
+        Team = "Marines",
     },
     Layout = {
         MobileWidth = 0.86,
@@ -828,6 +833,28 @@ local Config = {
                     Setting = "AutoCollectBerries",
                     SettingsKey = "StackFarmSettings",
                 },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Server search",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Hop for Elite Hunter",
+                    Action = "stack.hop.eliteHunter.enabled",
+                    Setting = "HopForEliteHunter",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                    Description = "Checks this server first, then searches other public servers.",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Hop for berries",
+                    Action = "stack.hop.berry.enabled",
+                    Setting = "HopForBerries",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                    Description = "Collects available berries here before searching other servers.",
+                },
             },
         },
         Player = {
@@ -985,6 +1012,14 @@ local Config = {
                 {
                     Kind = "sectionHeader",
                     Label = "Interface",
+                },
+                {
+                    Kind = "settingDropdown",
+                    Label = "Team to auto-select",
+                    Action = "settings.team.select",
+                    Setting = "Team",
+                    SettingsKey = "StartupSettings",
+                    Options = { "Marines", "Pirates" },
                 },
                 {
                     Kind = "settingDropdown",
@@ -1267,6 +1302,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
+local HttpService = game:GetService("HttpService")
 
 local Compatibility = {}
 Compatibility.__index = Compatibility
@@ -1286,6 +1322,7 @@ function Compatibility.new()
         Workspace = Workspace,
         RunService = RunService,
         CollectionService = CollectionService,
+        HttpService = HttpService,
         NpcManager = nil,
         NpcCatalogNames = nil,
     }, Compatibility)
@@ -1425,6 +1462,213 @@ function Compatibility:GetPlayerGui()
         return nil, "PlayerGui is unavailable"
     end
     return playerGui
+end
+
+function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
+    if teamName ~= "Marines" and teamName ~= "Pirates" then
+        return false, "Unsupported team"
+    end
+    local player = self.Player
+    if not player then
+        return false, "LocalPlayer is unavailable"
+    end
+
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then
+        return false, "PlayerGui is unavailable"
+    end
+
+    local timeout = math.clamp(tonumber(timeoutSeconds) or 6, 0, 8)
+    local deadline = os.clock() + timeout
+    local attempted = false
+    while os.clock() <= deadline do
+        local main = playerGui:FindFirstChild("Main (minimal)")
+            or playerGui:FindFirstChild("Main")
+        local chooseTeam = main and main:FindFirstChild("ChooseTeam")
+        if chooseTeam and chooseTeam.Visible then
+            local container = chooseTeam:FindFirstChild("Container")
+            local teamCard = container and container:FindFirstChild(teamName)
+            local frame = teamCard and teamCard:FindFirstChild("Frame")
+            local button = frame and frame:FindFirstChildWhichIsA("GuiButton", true)
+            if not button and teamCard then
+                button = teamCard:FindFirstChildWhichIsA("GuiButton", true)
+            end
+
+            if button then
+                attempted = true
+                local inputOk = pcall(function()
+                    local guiService = game:GetService("GuiService")
+                    local inputManager = game:GetService("VirtualInputManager")
+                    guiService.SelectedObject = button
+                    inputManager:SendKeyEvent(
+                        true,
+                        Enum.KeyCode.Return,
+                        false,
+                        button
+                    )
+                    inputManager:SendKeyEvent(
+                        false,
+                        Enum.KeyCode.Return,
+                        false,
+                        button
+                    )
+                    guiService.SelectedObject = nil
+                end)
+                if not inputOk then
+                    pcall(function()
+                        button:Activate()
+                    end)
+                else
+                    task.wait(0.1)
+                    if chooseTeam.Visible then
+                        pcall(function()
+                            button:Activate()
+                        end)
+                    end
+                end
+                task.wait(0.35)
+            else
+                task.wait(0.1)
+            end
+        elseif player.Team then
+            return true, "A team is already selected"
+        else
+            task.wait(0.1)
+        end
+
+        if not (chooseTeam and chooseTeam.Visible) then
+            if player.Team then
+                return true, "Team selected"
+            elseif attempted then
+                return true, "Team selection accepted"
+            end
+        end
+    end
+
+    if player.Team then
+        return true, "A team is already selected"
+    end
+    return false, attempted
+        and ("Could not confirm the " .. teamName .. " team selection")
+        or "Team selection screen was not found"
+end
+
+function Compatibility:_GetHttpRequestFunction()
+    local ok, requestFunction = pcall(function()
+        if type(request) == "function" then
+            return request
+        end
+        if type(http_request) == "function" then
+            return http_request
+        end
+        if type(syn) == "table" and type(syn.request) == "function" then
+            return syn.request
+        end
+        if type(http) == "table" and type(http.request) == "function" then
+            return http.request
+        end
+        if type(fluxus) == "table" and type(fluxus.request) == "function" then
+            return fluxus.request
+        end
+        return nil
+    end)
+    if not ok then
+        return nil
+    end
+    return type(requestFunction) == "function" and requestFunction or nil
+end
+
+function Compatibility:GetPublicServers(cursor)
+    local placeId = tonumber(game.PlaceId)
+    if not placeId or placeId <= 0 then
+        return nil, "Current place id is unavailable"
+    end
+
+    local url = "https://games.roblox.com/v1/games/"
+        .. tostring(math.floor(placeId))
+        .. "/servers/Public?sortOrder=Asc&limit=100"
+    if type(cursor) == "string" and cursor ~= "" then
+        local encodeOk, encodedCursor = pcall(function()
+            return self.HttpService:UrlEncode(cursor)
+        end)
+        if not encodeOk then
+            return nil, "Could not encode the server-list cursor"
+        end
+        url = url .. "&cursor=" .. encodedCursor
+    end
+
+    local responseBody
+    local requestFunction = self:_GetHttpRequestFunction()
+    if requestFunction then
+        local requestOk, response = pcall(requestFunction, {
+            Url = url,
+            Method = "GET",
+        })
+        if requestOk and type(response) == "table" then
+            local statusCode = tonumber(response.StatusCode or response.Status)
+            if statusCode and (statusCode < 200 or statusCode >= 300) then
+                return nil, "Roblox server list returned HTTP " .. tostring(statusCode)
+            end
+            responseBody = response.Body
+        elseif not requestOk then
+            return nil, tostring(response)
+        end
+    end
+
+    if type(responseBody) ~= "string" or responseBody == "" then
+        local httpOk, body = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if not httpOk or type(body) ~= "string" then
+            return nil, "Public server list access is unavailable"
+        end
+        responseBody = body
+    end
+
+    local decodeOk, data = pcall(function()
+        return self.HttpService:JSONDecode(responseBody)
+    end)
+    if not decodeOk or type(data) ~= "table" or type(data.data) ~= "table" then
+        return nil, "Roblox returned an invalid public server list"
+    end
+    return {
+        Servers = data.data,
+        NextCursor = type(data.nextPageCursor) == "string"
+            and data.nextPageCursor
+            or nil,
+    }
+end
+
+function Compatibility:TeleportToPublicServer(jobId)
+    if type(jobId) ~= "string" or jobId == "" then
+        return false, "Server id is unavailable"
+    end
+    if jobId == tostring(game.JobId) then
+        return false, "This is already the current server"
+    end
+
+    local teleportService
+    local serviceOk, service = pcall(function()
+        return game:GetService("TeleportService")
+    end)
+    if serviceOk then
+        teleportService = service
+    end
+    if not teleportService or not self.Player then
+        return false, "Server joining is unavailable"
+    end
+
+    local teleportOk, teleportError = pcall(function()
+        teleportService:TeleportToPlaceInstance(
+            game.PlaceId,
+            jobId,
+            self.Player
+        )
+    end)
+    if not teleportOk then
+        return false, tostring(teleportError)
+    end
+    return true
 end
 
 function Compatibility:GetUnparentedInstances()
@@ -2411,7 +2655,7 @@ __bundleFactories["CustomHub.SettingsPersistence"] = function()
 local SettingsPersistence = {}
 SettingsPersistence.__index = SettingsPersistence
 
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 local SETTINGS_FOLDER = "CustomHub"
 local SAVE_DEBOUNCE_SECONDS = 0.6
 local SETTING_KINDS = {
@@ -2477,6 +2721,64 @@ local function deepEqual(left, right)
     return true
 end
 
+local function copyTable(value)
+    if type(value) ~= "table" then
+        return value
+    end
+    local result = {}
+    for key, child in pairs(value) do
+        result[key] = copyTable(child)
+    end
+    return result
+end
+
+local function validateHopSession(value)
+    if type(value) ~= "table"
+        or tonumber(value.PlaceId) == nil
+        or tonumber(value.PlaceId) <= 0
+        or type(value.ExpiresAt) ~= "number"
+        or value.ExpiresAt <= os.time()
+        or value.ExpiresAt > os.time() + 86400
+        or type(value.Modes) ~= "table"
+    then
+        return nil
+    end
+
+    local modes = {
+        EliteHunter = value.Modes.EliteHunter == true,
+        Berry = value.Modes.Berry == true,
+    }
+    if not modes.EliteHunter and not modes.Berry then
+        return nil
+    end
+
+    local visited = {}
+    if type(value.Visited) == "table" then
+        for _, jobId in ipairs(value.Visited) do
+            if isSimpleString(jobId) then
+                visited[#visited + 1] = jobId
+                if #visited >= 300 then
+                    break
+                end
+            end
+        end
+    end
+
+    local session = {
+        PlaceId = math.floor(tonumber(value.PlaceId)),
+        ExpiresAt = math.floor(value.ExpiresAt),
+        Modes = modes,
+        Visited = visited,
+    }
+    if isSimpleString(value.PendingJobId) then
+        session.PendingJobId = value.PendingJobId
+    end
+    if type(value.Cursor) == "string" and #value.Cursor <= 2048 then
+        session.Cursor = value.Cursor
+    end
+    return session
+end
+
 function SettingsPersistence.new(config, compatibility)
     local self = setmetatable({
         Config = config,
@@ -2487,6 +2789,8 @@ function SettingsPersistence.new(config, compatibility)
         InterfacePreferences = nil,
         Rules = {},
         LastSnapshot = nil,
+        HopSession = nil,
+        LastHopSession = nil,
         SaveGeneration = 0,
         Destroyed = false,
         ReadOnly = false,
@@ -2516,6 +2820,7 @@ function SettingsPersistence:_BuildRules()
                 if group == "FarmSettings"
                     or group == "StackFarmSettings"
                     or group == "TravelSettings"
+                    or group == "StartupSettings"
                 then
                     self.Rules[group] = self.Rules[group] or {}
                     self.Rules[group][setting] = control
@@ -2708,6 +3013,8 @@ function SettingsPersistence:Load()
     end
 
     self:_ApplySavedSettings(data)
+    self.HopSession = validateHopSession(data.HopSession)
+    self.LastHopSession = copyTable(self.HopSession)
     self.LoadedFromFile = true
     self.LastSnapshot = self:_Capture()
     return true
@@ -2725,7 +3032,7 @@ function SettingsPersistence:_ReportSaveError(message)
     end
 end
 
-function SettingsPersistence:Save()
+function SettingsPersistence:Save(force)
     if self.Destroyed or self.ReadOnly then
         return false, "Settings persistence is paused"
     end
@@ -2734,12 +3041,21 @@ function SettingsPersistence:Save()
     end
 
     local snapshot = self:_Capture()
-    if self.LastSnapshot and deepEqual(snapshot, self.LastSnapshot) then
+    local hopSession = copyTable(self.HopSession)
+    if not force
+        and self.LastSnapshot
+        and deepEqual(snapshot, self.LastSnapshot)
+        and deepEqual(hopSession, self.LastHopSession)
+    then
         return true
     end
 
+    local document = copyTable(snapshot)
+    if hopSession then
+        document.HopSession = hopSession
+    end
     local encodeOk, content = pcall(function()
-        return game:GetService("HttpService"):JSONEncode(snapshot)
+        return game:GetService("HttpService"):JSONEncode(document)
     end)
     if not encodeOk or type(content) ~= "string" then
         self:_ReportSaveError("Could not encode settings")
@@ -2754,8 +3070,41 @@ function SettingsPersistence:Save()
     end
 
     self.LastSnapshot = snapshot
+    self.LastHopSession = copyTable(hopSession)
     self.LoadWarning = nil
     return true
+end
+
+function SettingsPersistence:CanPersistHopSession()
+    return not self.Destroyed
+        and not self.ReadOnly
+        and self.Storage ~= nil
+        and self.Path ~= nil
+end
+
+function SettingsPersistence:GetHopSession()
+    return copyTable(self.HopSession)
+end
+
+function SettingsPersistence:SetHopSession(session)
+    if not self:CanPersistHopSession() then
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+    local validated = validateHopSession(session)
+    if not validated then
+        return false, "Hop session data is invalid or expired"
+    end
+    self.HopSession = validated
+    return self:Save(true)
+end
+
+function SettingsPersistence:ClearHopSession()
+    if not self:CanPersistHopSession() then
+        self.HopSession = nil
+        return false, self.LoadWarning or "Local settings storage is unavailable"
+    end
+    self.HopSession = nil
+    return self:Save(true)
 end
 
 function SettingsPersistence:ScheduleSave()
@@ -2848,10 +3197,41 @@ function FeatureManager:Initialize()
         end
         table.insert(self.InitializedModules, featureModule)
     end
+    local mainFarm = self.Context and self.Context.MainFarm
+    if mainFarm and type(mainFarm.ResumePendingHop) == "function" then
+        local resumeOk, resumeResult, resumeError = pcall(
+            mainFarm.ResumePendingHop,
+            mainFarm
+        )
+        if not resumeOk or resumeResult == false and resumeError then
+            self.State:SetStatus(
+                "Server search could not resume: "
+                    .. tostring(resumeOk and resumeError or resumeResult),
+                "warning"
+            )
+        end
+    end
     return true
 end
 
 function FeatureManager:Dispatch(actionId, payload)
+    if actionId == "settings.team.select" then
+        local startupSettings = self.Context.Config
+            and self.Context.Config.StartupSettings
+        if not startupSettings or (payload ~= "Marines" and payload ~= "Pirates") then
+            self.State:SetStatus("Team selection setting is unavailable.", "error")
+            return false, "Unsupported team"
+        end
+        startupSettings.Team = payload
+        self:_ScheduleSettingsSave()
+        local compatibility = self.Context.Compatibility
+        if compatibility then
+            compatibility:SelectTeamIfPrompted(payload, 0.2)
+        end
+        self.State:SetStatus("Team to auto-select: " .. payload, "success")
+        return true
+    end
+
     if actionId == "settings.uiSize.select" then
         local layout = self.Context.Config and self.Context.Config.Layout
         local footprints = layout and layout.UiSizeFootprints
@@ -10624,6 +11004,8 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
             or stackSettings.AttackDarkbeard == true
             or stackSettings.TeleportToFruit == true
             or stackSettings.AutoCollectBerries == true
+            or stackSettings.HopForEliteHunter == true
+            or stackSettings.HopForBerries == true
         if mainFarm.MainFarmEnabled then
             self:_SetStatus(
                 "Travel unavailable while Main Farming is active.",
@@ -15115,6 +15497,8 @@ local TASK_KIND = {
     Darkbeard = true,
     Fruit = true,
     Berry = true,
+    HopEliteHunter = true,
+    HopBerry = true,
 }
 
 local SPAWNED_BOSS_KINDS = {
@@ -15234,6 +15618,8 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
             Darkbeard = false,
             Fruit = false,
             Berry = false,
+            HopEliteHunter = false,
+            HopBerry = false,
         },
         Pending = {},
         PendingByInstance = setmetatable({}, { __mode = "k" }),
@@ -15717,7 +16103,9 @@ function StackTaskQueue:SetEnabled(kind, enabled)
     self.Enabled[kind] = enabled
 
     if enabled then
-        self:_QueueExisting(kind)
+        if kind ~= "HopEliteHunter" and kind ~= "HopBerry" then
+            self:_QueueExisting(kind)
+        end
     else
         self:_RemovePending(kind)
         if kind == "Fruit" then
@@ -15874,6 +16262,8 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.Darkbeard == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
+        or self.Enabled.HopEliteHunter == true
+        or self.Enabled.HopBerry == true
 end
 
 function StackTaskQueue:TakePendingKind(kind)
@@ -16012,6 +16402,518 @@ return StackTaskQueue
 -- END SOURCE: src/ReplicatedStorage/CustomHub/Features/Farm/StackTaskQueue.lua
 end
 
+__bundleFactories["CustomHub.Features.ServerHopService"] = function()
+-- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua
+local ServerHopService = {}
+ServerHopService.__index = ServerHopService
+
+local INITIAL_SCAN_DELAY = 6
+local ARRIVAL_SCAN_DELAY = 8
+local RETRY_DELAY = 3
+local PAGE_DELAY = 0.5
+local TELEPORT_TIMEOUT = 25
+local SESSION_LIFETIME = 3600
+local MAX_VISITED_SERVERS = 300
+
+local function validJobId(value)
+    return type(value) == "string"
+        and #value > 0
+        and #value <= 128
+        and not value:find("[%c]")
+end
+
+function ServerHopService.new(compatibility, settingsPersistence, setStatus)
+    return setmetatable({
+        Compatibility = compatibility,
+        SettingsPersistence = settingsPersistence,
+        SetStatus = setStatus,
+        Settings = nil,
+        Session = nil,
+        ResumePending = false,
+        Fetching = false,
+        InFlight = false,
+        PendingJobId = nil,
+        PendingDeadline = 0,
+        NextAttemptAt = 0,
+        PageCount = 0,
+        Generation = 0,
+        Destroyed = false,
+        TeleportFailureConnection = nil,
+        LastErrorStatus = nil,
+    }, ServerHopService)
+end
+
+function ServerHopService:_SetStatus(message, kind)
+    if type(self.SetStatus) == "function" then
+        pcall(self.SetStatus, message, kind or "info")
+    end
+end
+
+function ServerHopService:_ReadModes()
+    local settings = self.Settings or {}
+    return {
+        EliteHunter = settings.HopForEliteHunter == true,
+        Berry = settings.HopForBerries == true,
+    }
+end
+
+function ServerHopService:_HasEnabledMode()
+    local modes = self:_ReadModes()
+    return modes.EliteHunter or modes.Berry
+end
+
+function ServerHopService:_ModeLabel()
+    local modes = self:_ReadModes()
+    if modes.EliteHunter and modes.Berry then
+        return "Elite Hunters and berries"
+    elseif modes.EliteHunter then
+        return "Elite Hunters"
+    elseif modes.Berry then
+        return "berries"
+    end
+    return "targets"
+end
+
+function ServerHopService:_IsThirdSea()
+    local compatibility = self.Compatibility
+    if not compatibility or type(compatibility.IsThirdSea) ~= "function" then
+        return false
+    end
+    local ok, result = pcall(compatibility.IsThirdSea, compatibility)
+    return ok and result == true
+end
+
+function ServerHopService:_CopySession(session)
+    if type(session) ~= "table" then
+        return nil
+    end
+    local copy = {
+        PlaceId = session.PlaceId,
+        ExpiresAt = session.ExpiresAt,
+        Modes = {
+            EliteHunter = session.Modes and session.Modes.EliteHunter == true,
+            Berry = session.Modes and session.Modes.Berry == true,
+        },
+        Visited = {},
+        Cursor = session.Cursor,
+        PendingJobId = session.PendingJobId,
+    }
+    for _, jobId in ipairs(session.Visited or {}) do
+        if validJobId(jobId) then
+            copy.Visited[#copy.Visited + 1] = jobId
+            if #copy.Visited >= MAX_VISITED_SERVERS then
+                break
+            end
+        end
+    end
+    return copy
+end
+
+function ServerHopService:_SaveSession()
+    local persistence = self.SettingsPersistence
+    if not persistence or type(persistence.SetHopSession) ~= "function" then
+        return false, "Settings storage is unavailable"
+    end
+    local copy = self:_CopySession(self.Session)
+    if not copy then
+        return false, "Hop session is unavailable"
+    end
+    copy.ExpiresAt = os.time() + SESSION_LIFETIME
+    self.Session.ExpiresAt = copy.ExpiresAt
+    local ok, saved, saveError = pcall(
+        persistence.SetHopSession,
+        persistence,
+        copy
+    )
+    if not ok then
+        return false, "Settings storage could not save the search session"
+    end
+    return saved, saveError
+end
+
+function ServerHopService:_ClearSavedSession()
+    local persistence = self.SettingsPersistence
+    if persistence and type(persistence.ClearHopSession) == "function" then
+        pcall(persistence.ClearHopSession, persistence)
+    end
+    self.Session = nil
+    self.PendingJobId = nil
+    self.PendingDeadline = 0
+    self.InFlight = false
+end
+
+function ServerHopService:_EnsureSession()
+    if self.Session then
+        self.Session.Modes = self:_ReadModes()
+        return self.Session
+    end
+
+    local modes = self:_ReadModes()
+    if not modes.EliteHunter and not modes.Berry then
+        return nil
+    end
+
+    local currentJobId = tostring(game.JobId or "")
+    self.Session = {
+        PlaceId = tonumber(game.PlaceId),
+        ExpiresAt = os.time() + SESSION_LIFETIME,
+        Modes = modes,
+        Visited = {},
+        Cursor = nil,
+    }
+    if validJobId(currentJobId) then
+        self.Session.Visited[1] = currentJobId
+    end
+    return self.Session
+end
+
+function ServerHopService:_MarkVisited(jobId)
+    if not self.Session or not validJobId(jobId) then
+        return
+    end
+    for _, existing in ipairs(self.Session.Visited) do
+        if existing == jobId then
+            return
+        end
+    end
+    table.insert(self.Session.Visited, jobId)
+    while #self.Session.Visited > MAX_VISITED_SERVERS do
+        table.remove(self.Session.Visited, 1)
+    end
+end
+
+function ServerHopService:_IsVisited(jobId)
+    for _, existing in ipairs((self.Session and self.Session.Visited) or {}) do
+        if existing == jobId then
+            return true
+        end
+    end
+    return false
+end
+
+function ServerHopService:_SetModesOnSavedSession()
+    if not self.Session then
+        return
+    end
+    self.Session.Modes = self:_ReadModes()
+    if not self.Session.Modes.EliteHunter and not self.Session.Modes.Berry then
+        self:_ClearSavedSession()
+        return
+    end
+    if self.Session.PendingJobId then
+        local saved = self:_SaveSession()
+        if not saved then
+            self:_SetStatus(
+                "Server search couldn't save its next hop; it will try again.",
+                "warning"
+            )
+        end
+    end
+end
+
+function ServerHopService:_FailPending(message)
+    if not self.PendingJobId then
+        return
+    end
+    self:_MarkVisited(self.PendingJobId)
+    self.PendingJobId = nil
+    self.PendingDeadline = 0
+    self.InFlight = false
+    if self.Session then
+        self.Session.PendingJobId = nil
+        self.Session.Modes = self:_ReadModes()
+        self:_SaveSession()
+    end
+    self.NextAttemptAt = os.clock() + RETRY_DELAY
+    self:_SetStatus(message or "That server could not be joined; trying another.", "warning")
+end
+
+function ServerHopService:_OnTeleportInitFailed(player, _, errorMessage)
+    if player ~= self.Compatibility.Player or not self.PendingJobId then
+        return
+    end
+    self:_FailPending("Could not join that server; trying another.")
+end
+
+function ServerHopService:Initialize(settings)
+    self.Settings = settings or {}
+    self.Destroyed = false
+
+    local teleportService
+    pcall(function()
+        teleportService = game:GetService("TeleportService")
+    end)
+    if teleportService and teleportService.TeleportInitFailed then
+        local connectOk, connection = pcall(function()
+            return teleportService.TeleportInitFailed:Connect(function(...)
+                self:_OnTeleportInitFailed(...)
+            end)
+        end)
+        if connectOk then
+            self.TeleportFailureConnection = connection
+        end
+    end
+
+    local persistence = self.SettingsPersistence
+    local savedSession
+    if persistence and type(persistence.GetHopSession) == "function" then
+        local readOk, session = pcall(persistence.GetHopSession, persistence)
+        if readOk then
+            savedSession = session
+        end
+    end
+    local currentJobId = tostring(game.JobId or "")
+    local modes = self:_ReadModes()
+    local shouldResume = savedSession ~= nil
+        and tonumber(savedSession.PlaceId) == tonumber(game.PlaceId)
+        and savedSession.PendingJobId == currentJobId
+        and savedSession.ExpiresAt > os.time()
+        and self:_IsThirdSea()
+        and (modes.EliteHunter or modes.Berry)
+
+    if shouldResume then
+        self.Session = self:_CopySession(savedSession)
+        self.Session.PendingJobId = nil
+        self.ResumePending = true
+        self.NextAttemptAt = os.clock() + ARRIVAL_SCAN_DELAY
+        self:_MarkVisited(currentJobId)
+        return true
+    end
+
+    if savedSession then
+        self:_ClearSavedSession()
+    end
+    return true
+end
+
+function ServerHopService:ShouldResume()
+    return self.ResumePending == true
+end
+
+function ServerHopService:ConsumeResume()
+    if not self.ResumePending then
+        return false
+    end
+    self.ResumePending = false
+    if self.Session then
+        self.Session.PendingJobId = nil
+        self.Session.Modes = self:_ReadModes()
+        self:_SaveSession()
+    end
+    self.NextAttemptAt = os.clock() + ARRIVAL_SCAN_DELAY
+    self:_SetStatus("Checking this server for " .. self:_ModeLabel(), "info")
+    return true
+end
+
+function ServerHopService:CancelResume()
+    if not self.ResumePending then
+        return false
+    end
+    self.ResumePending = false
+    self:_ClearSavedSession()
+    return true
+end
+
+function ServerHopService:SetEnabled(mode, enabled)
+    if mode ~= "EliteHunter" and mode ~= "Berry" then
+        return false, "Unsupported server search mode"
+    end
+    if type(enabled) ~= "boolean" then
+        return false, "Server search setting is invalid"
+    end
+    if enabled then
+        if not self:_IsThirdSea() then
+            return false, "Elite Hunter and berry hopping is only available in Third Sea"
+        end
+        local persistence = self.SettingsPersistence
+        if not persistence
+            or type(persistence.CanPersistHopSession) ~= "function"
+            or not persistence:CanPersistHopSession()
+        then
+            return false, "Server hopping needs local settings storage to resume after joining"
+        end
+    end
+
+    self.NextAttemptAt = enabled
+        and math.max(self.NextAttemptAt or 0, os.clock() + INITIAL_SCAN_DELAY)
+        or self.NextAttemptAt
+    self.Generation += 1
+    self:_SetModesOnSavedSession()
+    if not self:_HasEnabledMode() then
+        self:_ClearSavedSession()
+    elseif enabled then
+        self:_SetStatus("Checking this server before searching for another", "info")
+    end
+    return true
+end
+
+function ServerHopService:HasEnabledModes()
+    return self:_HasEnabledMode()
+end
+
+function ServerHopService:OnStackTaskStarted(kind)
+    if (kind == "EliteHunter" and self:_ReadModes().EliteHunter)
+        or (kind == "Berry" and self:_ReadModes().Berry)
+    then
+        self.NextAttemptAt = os.clock() + 2
+    end
+end
+
+function ServerHopService:_BeginFetch()
+    if self.Fetching or self.Destroyed then
+        return
+    end
+    local session = self:_EnsureSession()
+    if not session then
+        return
+    end
+    self.Fetching = true
+    local cursor = session.Cursor
+    local generation = self.Generation
+    self:_SetStatus("Checking public servers for " .. self:_ModeLabel(), "info")
+    task.spawn(function()
+        local callOk, result = pcall(function()
+            return self.Compatibility:GetPublicServers(cursor)
+        end)
+        if not callOk then
+            result = nil
+        end
+        if self.Destroyed then
+            self.Fetching = false
+            return
+        end
+        self.Fetching = false
+        if generation ~= self.Generation then
+            return
+        end
+        if not self:_HasEnabledMode() then
+            return
+        end
+        if not result then
+            if not self.LastErrorStatus then
+                self.LastErrorStatus = true
+                self:_SetStatus(
+                    "The public server list is unavailable right now; retrying shortly.",
+                    "warning"
+                )
+            end
+            self.NextAttemptAt = os.clock() + 12
+            return
+        end
+
+        self.LastErrorStatus = nil
+        local candidates = {}
+        for _, server in ipairs(result.Servers or {}) do
+            local jobId = type(server) == "table" and server.id
+            local playing = type(server) == "table" and tonumber(server.playing)
+            local maxPlayers = type(server) == "table" and tonumber(server.maxPlayers)
+            if validJobId(jobId)
+                and jobId ~= tostring(game.JobId)
+                and not self:_IsVisited(jobId)
+                and playing ~= nil
+                and maxPlayers ~= nil
+                and playing < maxPlayers
+            then
+                candidates[#candidates + 1] = jobId
+            end
+        end
+
+        if #candidates == 0 then
+            session.Cursor = result.NextCursor
+            self.PageCount += 1
+            if session.Cursor then
+                local pause = PAGE_DELAY
+                if self.PageCount >= 4 then
+                    self.PageCount = 0
+                    pause = 5
+                    self:_SetStatus("Still checking public servers", "info")
+                end
+                self.NextAttemptAt = os.clock() + pause
+                return
+            end
+
+            session.Visited = {}
+            self:_MarkVisited(tostring(game.JobId or ""))
+            self.PageCount = 0
+            self.NextAttemptAt = os.clock() + 8
+            self:_SetStatus("No new public servers found; checking again shortly", "warning")
+            return
+        end
+
+        session.Cursor = result.NextCursor
+        local jobId = candidates[math.random(1, #candidates)]
+        self:_MarkVisited(jobId)
+        session.PendingJobId = jobId
+        session.Modes = self:_ReadModes()
+        local saved, saveError = self:_SaveSession()
+        if not saved then
+            session.PendingJobId = nil
+            self.NextAttemptAt = os.clock() + 12
+            self:_SetStatus(
+                "Server hopping can't continue because the search session couldn't be saved.",
+                "error"
+            )
+            return
+        end
+
+        self.PendingJobId = jobId
+        self.PendingDeadline = os.clock() + TELEPORT_TIMEOUT
+        self.InFlight = true
+        self:_SetStatus("Joining another public server to check for targets", "info")
+        local teleportCallOk, joined = pcall(function()
+            return self.Compatibility:TeleportToPublicServer(jobId)
+        end)
+        if not teleportCallOk or not joined then
+            self:_FailPending("Could not join that server; trying another.")
+        end
+    end)
+end
+
+function ServerHopService:Step()
+    if self.Destroyed or not self:_HasEnabledMode() then
+        return false
+    end
+    if not self:_IsThirdSea() then
+        self:_SetStatus("Server search is only available in Third Sea", "warning")
+        self.NextAttemptAt = os.clock() + 30
+        return false
+    end
+
+    if self.InFlight then
+        if tostring(game.JobId or "") == self.PendingJobId then
+            self.InFlight = false
+            self.PendingJobId = nil
+            self.PendingDeadline = 0
+            self.NextAttemptAt = os.clock() + ARRIVAL_SCAN_DELAY
+            return false
+        end
+        if os.clock() >= self.PendingDeadline then
+            self:_FailPending("The server join timed out; trying another server")
+        else
+            return true
+        end
+    end
+    if self.Fetching or os.clock() < self.NextAttemptAt then
+        return false
+    end
+    self:_BeginFetch()
+    return false
+end
+
+function ServerHopService:Destroy()
+    self.Destroyed = true
+    self.Generation += 1
+    self.Fetching = false
+    if self.TeleportFailureConnection then
+        self.TeleportFailureConnection:Disconnect()
+        self.TeleportFailureConnection = nil
+    end
+end
+
+return ServerHopService
+-- END SOURCE: src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua
+end
+
 __bundleFactories["CustomHub.Features.MainFarm"] = function()
 -- BEGIN SOURCE: src/ReplicatedStorage/CustomHub/Features/MainFarm.lua
 local QuestService = __bundleLoad("CustomHub.Features.Farm.QuestService")
@@ -16019,6 +16921,7 @@ local EnemyService = __bundleLoad("CustomHub.Features.Farm.EnemyService")
 local MovementService = __bundleLoad("CustomHub.Features.Farm.MovementService")
 local CombatService = __bundleLoad("CustomHub.Features.Farm.CombatService")
 local StackTaskQueue = __bundleLoad("CustomHub.Features.Farm.StackTaskQueue")
+local ServerHopService = __bundleLoad("CustomHub.Features.ServerHopService")
 
 local QUEST_DIAGNOSTIC_INTERVAL = 1
 local MAX_QUEST_DIAGNOSTIC_REPORT_LENGTH = 1400
@@ -16099,6 +17002,7 @@ local MainFarm = {
     ActiveStackTask = nil,
     StackTaskStartedAt = 0,
     StackInterruptedFarm = false,
+    ServerHopService = nil,
 }
 
 local function diagnosticScalar(value)
@@ -16287,6 +17191,9 @@ function MainFarm:_BeginStackTask(entry)
     self.ActiveStackTask = entry
     self.StackTaskStartedAt = os.clock()
     self.StackInterruptedFarm = self.MainFarmEnabled == true
+    if self.ServerHopService then
+        self.ServerHopService:OnStackTaskStarted(entry.Kind)
+    end
 
     self:_ClearTarget()
     if self.MovementService then
@@ -17137,6 +18044,17 @@ function MainFarm:_StepStackTasks(session)
     end
 
     if not entry then
+        local hopService = self.ServerHopService
+        if hopService and hopService:HasEnabledModes() then
+            local teleportStarted = hopService:Step()
+            if teleportStarted then
+                return true
+            end
+            if not self.MainFarmEnabled then
+                return true
+            end
+            return false
+        end
         if self.MainFarmEnabled then
             return false
         end
@@ -20751,6 +21669,11 @@ function MainFarm:Initialize(context)
     self.IndraColorState = nil
     self.StackTaskStartedAt = 0
     self.StackInterruptedFarm = false
+    self.ResumeServerHop = false
+    if self.ServerHopService then
+        self.ServerHopService:Destroy()
+        self.ServerHopService = nil
+    end
     if self.StackTaskQueue then
         self.StackTaskQueue:Cleanup()
     end
@@ -20769,6 +21692,20 @@ function MainFarm:Initialize(context)
         )
     else
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
+        local hopEliteRequested = stackSettings.HopForEliteHunter == true
+        local hopBerryRequested = stackSettings.HopForBerries == true
+        if hopEliteRequested
+            and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
+        then
+            stackSettings.HopForEliteHunter = false
+            hopEliteRequested = false
+        end
+        if hopBerryRequested
+            and not isStackTaskAvailableInCurrentSea(context.Compatibility, "EliteHunter")
+        then
+            stackSettings.HopForBerries = false
+            hopBerryRequested = false
+        end
         if stackSettings.AttackRipIndra ~= true then
             stackSettings.PrioritizeRipIndra = false
         end
@@ -20801,6 +21738,9 @@ function MainFarm:Initialize(context)
             { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
         }) do
             local requested = stackSettings[taskDefinition.Setting] == true
+            if taskDefinition.Kind == "EliteHunter" then
+                requested = requested or hopEliteRequested
+            end
             local available = isStackTaskAvailableInCurrentSea(
                 context.Compatibility,
                 taskDefinition.Kind
@@ -20816,8 +21756,21 @@ function MainFarm:Initialize(context)
         )
         self.StackTaskQueue:SetEnabled(
             "Berry",
-            stackSettings.AutoCollectBerries == true
+            stackSettings.AutoCollectBerries == true or hopBerryRequested
         )
+        self.StackTaskQueue:SetEnabled("HopEliteHunter", hopEliteRequested)
+        self.StackTaskQueue:SetEnabled("HopBerry", hopBerryRequested)
+        self.ServerHopService = ServerHopService.new(
+            context.Compatibility,
+            context.SettingsPersistence,
+            function(message, kind)
+                self:_SetStatus(message, kind or "info")
+            end
+        )
+        self.ServerHopService:Initialize(stackSettings)
+        self.ResumeServerHop = self.ServerHopService:ShouldResume()
+        self.ServerHopPausedOnLoad = (hopEliteRequested or hopBerryRequested)
+            and not self.ResumeServerHop
     end
     self.Character = nil
     self.Target = nil
@@ -20981,6 +21934,21 @@ function MainFarm:_StartWorker()
     self:_ResetSpawnSearch(nil)
     local session = self.Session
     task.spawn(self._Run, self, session)
+    return true
+end
+
+function MainFarm:ResumePendingHop()
+    if not self.ResumeServerHop or not self.ServerHopService then
+        return false
+    end
+    local workerReady, workerError = self:_StartWorker()
+    if not workerReady then
+        self.ServerHopService:CancelResume()
+        self.ResumeServerHop = false
+        return false, workerError
+    end
+    self.ServerHopService:ConsumeResume()
+    self.ResumeServerHop = false
     return true
 end
 
@@ -21168,7 +22136,12 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
     elseif not payload and settingKey == "AttackDoughKing" then
         stackSettings.PrioritizeDoughKing = false
     end
-    local queueReady, queueError = self.StackTaskQueue:SetEnabled(kind, payload)
+    local enabledByHop = kind == "EliteHunter"
+            and stackSettings.HopForEliteHunter == true
+        or kind == "Berry"
+            and stackSettings.HopForBerries == true
+    local effectiveEnabled = payload or enabledByHop
+    local queueReady, queueError = self.StackTaskQueue:SetEnabled(kind, effectiveEnabled)
     if not queueReady then
         stackSettings[settingKey] = not payload
         self:_SetStatus("Stack Farming setting error: " .. tostring(queueError), "error")
@@ -21186,7 +22159,10 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         return true
     end
 
-    if self.ActiveStackTask and self.ActiveStackTask.Kind == kind then
+    if not effectiveEnabled
+        and self.ActiveStackTask
+        and self.ActiveStackTask.Kind == kind
+    then
         self:_FinishStackTask(self.ActiveStackTask, "Stack task turned off", false)
     end
     if self.ActiveStackPrep and (
@@ -21201,6 +22177,109 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         self:_StopWorker()
     else
         self:_SetStatus("Stack task disabled: " .. label, "info")
+    end
+    return true
+end
+
+function MainFarm:_SetServerHopEnabled(mode, settingKey, queueKind, localKind, localSettingKey, payload)
+    local stackSettings = self.Context
+        and self.Context.Config
+        and self.Context.Config.StackFarmSettings
+    local service = self.ServerHopService
+    local queue = self.StackTaskQueue
+    if not stackSettings or not service or not queue or type(payload) ~= "boolean" then
+        self:_SetStatus("Server search setting is unavailable or invalid", "error")
+        return false
+    end
+    if stackSettings[settingKey] == payload then
+        return true
+    end
+    if payload and not isStackTaskAvailableInCurrentSea(
+        self.Context.Compatibility,
+        "EliteHunter"
+    ) then
+        self:_SetStatus(
+            "Server search is only available in Third Sea",
+            "error",
+            "Elite Hunter and berry server search only works in Third Sea."
+        )
+        return false
+    end
+
+    local teleportFeature = self.Context and self.Context.TeleportFeature
+    if payload and teleportFeature then
+        if teleportFeature.IsTraveling and teleportFeature:IsTraveling() then
+            teleportFeature:Cancel(
+                "Server search started; current travel was stopped.",
+                false
+            )
+        end
+        if teleportFeature.CancelFarmTravel then
+            teleportFeature:CancelFarmTravel()
+        end
+    end
+
+    local previousQueueEnabled = queue.Enabled[queueKind] == true
+    local previousLocalQueueEnabled = queue.Enabled[localKind] == true
+    stackSettings[settingKey] = payload
+    local serviceReady, serviceError = service:SetEnabled(mode, payload)
+    if not serviceReady then
+        stackSettings[settingKey] = not payload
+        self:_SetStatus(
+            "Server search could not start: " .. tostring(serviceError),
+            "error",
+            tostring(serviceError)
+        )
+        return false
+    end
+
+    local queueReady, queueError = queue:SetEnabled(queueKind, payload)
+    if queueReady then
+        local localTaskEnabled = stackSettings[localSettingKey] == true or payload
+        queueReady, queueError = queue:SetEnabled(localKind, localTaskEnabled)
+    end
+    if not queueReady then
+        stackSettings[settingKey] = not payload
+        service:SetEnabled(mode, not payload)
+        queue:SetEnabled(queueKind, previousQueueEnabled)
+        queue:SetEnabled(localKind, previousLocalQueueEnabled)
+        self:_SetStatus("Server search setting error: " .. tostring(queueError), "error")
+        return false
+    end
+
+    if payload then
+        local workerReady, workerError = self:_StartWorker()
+        if not workerReady then
+            stackSettings[settingKey] = false
+            service:SetEnabled(mode, false)
+            queue:SetEnabled(queueKind, previousQueueEnabled)
+            queue:SetEnabled(localKind, previousLocalQueueEnabled)
+            return false, workerError
+        end
+        self:_SetStatus(
+            mode == "EliteHunter"
+                and "Elite Hunter search enabled"
+                or "Berry search enabled",
+            "success"
+        )
+        return true
+    end
+
+    if self.ActiveStackTask
+        and self.ActiveStackTask.Kind == localKind
+        and stackSettings[localSettingKey] ~= true
+    then
+        self:_FinishStackTask(self.ActiveStackTask, "Server search turned off", false)
+    end
+    if not self.MainFarmEnabled and not self:_HasEnabledStackTasks() then
+        self:_StopWorker()
+    else
+        self:_SetStatus(
+            mode == "EliteHunter"
+                and "Elite Hunter search disabled"
+                or "Berry search disabled",
+            "info"
+        )
     end
     return true
 end
@@ -21257,6 +22336,15 @@ function MainFarm:Handle(actionId, payload)
             "Auto attack Elite Hunter",
             payload
         )
+    elseif actionId == "stack.hop.eliteHunter.enabled" then
+        return self:_SetServerHopEnabled(
+            "EliteHunter",
+            "HopForEliteHunter",
+            "HopEliteHunter",
+            "EliteHunter",
+            "AutoEliteHunter",
+            payload
+        )
     elseif actionId == "stack.ripIndra.enabled" then
         return self:_SetStackTaskEnabled(
             "RipIndra",
@@ -21297,6 +22385,15 @@ function MainFarm:Handle(actionId, payload)
             "Berry",
             "AutoCollectBerries",
             "Collect Berries",
+            payload
+        )
+    elseif actionId == "stack.hop.berry.enabled" then
+        return self:_SetServerHopEnabled(
+            "Berry",
+            "HopForBerries",
+            "HopBerry",
+            "Berry",
+            "AutoCollectBerries",
             payload
         )
     end
@@ -21680,6 +22777,10 @@ function MainFarm:Cleanup()
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
+    if self.ServerHopService then
+        self.ServerHopService:Destroy()
+        self.ServerHopService = nil
+    end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
         self.StackTaskQueue:SetEnabled("EliteHunter", false)
@@ -21689,6 +22790,8 @@ function MainFarm:Cleanup()
         self.StackTaskQueue:SetEnabled("Darkbeard", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
+        self.StackTaskQueue:SetEnabled("HopEliteHunter", false)
+        self.StackTaskQueue:SetEnabled("HopBerry", false)
     end
     self:_StopWorker()
     if self.StackTaskQueue then
@@ -21766,6 +22869,20 @@ function Hub:Start()
 
     if activeHub and activeHub ~= self then
         activeHub:Destroy()
+        self.SettingsPersistence:Load()
+        self.SettingsPersistence:SetState(self.State)
+    end
+
+    local startupSettings = Config.StartupSettings or {}
+    local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
+    local teamSelected, teamSelectionResult = self.Compatibility:SelectTeamIfPrompted(
+        teamName,
+        6
+    )
+    if not teamSelected then
+        self.TeamSelectionWarning = teamSelectionResult
+    else
+        self.TeamSelectionWarning = nil
     end
 
     local initialized, initError = self.FeatureManager:Initialize()
@@ -21801,10 +22918,23 @@ function Hub:Start()
     self.Started = true
     activeHub = self
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
+    local mainFarm = self.FeatureManager
+        and self.FeatureManager.Context
+        and self.FeatureManager.Context.MainFarm
     local settingsWarning = self.SettingsPersistence
         and self.SettingsPersistence:GetStartupWarning()
     if settingsWarning then
         self.State:SetStatus(settingsWarning, "warning")
+    elseif self.TeamSelectionWarning then
+        self.State:SetStatus(
+            "Could not auto-select a team: " .. tostring(self.TeamSelectionWarning),
+            "warning"
+        )
+    elseif mainFarm and mainFarm.ServerHopPausedOnLoad then
+        self.State:SetStatus(
+            "Saved server search is paused after reload. Turn its toggle off and back on to start again.",
+            "warning"
+        )
     end
     return true
 end

@@ -1422,6 +1422,8 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
             or stackSettings.AttackDarkbeard == true
             or stackSettings.TeleportToFruit == true
             or stackSettings.AutoCollectBerries == true
+            or stackSettings.HopForEliteHunter == true
+            or stackSettings.HopForBerries == true
         if mainFarm.MainFarmEnabled then
             self:_SetStatus(
                 "Travel unavailable while Main Farming is active.",
