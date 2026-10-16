@@ -65,7 +65,6 @@ function CombatService.new(compatibility, enemyService)
         AttackIndex = 0,
         FruitAttackIndex = 1,
         NextGunM1At = {},
-        NextFruitM1At = {},
     }, CombatService)
 end
 
@@ -1137,11 +1136,6 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
     end
 
     if weaponCategory == "Blox Fruit" then
-        self.NextFruitM1At = self.NextFruitM1At or {}
-        local now = os.clock()
-        if requiredTool and now < (self.NextFruitM1At[tool] or 0) then
-            return false, "Blox Fruit M1 is cooling down"
-        end
         local fruitCallOk, fruitIssued, fruitResult = pcall(
             self._AttackFruitM1,
             self,
@@ -1154,12 +1148,6 @@ function CombatService:AttackM1(target, range, weaponCategory, attackNoAnimation
             return false, "Fruit M1 request failed: " .. tostring(fruitIssued)
         end
         if fruitIssued then
-            if requiredTool then
-                -- Keep Mastery fruit M1 bounded even when the fruit does not
-                -- expose a readable cooldown value.
-                local cooldown = self:_GetToolCooldown(tool) or 0.25
-                self.NextFruitM1At[tool] = now + cooldown
-            end
             return true, fruitResult
         end
         return false, fruitResult

@@ -287,13 +287,12 @@ require(
     and "tool:FindFirstChild(\"LeftClickRemote\")" in fruit_m1
     and "remoteFunction:InvokeServer(\"TAP\")" in fruit_m1
     and "requiredTool" in mastery_attack_m1
-    and "NextFruitM1At[tool]" in mastery_attack_m1
-    and "self:_GetToolCooldown(tool)" in mastery_attack_m1
-    and "self:_GetToolCooldown(tool) or 0.25" in mastery_attack_m1
+    and "NextFruitM1At" not in mastery_attack_m1
+    and "self:_GetToolCooldown(tool)" not in mastery_attack_m1
     and "pcall(" in mastery_attack_m1
     and "self:FindWeapon(" not in mastery_attack_m1
     and "self:EquipTool(" not in mastery_attack_m1,
-    "Fruit Mastery M1 must use the pinned equipped fruit and a bounded per-tool cooldown",
+    "Fruit Mastery M1 must use the pinned equipped fruit without an extra local cooldown",
 )
 gun_shoot_lookup = function_body(
     COMPATIBILITY,

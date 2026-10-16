@@ -1782,8 +1782,7 @@ function MainFarm:_TryStartFarmSkill(
             masteryFruitM1Error = "Fruit M1 execution failed: " .. tostring(inputSent)
         elseif inputSent then
             masteryFruitM1Result = inputResult
-        elseif inputResult ~= "Blox Fruit M1 is cooling down"
-            and inputResult ~= "Selected mastery weapon is no longer equipped"
+        elseif inputResult ~= "Selected mastery weapon is no longer equipped"
             and inputResult ~= "Selected fruit tool has no supported M1 remote"
             and inputResult ~= "Target is outside ClickM1 range"
         then
