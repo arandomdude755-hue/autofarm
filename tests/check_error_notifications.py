@@ -37,6 +37,9 @@ require(
     'Name = "ActionErrorNotification"' in UI
     and "AnchorPoint = Vector2.new(1, 1)" in UI
     and "UDim2.new(1, -16, 1, -16)" in UI
+    and "MaxSize = Vector2.new(290, 68)" in UI
+    and "MinSize = Vector2.new(190, 54)" in UI
+    and "Size = UDim2.new(0.82, 0, 0, 64)" in UI
     and "self:_ShowNotification(snapshot.notification)" in UI
     and "task.delay(4.5" in UI
     and "function UI:_HideNotification()" in UI

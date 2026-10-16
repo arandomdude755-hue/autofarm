@@ -5684,15 +5684,15 @@ function UI:Mount()
         Name = "ActionErrorNotification",
         AnchorPoint = Vector2.new(1, 1),
         Position = UDim2.new(1, -16, 1, 96),
-        Size = UDim2.new(0.88, 0, 0, 78),
+        Size = UDim2.new(0.82, 0, 0, 64),
         BackgroundColor3 = theme.Header,
         BorderSizePixel = 0,
         Visible = false,
         ZIndex = 50,
     }, self.Gui)
     create("UISizeConstraint", {
-        MinSize = Vector2.new(210, 72),
-        MaxSize = Vector2.new(350, 84),
+        MinSize = Vector2.new(190, 54),
+        MaxSize = Vector2.new(290, 68),
     }, self.NotificationFrame)
     addCorner(self.NotificationFrame, 6)
     self.NotificationStroke = create("UIStroke", {
@@ -5703,8 +5703,8 @@ function UI:Mount()
     }, self.NotificationFrame)
     self.NotificationAccent = create("Frame", {
         Name = "Accent",
-        Position = UDim2.fromOffset(0, 9),
-        Size = UDim2.new(0, 3, 1, -18),
+        Position = UDim2.fromOffset(0, 7),
+        Size = UDim2.new(0, 3, 1, -14),
         BackgroundColor3 = theme.Error,
         BorderSizePixel = 0,
         ZIndex = 51,
@@ -5712,26 +5712,26 @@ function UI:Mount()
     addCorner(self.NotificationAccent, 3)
     self.NotificationTitle = create("TextLabel", {
         Name = "Title",
-        Position = UDim2.fromOffset(14, 7),
-        Size = UDim2.new(1, -26, 0, 21),
+        Position = UDim2.fromOffset(12, 5),
+        Size = UDim2.new(1, -22, 0, 18),
         BackgroundTransparency = 1,
         Font = theme.StrongFont,
         Text = "Action unavailable",
         TextColor3 = theme.Error,
-        TextSize = theme.TextSizes.Control,
+        TextSize = math.max(10, theme.TextSizes.Control - 1),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
         ZIndex = 52,
     }, self.NotificationFrame)
     self.NotificationMessage = create("TextLabel", {
         Name = "Message",
-        Position = UDim2.fromOffset(14, 29),
-        Size = UDim2.new(1, -26, 1, -35),
+        Position = UDim2.fromOffset(12, 24),
+        Size = UDim2.new(1, -22, 1, -29),
         BackgroundTransparency = 1,
         Font = theme.Font,
         Text = "",
         TextColor3 = theme.Text,
-        TextSize = theme.TextSizes.Control,
+        TextSize = math.max(9, theme.TextSizes.Control - 2),
         TextWrapped = true,
         TextTruncate = Enum.TextTruncate.AtEnd,
         TextXAlignment = Enum.TextXAlignment.Left,
