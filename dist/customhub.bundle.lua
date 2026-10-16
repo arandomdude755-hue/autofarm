@@ -1352,6 +1352,7 @@ local TITLE_LOCKED_CONFIRMATION_DELAY = 0.25
 local TITLE_STATE_CACHE_TTL = 5
 local TITLE_STATE_UNKNOWN_CACHE_TTL = 1
 local AUTO_EXECUTE_SOURCE_URL = "https://raw.githubusercontent.com/arandomdude755-hue/autofarm/dev/dist/customhub.bundle.lua"
+local AUTO_EXECUTE_BUNDLE_PATH = "CustomHub/customhub.bundle.lua"
 local AUTO_EXECUTE_ENABLED_KEY = "__CUSTOM_HUB_AUTO_EXECUTE"
 local AUTO_EXECUTE_GENERATION_KEY = "__CUSTOM_HUB_AUTO_EXECUTE_GENERATION"
 
@@ -1418,6 +1419,105 @@ function Compatibility:_GetQueueOnTeleport()
     return nil, environment, "queue-on-teleport API is unavailable"
 end
 
+function Compatibility:_FetchAutoExecuteSource(url)
+    local httpOk, source = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if httpOk and type(source) == "string" and source ~= "" then
+        return source, "game:HttpGet"
+    end
+
+    local lastError = httpOk and "HTTP response was empty" or tostring(source)
+    local environment = self:_GetExecutorEnvironment()
+    local namespaces = {}
+    if type(environment) == "table" then
+        table.insert(namespaces, environment)
+    end
+    if type(_G) == "table" and _G ~= environment then
+        table.insert(namespaces, _G)
+    end
+    for _, namespaceName in ipairs({ "syn", "fluxus", "http" }) do
+        local namespace
+        pcall(function()
+            namespace = environment[namespaceName] or _G[namespaceName]
+        end)
+        if type(namespace) == "table" then
+            table.insert(namespaces, namespace)
+        end
+    end
+
+    local candidates = {}
+    local seen = {}
+    for _, namespace in ipairs(namespaces) do
+        for _, name in ipairs({ "request", "http_request" }) do
+            local requestFunction
+            pcall(function()
+                requestFunction = namespace[name]
+            end)
+            if type(requestFunction) == "function" and not seen[requestFunction] then
+                seen[requestFunction] = true
+                table.insert(candidates, requestFunction)
+            end
+        end
+    end
+
+    for _, requestFunction in ipairs(candidates) do
+        local requestOk, response = pcall(requestFunction, {
+            Url = url,
+            Method = "GET",
+        })
+        if requestOk then
+            local body = type(response) == "string"
+                and response
+                or type(response) == "table"
+                    and (response.Body or response.body)
+            local status = type(response) == "table"
+                and tonumber(response.StatusCode or response.Status or response.status_code)
+            if type(body) == "string"
+                and body ~= ""
+                and (not status or status >= 200 and status < 300)
+            then
+                return body, "executor HTTP request"
+            end
+        else
+            lastError = tostring(response)
+        end
+
+        local rawOk, rawResponse = pcall(requestFunction, url)
+        if rawOk then
+            local body = type(rawResponse) == "string"
+                and rawResponse
+                or type(rawResponse) == "table"
+                    and (rawResponse.Body or rawResponse.body)
+            if type(body) == "string" and body ~= "" then
+                return body, "executor HTTP request"
+            end
+        else
+            lastError = tostring(rawResponse)
+        end
+    end
+
+    return nil, lastError
+end
+
+function Compatibility:_StageAutoExecuteBundle()
+    local storage, storageError = self:GetLocalSettingsStorage()
+    if not storage or type(storage.Write) ~= "function" then
+        return false, storageError or "Local file APIs are unavailable"
+    end
+
+    local source, fetchError = self:_FetchAutoExecuteSource(AUTO_EXECUTE_SOURCE_URL)
+    if type(source) ~= "string" or source == "" then
+        return false, fetchError or "The bundle download was empty"
+    end
+
+    local writeOk, writeError = storage.Write(AUTO_EXECUTE_BUNDLE_PATH, source)
+    if not writeOk then
+        return false, writeError or "Could not save the local bundle copy"
+    end
+    return true
+end
+
 function Compatibility:SetAutoExecuteEnabled(enabled)
     if type(enabled) ~= "boolean" then
         return false, "Auto Execute setting is invalid"
@@ -1450,6 +1550,11 @@ function Compatibility:SetAutoExecuteEnabled(enabled)
     end
 
     local queuedSource = string.format([[
+local sourceUrl = %q
+local bundlePath = %q
+local enabledKey = %q
+local generationKey = %q
+local expectedGeneration = %d
 local environment
 local getEnvironment = getgenv
 pcall(function()
@@ -1460,46 +1565,233 @@ end)
 if type(environment) ~= "table" then
     environment = _G
 end
-if type(environment) ~= "table"
-    or environment.%s ~= true
-    or tonumber(environment.%s) ~= %d
-then
+local autoExecuteEnabled = type(environment) == "table"
+    and environment[enabledKey]
+local currentGeneration = type(environment) == "table"
+    and tonumber(environment[generationKey])
+if autoExecuteEnabled == false
+    or currentGeneration ~= nil and currentGeneration ~= expectedGeneration then
     return
 end
+
 task.spawn(function()
-    local startedAt = os.clock()
-    while not game:IsLoaded() and os.clock() - startedAt < 60 do
-        task.wait(0.25)
+    local function waitFor(predicate, timeout)
+        local deadline = os.clock() + timeout
+        repeat
+            local ok, result = pcall(predicate)
+            if ok and result then
+                return result
+            end
+            task.wait(0.25)
+        until os.clock() >= deadline
+        return nil
     end
-    local Players = game:GetService("Players")
-    while not Players.LocalPlayer
-        or not Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    do
-        if os.clock() - startedAt >= 60 then
-            return
+
+    local function report(message)
+        warn("[Custom Hub Auto Execute] " .. message)
+        local starterGui = game:GetService("StarterGui")
+        for _ = 1, 20 do
+            local shown = pcall(function()
+                starterGui:SetCore("SendNotification", {
+                    Title = "Custom Hub Auto Execute",
+                    Text = message,
+                    Duration = 8,
+                })
+            end)
+            if shown then
+                return
+            end
+            task.wait(0.25)
         end
-        task.wait(0.25)
     end
-    local ok, source = pcall(function()
-        return game:HttpGet("%s")
-    end)
-    if not ok or type(source) ~= "string" then
-        warn("Custom Hub Auto Execute could not download the current bundle")
+
+    if not waitFor(function()
+        return game:IsLoaded()
+    end, 120) then
+        warn("[Custom Hub Auto Execute] Timed out waiting for the new game session.")
         return
     end
-    local compileOk, chunk = pcall(function()
-        return loadstring(source)
-    end)
-    if not compileOk or type(chunk) ~= "function" then
-        warn("Custom Hub Auto Execute could not compile the downloaded bundle")
+
+    local Players = game:GetService("Players")
+    local player = waitFor(function()
+        return Players.LocalPlayer
+    end, 60)
+    if not player then
+        warn("[Custom Hub Auto Execute] LocalPlayer was unavailable.")
         return
     end
-    local runOk = pcall(chunk)
+
+    local playerGui = waitFor(function()
+        return player:FindFirstChildOfClass("PlayerGui")
+    end, 60)
+    if not playerGui then
+        warn("[Custom Hub Auto Execute] PlayerGui was unavailable.")
+        return
+    end
+
+    local source
+    local sourceKind
+    local readFileFunction = readfile
+    if type(readFileFunction) == "function" then
+        local readOk, localSource = pcall(readFileFunction, bundlePath)
+        if readOk and type(localSource) == "string" and localSource ~= "" then
+            source = localSource
+            sourceKind = "local bundle"
+        end
+    end
+
+    if not source then
+        local httpOk, httpSource = pcall(function()
+            return game:HttpGet(sourceUrl)
+        end)
+        if httpOk and type(httpSource) == "string" and httpSource ~= "" then
+            source = httpSource
+            sourceKind = "URL"
+        else
+            local lastError = httpOk and "HTTP response was empty" or tostring(httpSource)
+            local namespaces = {}
+            if type(environment) == "table" then
+                table.insert(namespaces, environment)
+            end
+            if type(_G) == "table" and _G ~= environment then
+                table.insert(namespaces, _G)
+            end
+            for _, namespaceName in ipairs({ "syn", "fluxus", "http" }) do
+                local namespace
+                pcall(function()
+                    namespace = environment[namespaceName] or _G[namespaceName]
+                end)
+                if type(namespace) == "table" then
+                    table.insert(namespaces, namespace)
+                end
+            end
+
+            local candidates = {}
+            local seen = {}
+            for _, namespace in ipairs(namespaces) do
+                for _, name in ipairs({ "request", "http_request" }) do
+                    local requestFunction
+                    pcall(function()
+                        requestFunction = namespace[name]
+                    end)
+                    if type(requestFunction) == "function"
+                        and not seen[requestFunction]
+                    then
+                        seen[requestFunction] = true
+                        table.insert(candidates, requestFunction)
+                    end
+                end
+            end
+
+            for _, requestFunction in ipairs(candidates) do
+                local requestOk, response = pcall(requestFunction, {
+                    Url = sourceUrl,
+                    Method = "GET",
+                })
+                if requestOk then
+                    local body = type(response) == "string"
+                        and response
+                        or type(response) == "table"
+                            and (response.Body or response.body)
+                    local status = type(response) == "table"
+                        and tonumber(response.StatusCode or response.Status or response.status_code)
+                    if type(body) == "string"
+                        and body ~= ""
+                        and (not status or status >= 200 and status < 300)
+                    then
+                        source = body
+                        sourceKind = "executor HTTP request"
+                        break
+                    end
+                else
+                    lastError = tostring(response)
+                end
+
+                local rawOk, rawResponse = pcall(requestFunction, sourceUrl)
+                if rawOk then
+                    local body = type(rawResponse) == "string"
+                        and rawResponse
+                        or type(rawResponse) == "table"
+                            and (rawResponse.Body or rawResponse.body)
+                    if type(body) == "string" and body ~= "" then
+                        source = body
+                        sourceKind = "executor HTTP request"
+                        break
+                    end
+                else
+                    lastError = tostring(rawResponse)
+                end
+            end
+
+            if not source then
+                report("Could not download the bundle: " .. tostring(lastError))
+                return
+            end
+        end
+    end
+
+    local function compile(sourceText)
+        local compiler = loadstring
+        if type(compiler) ~= "function" then
+            return nil, "loadstring is unavailable"
+        end
+        local compileOk, chunk, compileError = pcall(compiler, sourceText)
+        if not compileOk then
+            return nil, tostring(chunk)
+        end
+        if type(chunk) ~= "function" then
+            return nil, tostring(compileError or "The compiler returned no script")
+        end
+        return chunk
+    end
+
+    local chunk, compileError = compile(source)
+    if not chunk and sourceKind == "local bundle" then
+        local fetchOk, freshSource = pcall(function()
+            return game:HttpGet(sourceUrl)
+        end)
+        if fetchOk and type(freshSource) == "string" and freshSource ~= "" then
+            source = freshSource
+            sourceKind = "URL"
+            chunk, compileError = compile(source)
+        else
+            compileError = tostring(compileError)
+                .. "; URL refresh failed: "
+                .. tostring(freshSource)
+        end
+    end
+    if not chunk then
+        report("Could not compile the " .. tostring(sourceKind or "downloaded")
+            .. " bundle: " .. tostring(compileError))
+        return
+    end
+
+    if sourceKind == "URL" then
+        pcall(function()
+            if type(writefile) == "function" then
+                writefile(bundlePath, source)
+            end
+        end)
+    end
+
+    local runOk, runError = pcall(chunk)
     if not runOk then
-        warn("Custom Hub Auto Execute failed while starting the downloaded bundle")
+        report("Bundle execution failed: " .. tostring(runError))
+        return
+    end
+
+    local loadedGui = waitFor(function()
+        local currentGui = player:FindFirstChildOfClass("PlayerGui")
+        return currentGui and currentGui:FindFirstChild("CustomHubShell")
+    end, 20)
+    if loadedGui then
+        report("Custom Hub loaded after teleport.")
+    else
+        report("Bundle ran, but the hub window did not appear. Check executor errors.")
     end
 end)
-]], AUTO_EXECUTE_ENABLED_KEY, AUTO_EXECUTE_GENERATION_KEY, generation, AUTO_EXECUTE_SOURCE_URL)
+]], AUTO_EXECUTE_SOURCE_URL, AUTO_EXECUTE_BUNDLE_PATH,
+    AUTO_EXECUTE_ENABLED_KEY, AUTO_EXECUTE_GENERATION_KEY, generation)
 
     local queueOk, queueResult = pcall(queueFunction, queuedSource)
     if not queueOk or queueResult == false then
@@ -1509,7 +1801,17 @@ end)
         end)
         return false, "The executor rejected the queued reload"
     end
-    return true, "Auto Execute will reload the current Custom Hub bundle after teleport"
+    task.spawn(function()
+        local staged, stageError = self:_StageAutoExecuteBundle()
+        if not staged then
+            warn(
+                "[Custom Hub Auto Execute] Local bundle staging failed; "
+                    .. "the queued loader will use its URL fallback: "
+                    .. tostring(stageError)
+            )
+        end
+    end)
+    return true, "Auto Execute queued the current Custom Hub bundle after teleport"
 end
 
 function Compatibility:QueueAutoExecuteProbe()
@@ -3766,7 +4068,7 @@ function FeatureManager:Dispatch(actionId, payload)
         self:_ScheduleSettingsSave()
         self.State:SetStatus(
             payload
-                and "Auto Execute enabled; Custom Hub will reload after teleport."
+                and "Auto Execute queued; the next session will report whether the hub loaded."
                 or "Auto Execute disabled; any queued reload will be skipped.",
             "success"
         )

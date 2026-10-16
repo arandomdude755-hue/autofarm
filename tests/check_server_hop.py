@@ -128,6 +128,12 @@ require(
     and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
     and "function Compatibility:SetAutoExecuteEnabled(enabled)" in COMPATIBILITY
     and "function Compatibility:QueueAutoExecuteProbe()" in COMPATIBILITY
+    and 'AUTO_EXECUTE_BUNDLE_PATH = "CustomHub/customhub.bundle.lua"' in COMPATIBILITY
+    and "function Compatibility:_StageAutoExecuteBundle()" in COMPATIBILITY
+    and "pcall(readFileFunction, bundlePath)" in COMPATIBILITY
+    and "autoExecuteEnabled == false" in COMPATIBILITY
+    and "currentGeneration ~= nil and currentGeneration ~= expectedGeneration" in COMPATIBILITY
+    and "Bundle ran, but the hub window did not appear." in COMPATIBILITY
     and 'starterGui:SetCore("SendNotification"' in COMPATIBILITY
     and "startupSettings.AutoExecute == true" in (
         ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"

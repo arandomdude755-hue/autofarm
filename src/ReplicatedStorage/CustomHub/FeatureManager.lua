@@ -119,7 +119,7 @@ function FeatureManager:Dispatch(actionId, payload)
         self:_ScheduleSettingsSave()
         self.State:SetStatus(
             payload
-                and "Auto Execute enabled; Custom Hub will reload after teleport."
+                and "Auto Execute queued; the next session will report whether the hub loaded."
                 or "Auto Execute disabled; any queued reload will be skipped.",
             "success"
         )
