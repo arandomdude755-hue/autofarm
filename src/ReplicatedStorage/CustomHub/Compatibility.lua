@@ -180,14 +180,34 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         return false, "PlayerGui is unavailable"
     end
 
-    local timeout = math.clamp(tonumber(timeoutSeconds) or 6, 0, 8)
+    if player.Team then
+        return true, "A team is already selected"
+    end
+
+    local timeout = math.clamp(tonumber(timeoutSeconds) or 20, 0, 30)
     local deadline = os.clock() + timeout
     local attempted = false
+    local sawPrompt = false
+    local promptClosedAt = nil
     while os.clock() <= deadline do
+        if not game:IsLoaded() or not player:FindFirstChild("DataLoaded") then
+            task.wait(0.1)
+            continue
+        end
+
+        if player.Team then
+            return true, "Team selected"
+        end
+
         local main = playerGui:FindFirstChild("Main (minimal)")
-            or playerGui:FindFirstChild("Main")
         local chooseTeam = main and main:FindFirstChild("ChooseTeam")
+        if not chooseTeam then
+            main = playerGui:FindFirstChild("Main")
+            chooseTeam = main and main:FindFirstChild("ChooseTeam")
+        end
         if chooseTeam and chooseTeam.Visible then
+            sawPrompt = true
+            promptClosedAt = nil
             local container = chooseTeam:FindFirstChild("Container")
             local teamCard = container and container:FindFirstChild(teamName)
             local frame = teamCard and teamCard:FindFirstChild("Frame")
@@ -198,6 +218,9 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
 
             if button then
                 attempted = true
+                pcall(function()
+                    button.Selectable = true
+                end)
                 local inputOk = pcall(function()
                     local guiService = game:GetService("GuiService")
                     local inputManager = game:GetService("VirtualInputManager")
@@ -214,45 +237,45 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
                         false,
                         button
                     )
-                    guiService.SelectedObject = nil
                 end)
-                if not inputOk then
+                if not inputOk or chooseTeam.Visible then
                     pcall(function()
                         button:Activate()
                     end)
-                else
-                    task.wait(0.1)
-                    if chooseTeam.Visible then
-                        pcall(function()
-                            button:Activate()
-                        end)
-                    end
                 end
-                task.wait(0.35)
+                task.wait(0.4)
+                pcall(function()
+                    if game:GetService("GuiService").SelectedObject == button then
+                        game:GetService("GuiService").SelectedObject = nil
+                    end
+                end)
             else
                 task.wait(0.1)
             end
-        elseif player.Team then
-            return true, "A team is already selected"
         else
+            if sawPrompt then
+                promptClosedAt = promptClosedAt or os.clock()
+                if os.clock() - promptClosedAt >= 0.75 then
+                    return false, "Team prompt closed before selection was confirmed"
+                end
+            end
             task.wait(0.1)
         end
 
-        if not (chooseTeam and chooseTeam.Visible) then
-            if player.Team then
-                return true, "Team selected"
-            elseif attempted then
-                return true, "Team selection accepted"
-            end
+        if player.Team then
+            return true, "Team selected"
         end
     end
 
     if player.Team then
         return true, "A team is already selected"
     end
-    return false, attempted
-        and ("Could not confirm the " .. teamName .. " team selection")
-        or "Team selection screen was not found"
+    if attempted then
+        return false, "Could not confirm the " .. teamName .. " team selection"
+    elseif sawPrompt then
+        return false, "The team selection screen did not contain a usable button"
+    end
+    return false, "Team selection screen was not found after game data loaded"
 end
 
 function Compatibility:GetPublicServers(cursor)

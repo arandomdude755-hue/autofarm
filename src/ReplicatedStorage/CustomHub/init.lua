@@ -30,6 +30,8 @@ function Hub.new()
         UI = nil,
         Started = false,
         Destroying = false,
+        TeamSelectionGeneration = 0,
+        TeamSelectionTask = nil,
     }, Hub)
 end
 
@@ -48,18 +50,6 @@ function Hub:Start()
         activeHub:Destroy()
         self.SettingsPersistence:Load()
         self.SettingsPersistence:SetState(self.State)
-    end
-
-    local startupSettings = Config.StartupSettings or {}
-    local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
-    local teamSelected, teamSelectionResult = self.Compatibility:SelectTeamIfPrompted(
-        teamName,
-        6
-    )
-    if not teamSelected then
-        self.TeamSelectionWarning = teamSelectionResult
-    else
-        self.TeamSelectionWarning = nil
     end
 
     local initialized, initError = self.FeatureManager:Initialize()
@@ -95,6 +85,31 @@ function Hub:Start()
     self.Started = true
     activeHub = self
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
+    local startupSettings = Config.StartupSettings or {}
+    local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
+    self.TeamSelectionGeneration += 1
+    local teamSelectionGeneration = self.TeamSelectionGeneration
+    self.TeamSelectionTask = task.spawn(function()
+        local selected, selectionResult = self.Compatibility:SelectTeamIfPrompted(
+            teamName,
+            25
+        )
+        if self.Destroying
+            or not self.Started
+            or self.TeamSelectionGeneration ~= teamSelectionGeneration
+        then
+            return
+        end
+        if not selected then
+            self.TeamSelectionWarning = selectionResult
+            self.State:SetStatus(
+                "Auto team selection couldn't finish: " .. tostring(selectionResult),
+                "warning"
+            )
+        else
+            self.TeamSelectionWarning = nil
+        end
+    end)
     local mainFarm = self.FeatureManager
         and self.FeatureManager.Context
         and self.FeatureManager.Context.MainFarm
@@ -102,11 +117,6 @@ function Hub:Start()
         and self.SettingsPersistence:GetStartupWarning()
     if settingsWarning then
         self.State:SetStatus(settingsWarning, "warning")
-    elseif self.TeamSelectionWarning then
-        self.State:SetStatus(
-            "Could not auto-select a team: " .. tostring(self.TeamSelectionWarning),
-            "warning"
-        )
     elseif mainFarm and mainFarm.ServerHopPausedOnLoad then
         self.State:SetStatus(
             "Saved server search is paused after reload. Turn its toggle off and back on to start again.",
@@ -121,6 +131,11 @@ function Hub:Destroy()
         return
     end
     self.Destroying = true
+    self.TeamSelectionGeneration += 1
+    if self.TeamSelectionTask then
+        pcall(task.cancel, self.TeamSelectionTask)
+        self.TeamSelectionTask = nil
+    end
 
     if self.UI then
         self.UI:Destroy()

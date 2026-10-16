@@ -25,12 +25,19 @@ local function validJobId(value)
         and not value:find("[%c]")
 end
 
-function ServerHopService.new(compatibility, settingsPersistence, setStatus, coordinator)
+function ServerHopService.new(
+    compatibility,
+    settingsPersistence,
+    setStatus,
+    coordinator,
+    notifyUser
+)
     return setmetatable({
         Compatibility = compatibility,
         SettingsPersistence = settingsPersistence,
         SetStatus = setStatus,
         Coordinator = coordinator,
+        NotifyUser = notifyUser,
         CoordinatorLease = nil,
         Settings = nil,
         Session = nil,
@@ -509,6 +516,15 @@ function ServerHopService:_BeginFetch()
         self.PendingDeadline = os.clock() + TELEPORT_TIMEOUT
         self.InFlight = true
         self:_SetStatus("Joining another public server to check for targets", "info")
+        if type(self.NotifyUser) == "function" then
+            pcall(
+                self.NotifyUser,
+                "Server hopping",
+                "Joining a new server to look for " .. self:_ModeLabel() .. ".",
+                "info",
+                { Key = "server-hop", Cooldown = 3 }
+            )
+        end
         local teleportCallOk, joined, joinError = pcall(function()
             return self.Compatibility:TeleportToPublicServer(jobId)
         end)

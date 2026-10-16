@@ -169,6 +169,9 @@ require('TabSubsections = {' in CONFIG
         and 'function UI:_LayoutNavigation(animate)' in UI_MODULE
         and 'function UI:_SelectSubsection(tabName, subsection)' in UI_MODULE
         and 'self:_SelectSubsection(tabName, subsections[1])' in UI_MODULE
+        and 'self.CollapsedTabs[tabName] = true' in UI_MODULE
+        and 'self.CollapsedTabs[parentTab] = nil' in UI_MODULE
+        and 'self.ExpandedTabs[tabName] == true' in UI_MODULE
         and 'tabName == snapshot.selectedTab or tabName == selectedParent' in UI_MODULE
         and 'self.ExpandedTabs[expandedTab] = expandedTab == parentTab' in UI_MODULE
         and 'top = top + layout.SidebarChildRowHeight + layout.SidebarRowGap' in UI_MODULE

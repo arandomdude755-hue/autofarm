@@ -130,6 +130,31 @@ function State:ClearNotification(key)
     return true
 end
 
+function State:PushNotification(title, message, kind, options)
+    options = type(options) == "table" and options or {}
+    local key = tostring(options.Key or (tostring(title) .. "\0" .. tostring(message)))
+    local now = os.clock()
+    local cooldown = math.max(0, tonumber(options.Cooldown) or 4)
+    local lastShownAt = self._notificationLastShownAt[key]
+    if lastShownAt and now - lastShownAt < cooldown then
+        return false
+    end
+
+    self._notificationLastShownAt[key] = now
+    self._activeNotificationKey = key
+    self._notificationSerial += 1
+    self._values.notification = {
+        Id = self._notificationSerial,
+        Key = key,
+        Title = tostring(title or "Notice"),
+        Message = tostring(message or ""),
+        Kind = (kind == "error" or kind == "warning") and kind or "info",
+        Persistent = options.Persistent == true,
+    }
+    self:_Notify()
+    return true
+end
+
 function State:SetStatus(message, kind, playerMessage, notificationOptions)
     local text = tostring(message)
     if #text > self._maxStatusCharacters then

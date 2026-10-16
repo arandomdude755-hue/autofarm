@@ -24,6 +24,7 @@ require(
     and '"That action couldn\'t be completed. Check the hub status line for details."' in STATE
     and "local cooldown = tonumber(options.Cooldown) or 30" in STATE
     and "function State:ClearNotification(key)" in STATE
+    and "function State:PushNotification(title, message, kind, options)" in STATE
     and "self._values.notification = nil" in STATE,
     "State must deduplicate repeated issues, clear resolved alerts, and keep messages player-readable",
 )
@@ -46,6 +47,11 @@ require(
     and "if self.CurrentNotificationPersistent then" in UI
     and "theme.Error" in UI,
     "the error toast must use the hub theme, appear bottom-right, and support persistent resolution-aware alerts",
+)
+require(
+    'accent = theme.Accent' in UI
+    and 'notification.Kind == "warning"' in UI,
+    "informational notifications should use the hub accent rather than warning colors",
 )
 require(
     'Key = "indra_missing_haki"' in MAIN_FARM

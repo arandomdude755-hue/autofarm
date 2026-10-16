@@ -154,6 +154,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         TabSubsectionButtons = {},
         TabSubsectionLabels = {},
         ExpandedTabs = {},
+        CollapsedTabs = {},
         ActiveSubsectionTab = nil,
         ActiveSubsectionLabel = nil,
         ToggleLabels = {},
@@ -615,12 +616,31 @@ function UI:_Refresh(snapshot)
     local navigationChanged = false
     for tabName in pairs(self.ExpandedTabs) do
         local shouldExpand = tabName == selectedParent
+            and self.CollapsedTabs[tabName] ~= true
+        if not shouldExpand and (self.SearchQuery or "") ~= "" then
+            for _, subsection in ipairs(
+                (self.Config.TabSubsections or {})[tabName] or {}
+            ) do
+                if string.find(
+                    normalizeSearchText(subsection.Label),
+                    self.SearchQuery,
+                    1,
+                    true
+                ) then
+                    shouldExpand = true
+                    break
+                end
+            end
+        end
         if self.ExpandedTabs[tabName] ~= shouldExpand then
             self.ExpandedTabs[tabName] = shouldExpand
             navigationChanged = true
         end
     end
-    if selectedParent and self.ExpandedTabs[selectedParent] ~= true then
+    if selectedParent
+        and self.CollapsedTabs[selectedParent] ~= true
+        and self.ExpandedTabs[selectedParent] ~= true
+    then
         self.ExpandedTabs[selectedParent] = true
         navigationChanged = true
     end
@@ -824,7 +844,14 @@ function UI:_ShowNotification(notification)
     frame.Position = UDim2.new(1, -16, 1, 96)
     self.NotificationTitle.Text = notification.Title or "Action unavailable"
     self.NotificationMessage.Text = tostring(notification.Message or "")
-    local accent = notification.Kind == "error" and theme.Error or theme.Warning
+    local accent
+    if notification.Kind == "error" then
+        accent = theme.Error
+    elseif notification.Kind == "warning" then
+        accent = theme.Warning
+    else
+        accent = theme.Accent
+    end
     self.NotificationAccent.BackgroundColor3 = accent
     self.NotificationStroke.Color = accent
     self.NotificationTitle.TextColor3 = accent
@@ -1381,6 +1408,9 @@ function UI:_SelectTab(tabName)
     end
 
     local parentTab, subsection = self:_GetSubsectionForPage(tabName)
+    if parentTab then
+        self.CollapsedTabs[parentTab] = nil
+    end
     for expandedTab in pairs(self.ExpandedTabs) do
         self.ExpandedTabs[expandedTab] = expandedTab == parentTab
     end
@@ -3079,7 +3109,24 @@ function UI:Mount()
         end
         self:_Connect(self.PersistentConnections, button.Activated, function()
             if #subsections > 0 then
-                self:_SelectSubsection(tabName, subsections[1])
+                if self.ExpandedTabs[tabName] == true then
+                    self.ExpandedTabs[tabName] = false
+                    self.CollapsedTabs[tabName] = true
+                    self:_LayoutNavigation(true)
+                    return
+                end
+
+                self.CollapsedTabs[tabName] = nil
+                local selectedParent = self:_GetSubsectionForPage(
+                    self.State:GetSnapshot().selectedTab
+                )
+                if selectedParent == tabName then
+                    self.ExpandedTabs[tabName] = true
+                    self:_LayoutNavigation(true)
+                    self:_EnsureExpandedNavigationVisible(tabName)
+                else
+                    self:_SelectSubsection(tabName, subsections[1])
+                end
             else
                 self:_SelectTab(tabName)
             end
@@ -3391,6 +3438,7 @@ function UI:Destroy()
     self.TabSubsectionButtons = {}
     self.TabSubsectionLabels = {}
     self.ExpandedTabs = {}
+    self.CollapsedTabs = {}
     self.ActiveSubsectionTab = nil
     self.ActiveSubsectionLabel = nil
     self.TabArrows = {}

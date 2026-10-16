@@ -4956,7 +4956,13 @@ function MainFarm:Initialize(context)
             function(message, kind)
                 self:_SetStatus(message, kind or "info")
             end,
-            context.TaskCoordinator
+            context.TaskCoordinator,
+            function(title, message, kind, options)
+                local state = context.State
+                if state and type(state.PushNotification) == "function" then
+                    state:PushNotification(title, message, kind, options)
+                end
+            end
         )
         self.ServerHopService:Initialize(stackSettings)
         self.ResumeServerHop = self.ServerHopService:ShouldResume()

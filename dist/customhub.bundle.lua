@@ -1233,6 +1233,31 @@ function State:ClearNotification(key)
     return true
 end
 
+function State:PushNotification(title, message, kind, options)
+    options = type(options) == "table" and options or {}
+    local key = tostring(options.Key or (tostring(title) .. "\0" .. tostring(message)))
+    local now = os.clock()
+    local cooldown = math.max(0, tonumber(options.Cooldown) or 4)
+    local lastShownAt = self._notificationLastShownAt[key]
+    if lastShownAt and now - lastShownAt < cooldown then
+        return false
+    end
+
+    self._notificationLastShownAt[key] = now
+    self._activeNotificationKey = key
+    self._notificationSerial += 1
+    self._values.notification = {
+        Id = self._notificationSerial,
+        Key = key,
+        Title = tostring(title or "Notice"),
+        Message = tostring(message or ""),
+        Kind = (kind == "error" or kind == "warning") and kind or "info",
+        Persistent = options.Persistent == true,
+    }
+    self:_Notify()
+    return true
+end
+
 function State:SetStatus(message, kind, playerMessage, notificationOptions)
     local text = tostring(message)
     if #text > self._maxStatusCharacters then
@@ -1476,14 +1501,34 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         return false, "PlayerGui is unavailable"
     end
 
-    local timeout = math.clamp(tonumber(timeoutSeconds) or 6, 0, 8)
+    if player.Team then
+        return true, "A team is already selected"
+    end
+
+    local timeout = math.clamp(tonumber(timeoutSeconds) or 20, 0, 30)
     local deadline = os.clock() + timeout
     local attempted = false
+    local sawPrompt = false
+    local promptClosedAt = nil
     while os.clock() <= deadline do
+        if not game:IsLoaded() or not player:FindFirstChild("DataLoaded") then
+            task.wait(0.1)
+            continue
+        end
+
+        if player.Team then
+            return true, "Team selected"
+        end
+
         local main = playerGui:FindFirstChild("Main (minimal)")
-            or playerGui:FindFirstChild("Main")
         local chooseTeam = main and main:FindFirstChild("ChooseTeam")
+        if not chooseTeam then
+            main = playerGui:FindFirstChild("Main")
+            chooseTeam = main and main:FindFirstChild("ChooseTeam")
+        end
         if chooseTeam and chooseTeam.Visible then
+            sawPrompt = true
+            promptClosedAt = nil
             local container = chooseTeam:FindFirstChild("Container")
             local teamCard = container and container:FindFirstChild(teamName)
             local frame = teamCard and teamCard:FindFirstChild("Frame")
@@ -1494,6 +1539,9 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
 
             if button then
                 attempted = true
+                pcall(function()
+                    button.Selectable = true
+                end)
                 local inputOk = pcall(function()
                     local guiService = game:GetService("GuiService")
                     local inputManager = game:GetService("VirtualInputManager")
@@ -1510,45 +1558,45 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
                         false,
                         button
                     )
-                    guiService.SelectedObject = nil
                 end)
-                if not inputOk then
+                if not inputOk or chooseTeam.Visible then
                     pcall(function()
                         button:Activate()
                     end)
-                else
-                    task.wait(0.1)
-                    if chooseTeam.Visible then
-                        pcall(function()
-                            button:Activate()
-                        end)
-                    end
                 end
-                task.wait(0.35)
+                task.wait(0.4)
+                pcall(function()
+                    if game:GetService("GuiService").SelectedObject == button then
+                        game:GetService("GuiService").SelectedObject = nil
+                    end
+                end)
             else
                 task.wait(0.1)
             end
-        elseif player.Team then
-            return true, "A team is already selected"
         else
+            if sawPrompt then
+                promptClosedAt = promptClosedAt or os.clock()
+                if os.clock() - promptClosedAt >= 0.75 then
+                    return false, "Team prompt closed before selection was confirmed"
+                end
+            end
             task.wait(0.1)
         end
 
-        if not (chooseTeam and chooseTeam.Visible) then
-            if player.Team then
-                return true, "Team selected"
-            elseif attempted then
-                return true, "Team selection accepted"
-            end
+        if player.Team then
+            return true, "Team selected"
         end
     end
 
     if player.Team then
         return true, "A team is already selected"
     end
-    return false, attempted
-        and ("Could not confirm the " .. teamName .. " team selection")
-        or "Team selection screen was not found"
+    if attempted then
+        return false, "Could not confirm the " .. teamName .. " team selection"
+    elseif sawPrompt then
+        return false, "The team selection screen did not contain a usable button"
+    end
+    return false, "Team selection screen was not found after game data loaded"
 end
 
 function Compatibility:GetPublicServers(cursor)
@@ -3273,9 +3321,20 @@ function FeatureManager:Dispatch(actionId, payload)
         self:_ScheduleSettingsSave()
         local compatibility = self.Context.Compatibility
         if compatibility then
-            compatibility:SelectTeamIfPrompted(payload, 0.2)
+            task.spawn(function()
+                local selected, result = compatibility:SelectTeamIfPrompted(
+                    payload,
+                    20
+                )
+                if not selected then
+                    self.State:SetStatus(
+                        "Team selection couldn't finish: " .. tostring(result),
+                        "warning"
+                    )
+                end
+            end)
         end
-        self.State:SetStatus("Team to auto-select: " .. payload, "success")
+        self.State:SetStatus("Saved team to auto-select: " .. payload, "success")
         return true
     end
 
@@ -3535,6 +3594,7 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         TabSubsectionButtons = {},
         TabSubsectionLabels = {},
         ExpandedTabs = {},
+        CollapsedTabs = {},
         ActiveSubsectionTab = nil,
         ActiveSubsectionLabel = nil,
         ToggleLabels = {},
@@ -3996,12 +4056,31 @@ function UI:_Refresh(snapshot)
     local navigationChanged = false
     for tabName in pairs(self.ExpandedTabs) do
         local shouldExpand = tabName == selectedParent
+            and self.CollapsedTabs[tabName] ~= true
+        if not shouldExpand and (self.SearchQuery or "") ~= "" then
+            for _, subsection in ipairs(
+                (self.Config.TabSubsections or {})[tabName] or {}
+            ) do
+                if string.find(
+                    normalizeSearchText(subsection.Label),
+                    self.SearchQuery,
+                    1,
+                    true
+                ) then
+                    shouldExpand = true
+                    break
+                end
+            end
+        end
         if self.ExpandedTabs[tabName] ~= shouldExpand then
             self.ExpandedTabs[tabName] = shouldExpand
             navigationChanged = true
         end
     end
-    if selectedParent and self.ExpandedTabs[selectedParent] ~= true then
+    if selectedParent
+        and self.CollapsedTabs[selectedParent] ~= true
+        and self.ExpandedTabs[selectedParent] ~= true
+    then
         self.ExpandedTabs[selectedParent] = true
         navigationChanged = true
     end
@@ -4205,7 +4284,14 @@ function UI:_ShowNotification(notification)
     frame.Position = UDim2.new(1, -16, 1, 96)
     self.NotificationTitle.Text = notification.Title or "Action unavailable"
     self.NotificationMessage.Text = tostring(notification.Message or "")
-    local accent = notification.Kind == "error" and theme.Error or theme.Warning
+    local accent
+    if notification.Kind == "error" then
+        accent = theme.Error
+    elseif notification.Kind == "warning" then
+        accent = theme.Warning
+    else
+        accent = theme.Accent
+    end
     self.NotificationAccent.BackgroundColor3 = accent
     self.NotificationStroke.Color = accent
     self.NotificationTitle.TextColor3 = accent
@@ -4762,6 +4848,9 @@ function UI:_SelectTab(tabName)
     end
 
     local parentTab, subsection = self:_GetSubsectionForPage(tabName)
+    if parentTab then
+        self.CollapsedTabs[parentTab] = nil
+    end
     for expandedTab in pairs(self.ExpandedTabs) do
         self.ExpandedTabs[expandedTab] = expandedTab == parentTab
     end
@@ -6460,7 +6549,24 @@ function UI:Mount()
         end
         self:_Connect(self.PersistentConnections, button.Activated, function()
             if #subsections > 0 then
-                self:_SelectSubsection(tabName, subsections[1])
+                if self.ExpandedTabs[tabName] == true then
+                    self.ExpandedTabs[tabName] = false
+                    self.CollapsedTabs[tabName] = true
+                    self:_LayoutNavigation(true)
+                    return
+                end
+
+                self.CollapsedTabs[tabName] = nil
+                local selectedParent = self:_GetSubsectionForPage(
+                    self.State:GetSnapshot().selectedTab
+                )
+                if selectedParent == tabName then
+                    self.ExpandedTabs[tabName] = true
+                    self:_LayoutNavigation(true)
+                    self:_EnsureExpandedNavigationVisible(tabName)
+                else
+                    self:_SelectSubsection(tabName, subsections[1])
+                end
             else
                 self:_SelectTab(tabName)
             end
@@ -6772,6 +6878,7 @@ function UI:Destroy()
     self.TabSubsectionButtons = {}
     self.TabSubsectionLabels = {}
     self.ExpandedTabs = {}
+    self.CollapsedTabs = {}
     self.ActiveSubsectionTab = nil
     self.ActiveSubsectionLabel = nil
     self.TabArrows = {}
@@ -16497,12 +16604,19 @@ local function validJobId(value)
         and not value:find("[%c]")
 end
 
-function ServerHopService.new(compatibility, settingsPersistence, setStatus, coordinator)
+function ServerHopService.new(
+    compatibility,
+    settingsPersistence,
+    setStatus,
+    coordinator,
+    notifyUser
+)
     return setmetatable({
         Compatibility = compatibility,
         SettingsPersistence = settingsPersistence,
         SetStatus = setStatus,
         Coordinator = coordinator,
+        NotifyUser = notifyUser,
         CoordinatorLease = nil,
         Settings = nil,
         Session = nil,
@@ -16981,6 +17095,15 @@ function ServerHopService:_BeginFetch()
         self.PendingDeadline = os.clock() + TELEPORT_TIMEOUT
         self.InFlight = true
         self:_SetStatus("Joining another public server to check for targets", "info")
+        if type(self.NotifyUser) == "function" then
+            pcall(
+                self.NotifyUser,
+                "Server hopping",
+                "Joining a new server to look for " .. self:_ModeLabel() .. ".",
+                "info",
+                { Key = "server-hop", Cooldown = 3 }
+            )
+        end
         local teleportCallOk, joined, joinError = pcall(function()
             return self.Compatibility:TeleportToPublicServer(jobId)
         end)
@@ -22115,7 +22238,13 @@ function MainFarm:Initialize(context)
             function(message, kind)
                 self:_SetStatus(message, kind or "info")
             end,
-            context.TaskCoordinator
+            context.TaskCoordinator,
+            function(title, message, kind, options)
+                local state = context.State
+                if state and type(state.PushNotification) == "function" then
+                    state:PushNotification(title, message, kind, options)
+                end
+            end
         )
         self.ServerHopService:Initialize(stackSettings)
         self.ResumeServerHop = self.ServerHopService:ShouldResume()
@@ -23211,6 +23340,8 @@ function Hub.new()
         UI = nil,
         Started = false,
         Destroying = false,
+        TeamSelectionGeneration = 0,
+        TeamSelectionTask = nil,
     }, Hub)
 end
 
@@ -23229,18 +23360,6 @@ function Hub:Start()
         activeHub:Destroy()
         self.SettingsPersistence:Load()
         self.SettingsPersistence:SetState(self.State)
-    end
-
-    local startupSettings = Config.StartupSettings or {}
-    local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
-    local teamSelected, teamSelectionResult = self.Compatibility:SelectTeamIfPrompted(
-        teamName,
-        6
-    )
-    if not teamSelected then
-        self.TeamSelectionWarning = teamSelectionResult
-    else
-        self.TeamSelectionWarning = nil
     end
 
     local initialized, initError = self.FeatureManager:Initialize()
@@ -23276,6 +23395,31 @@ function Hub:Start()
     self.Started = true
     activeHub = self
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
+    local startupSettings = Config.StartupSettings or {}
+    local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
+    self.TeamSelectionGeneration += 1
+    local teamSelectionGeneration = self.TeamSelectionGeneration
+    self.TeamSelectionTask = task.spawn(function()
+        local selected, selectionResult = self.Compatibility:SelectTeamIfPrompted(
+            teamName,
+            25
+        )
+        if self.Destroying
+            or not self.Started
+            or self.TeamSelectionGeneration ~= teamSelectionGeneration
+        then
+            return
+        end
+        if not selected then
+            self.TeamSelectionWarning = selectionResult
+            self.State:SetStatus(
+                "Auto team selection couldn't finish: " .. tostring(selectionResult),
+                "warning"
+            )
+        else
+            self.TeamSelectionWarning = nil
+        end
+    end)
     local mainFarm = self.FeatureManager
         and self.FeatureManager.Context
         and self.FeatureManager.Context.MainFarm
@@ -23283,11 +23427,6 @@ function Hub:Start()
         and self.SettingsPersistence:GetStartupWarning()
     if settingsWarning then
         self.State:SetStatus(settingsWarning, "warning")
-    elseif self.TeamSelectionWarning then
-        self.State:SetStatus(
-            "Could not auto-select a team: " .. tostring(self.TeamSelectionWarning),
-            "warning"
-        )
     elseif mainFarm and mainFarm.ServerHopPausedOnLoad then
         self.State:SetStatus(
             "Saved server search is paused after reload. Turn its toggle off and back on to start again.",
@@ -23302,6 +23441,11 @@ function Hub:Destroy()
         return
     end
     self.Destroying = true
+    self.TeamSelectionGeneration += 1
+    if self.TeamSelectionTask then
+        pcall(task.cancel, self.TeamSelectionTask)
+        self.TeamSelectionTask = nil
+    end
 
     if self.UI then
         self.UI:Destroy()

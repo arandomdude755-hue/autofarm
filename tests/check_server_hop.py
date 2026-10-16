@@ -95,16 +95,28 @@ require(
     "function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)" in COMPATIBILITY
     and 'playerGui:FindFirstChild("Main (minimal)")' in COMPATIBILITY
     and 'playerGui:FindFirstChild("Main")' in COMPATIBILITY
+    and 'player:FindFirstChild("DataLoaded")' in COMPATIBILITY
+    and "button.Selectable = true" in COMPATIBILITY
     and "VirtualInputManager" in COMPATIBILITY
     and "button:Activate()" in COMPATIBILITY
     and "self.Compatibility:SelectTeamIfPrompted" in HUB,
-    "startup team selection must handle both team-screen layouts without a game-specific remote",
+    "team selection must wait for game data and retry the selectable team button",
 )
 require(
-    HUB.index("SelectTeamIfPrompted")
-    < HUB.index("self.FeatureManager:Initialize()"),
-    "team selection must run before the hub interface is mounted",
+    HUB.index("self.FeatureManager:Initialize()")
+    < HUB.index("self.Compatibility:SelectTeamIfPrompted")
+    and "self.TeamSelectionTask = task.spawn(function()" in HUB,
+    "team selection retries must run in the background without delaying the hub UI",
+)
+require(
+    'function State:PushNotification(title, message, kind, options)' in (
+        ROOT / "src/ReplicatedStorage/CustomHub/State.lua"
+    ).read_text(encoding="utf-8")
+    and 'self.NotifyUser,\n                "Server hopping"' in HOP
+    and 'Key = "server-hop"' in HOP,
+    "each actual server join should show a throttled player-facing notification",
 )
 
 print("PASS: Elite Hunter/berry hopping uses the game's server browser and its teleport handshake")
-print("PASS: startup team selection defaults to Marines and runs before the hub UI")
+print("PASS: startup team selection waits for game readiness without delaying the UI")
+print("PASS: each server hop shows a concise notification")

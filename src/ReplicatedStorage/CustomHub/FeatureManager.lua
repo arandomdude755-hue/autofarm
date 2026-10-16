@@ -77,9 +77,20 @@ function FeatureManager:Dispatch(actionId, payload)
         self:_ScheduleSettingsSave()
         local compatibility = self.Context.Compatibility
         if compatibility then
-            compatibility:SelectTeamIfPrompted(payload, 0.2)
+            task.spawn(function()
+                local selected, result = compatibility:SelectTeamIfPrompted(
+                    payload,
+                    20
+                )
+                if not selected then
+                    self.State:SetStatus(
+                        "Team selection couldn't finish: " .. tostring(result),
+                        "warning"
+                    )
+                end
+            end)
         end
-        self.State:SetStatus("Team to auto-select: " .. payload, "success")
+        self.State:SetStatus("Saved team to auto-select: " .. payload, "success")
         return true
     end
 
