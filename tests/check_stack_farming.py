@@ -32,13 +32,15 @@ require(
 )
 require(
     'Action = "stack.cakePrince.enabled"' in CONFIG
+    and 'Action = "stack.eliteHunter.enabled"' in CONFIG
     and 'Action = "stack.fruit.enabled"' in CONFIG
     and 'Action = "stack.berry.enabled"' in CONFIG
     and "SpecialHop" not in CONFIG,
-    "Stack Farming must expose Cake Prince, fruit and berries without hop controls",
+    "Stack Farming must expose Cake Prince, Elite Hunter, fruit and berries without hop controls",
 )
 require(
     "AutoAttackCakePrince = false" in CONFIG
+    and "AutoEliteHunter = false" in CONFIG
     and "TeleportToFruit = false" in CONFIG
     and "AutoCollectBerries = false" in CONFIG,
     "Stack Farming tasks must default to off",
@@ -48,6 +50,14 @@ require(
     'instance.Name == "Cake Prince"' in QUEUE
     and 'string.lower(instance.Name), "fruit"' in QUEUE,
     "the event queue must detect Cake Prince and fruit candidates",
+)
+require(
+    "Deandre = true" in QUEUE
+    and "Urban = true" in QUEUE
+    and "Diablo = true" in QUEUE
+    and 'replicatedStorage.ChildAdded:Connect' in QUEUE
+    and 'self:_ObserveEliteHunter(instance)' in QUEUE,
+    "Elite Hunter tasks should detect the three live targets in ReplicatedStorage and Workspace",
 )
 require(
     '"BerryBush"' in QUEUE
@@ -98,6 +108,18 @@ require(
     and '"spawned fruit"' in MAIN_FARM,
     "stack jobs must use existing boss combat and shared farm travel",
 )
+elite_quest = MAIN_FARM.split("function MainFarm:_EnsureEliteHunterQuest", 1)[1].split(
+    "\nfunction MainFarm:", 1
+)[0]
+require(
+    'commF:InvokeServer("EliteHunter")' in elite_quest
+    and 'commF:InvokeServer("AbandonQuest")' in elite_quest
+    and "string.find(string.lower(questTitle)" in MAIN_FARM
+    and 'self:_EngageModeTarget(target, true, root, session, "stack")' in MAIN_FARM
+    and "only available in Third Sea" in MAIN_FARM
+    and "or self.Enabled.EliteHunter == true" in QUEUE,
+    "Elite Hunter must accept and confirm its matching quest, use shared combat, and stay Sea 3 only",
+)
 require(
     'prompt:InputHoldBegin()' in MAIN_FARM
     and 'prompt:InputHoldEnd()' in MAIN_FARM
@@ -130,8 +152,9 @@ require(
     "manual travel must explain the Stack Farming conflict to the player",
 )
 require(
-    "AutoCollectBerries == true" in TELEPORT,
-    "berry collection must also prevent conflicting manual travel",
+    "AutoCollectBerries == true" in TELEPORT
+    and "AutoEliteHunter == true" in TELEPORT,
+    "berry collection and Elite Hunter must prevent conflicting manual travel",
 )
 
 print("PASS: Main Farming and Stack Farming are separate nested pages")

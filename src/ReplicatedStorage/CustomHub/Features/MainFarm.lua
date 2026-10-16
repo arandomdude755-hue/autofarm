@@ -219,6 +219,8 @@ end
 function MainFarm:_GetStackTaskLabel(entry)
     if entry and entry.Kind == "CakePrince" then
         return "Cake Prince"
+    elseif entry and entry.Kind == "EliteHunter" then
+        return "Elite Hunter: " .. tostring(entry.Instance and entry.Instance.Name or "target")
     elseif entry and entry.Kind == "Fruit" then
         return entry.Instance and entry.Instance.Name or "spawned fruit"
     elseif entry and entry.Kind == "Berry" then
@@ -305,6 +307,118 @@ function MainFarm:_FinishStackTask(entry, reason, markCompleted)
     end
 end
 
+function MainFarm:_IsEliteHunterQuestActive(targetName)
+    local questState = "unknown"
+    local activeTarget
+    if self.QuestService then
+        local stateOk, state, target = pcall(
+            self.QuestService.GetActiveQuestState,
+            self.QuestService
+        )
+        if stateOk then
+            questState = state
+            activeTarget = target
+        end
+    end
+
+    local targetLower = string.lower(tostring(targetName or ""))
+    if targetLower ~= "" and type(activeTarget) == "string"
+        and string.find(string.lower(activeTarget), targetLower, 1, true)
+    then
+        return true, questState, false
+    end
+
+    local visibleQuest = false
+    local questTitle = ""
+    local compatibility = self.Context and self.Context.Compatibility
+    local readOk = pcall(function()
+        local playerGui = compatibility and compatibility:GetPlayerGui()
+        local main = playerGui and playerGui:FindFirstChild("Main")
+        local quest = main and main:FindFirstChild("Quest")
+        local container = quest and quest:FindFirstChild("Container")
+        local questTitleFrame = container and container:FindFirstChild("QuestTitle")
+        local titleLabel = questTitleFrame and questTitleFrame:FindFirstChild("Title")
+        visibleQuest = main ~= nil
+            and (not main:IsA("ScreenGui") or main.Enabled)
+            and quest ~= nil
+            and quest:IsA("GuiObject")
+            and quest.Visible
+            and titleLabel ~= nil
+            and titleLabel:IsA("TextLabel")
+            and titleLabel.Visible
+        if visibleQuest then
+            questTitle = titleLabel.Text
+        end
+    end)
+    if not readOk then
+        visibleQuest = false
+        questTitle = ""
+    end
+
+    if visibleQuest and targetLower ~= ""
+        and string.find(string.lower(questTitle), targetLower, 1, true)
+    then
+        return true, questState, true
+    end
+    return false, questState, visibleQuest
+end
+
+function MainFarm:_EnsureEliteHunterQuest(entry, target)
+    local active, questState, visibleQuest = self:_IsEliteHunterQuestActive(target.Name)
+    if active then
+        entry.EliteQuestRequestAttempts = 0
+        entry.NextEliteQuestRequestAt = nil
+        return true
+    end
+
+    local now = os.clock()
+    if now < (entry.NextEliteQuestRequestAt or 0) then
+        self:_SetStatus("Waiting for the Elite Hunter quest: " .. target.Name, "info")
+        return false
+    end
+
+    local attempts = entry.EliteQuestRequestAttempts or 0
+    if attempts >= 3 then
+        self:_FinishStackTask(
+            entry,
+            "Could not accept the Elite Hunter quest; skipping this spawn"
+        )
+        return false
+    end
+
+    local compatibility = self.Context and self.Context.Compatibility
+    local remoteOk, commF = pcall(function()
+        return compatibility and compatibility:GetCommF()
+    end)
+    if not remoteOk then
+        commF = nil
+    end
+    if not commF then
+        entry.EliteQuestRequestAttempts = attempts + 1
+        entry.NextEliteQuestRequestAt = now + 1.5
+        self:_SetStatus("Waiting to accept the Elite Hunter quest", "warning")
+        return false
+    end
+
+    local requestOk, requestError = pcall(function()
+        if questState == "active" or questState == "active-unknown" or visibleQuest then
+            commF:InvokeServer("AbandonQuest")
+        end
+        commF:InvokeServer("EliteHunter")
+    end)
+    entry.EliteQuestRequestAttempts = attempts + 1
+    entry.NextEliteQuestRequestAt = now + 1.5
+    if requestOk then
+        self:_SetStatus("Requesting Elite Hunter quest for " .. target.Name, "info")
+    else
+        self:_SetStatus(
+            "Could not request the Elite Hunter quest: " .. tostring(requestError),
+            "warning"
+        )
+    end
+    return false
+end
+
 function MainFarm:_StepStackTasks(session)
     local queue = self.StackTaskQueue
     if not queue or not queue:HasEnabledTasks() then
@@ -352,7 +466,10 @@ function MainFarm:_StepStackTasks(session)
         if self.MainFarmEnabled then
             return false
         end
-        self:_SetStatus("Stack Farming is on; waiting for Cake Prince, fruit or berries", "info")
+        self:_SetStatus(
+            "Stack Farming is on; waiting for Elite Hunter, Cake Prince, fruit or berries",
+            "info"
+        )
         return true
     end
 
@@ -374,7 +491,20 @@ function MainFarm:_StepStackTasks(session)
         return true
     end
 
-    if entry.Kind == "CakePrince" then
+    if entry.Kind == "EliteHunter" then
+        if not self.EnemyService:IsAlive(target) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+        if not self:_EnsureEliteHunterQuest(entry, target) then
+            return true
+        end
+        self:_EngageModeTarget(target, true, root, session, "stack")
+        if not self.EnemyService:IsAlive(target) then
+            self:_FinishStackTask(entry)
+        end
+        return true
+    elseif entry.Kind == "CakePrince" then
         if not workspaceService or not target:IsDescendantOf(workspaceService) then
             self:_FinishStackTask(entry)
             return true
@@ -3883,7 +4013,8 @@ function MainFarm:Initialize(context)
     end
     self.StackTaskQueue = StackTaskQueue.new(
         context.Compatibility and context.Compatibility.Workspace,
-        context.Compatibility and context.Compatibility.CollectionService
+        context.Compatibility and context.Compatibility.CollectionService,
+        context.Compatibility and context.Compatibility.ReplicatedStorage
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then
@@ -3898,6 +4029,16 @@ function MainFarm:Initialize(context)
         self.StackTaskQueue:SetEnabled(
             "CakePrince",
             stackSettings.AutoAttackCakePrince == true
+        )
+        local thirdSea = context.Compatibility
+            and type(context.Compatibility.IsThirdSea) == "function"
+            and context.Compatibility:IsThirdSea()
+        if stackSettings.AutoEliteHunter == true and not thirdSea then
+            stackSettings.AutoEliteHunter = false
+        end
+        self.StackTaskQueue:SetEnabled(
+            "EliteHunter",
+            stackSettings.AutoEliteHunter == true and thirdSea == true
         )
         self.StackTaskQueue:SetEnabled(
             "Fruit",
@@ -4215,6 +4356,20 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         self:_SetStatus("Stack Farming setting is unavailable or invalid", "error")
         return false
     end
+    if payload and kind == "EliteHunter" then
+        local compatibility = self.Context and self.Context.Compatibility
+        local seaOk, thirdSea = pcall(function()
+            return compatibility and compatibility:IsThirdSea()
+        end)
+        if not seaOk or not thirdSea then
+            self:_SetStatus(
+                "Elite Hunter only works in Third Sea",
+                "error",
+                "Auto Elite Hunter is only available in Third Sea."
+            )
+            return false
+        end
+    end
     if not self.StackTaskQueue then
         self:_SetStatus(
             "Stack Farming is unavailable because spawn detection could not start",
@@ -4276,6 +4431,13 @@ function MainFarm:Handle(actionId, payload)
             "CakePrince",
             "AutoAttackCakePrince",
             "Auto Attack Cake Prince",
+            payload
+        )
+    elseif actionId == "stack.eliteHunter.enabled" then
+        return self:_SetStackTaskEnabled(
+            "EliteHunter",
+            "AutoEliteHunter",
+            "Auto Elite Hunter",
             payload
         )
     elseif actionId == "stack.fruit.enabled" then
@@ -4665,11 +4827,13 @@ function MainFarm:Cleanup()
         and self.Context.Config.StackFarmSettings
     if stackSettings then
         stackSettings.AutoAttackCakePrince = false
+        stackSettings.AutoEliteHunter = false
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
+        self.StackTaskQueue:SetEnabled("EliteHunter", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
     end

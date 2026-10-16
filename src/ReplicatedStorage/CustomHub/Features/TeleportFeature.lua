@@ -1415,6 +1415,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         self:_SetFeatureEnabled(actionId, false)
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
         local stackActive = stackSettings.AutoAttackCakePrince == true
+            or stackSettings.AutoEliteHunter == true
             or stackSettings.TeleportToFruit == true
             or stackSettings.AutoCollectBerries == true
         if mainFarm.MainFarmEnabled then

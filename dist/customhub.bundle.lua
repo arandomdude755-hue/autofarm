@@ -486,6 +486,7 @@ local Config = {
     },
     StackFarmSettings = {
         AutoAttackCakePrince = false,
+        AutoEliteHunter = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
     },
@@ -742,6 +743,13 @@ local Config = {
                     Label = "Auto Attack Cake Prince",
                     Action = "stack.cakePrince.enabled",
                     Setting = "AutoAttackCakePrince",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto Elite Hunter",
+                    Action = "stack.eliteHunter.enabled",
+                    Setting = "AutoEliteHunter",
                     SettingsKey = "StackFarmSettings",
                 },
                 {
@@ -9888,6 +9896,7 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         self:_SetFeatureEnabled(actionId, false)
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
         local stackActive = stackSettings.AutoAttackCakePrince == true
+            or stackSettings.AutoEliteHunter == true
             or stackSettings.TeleportToFruit == true
             or stackSettings.AutoCollectBerries == true
         if mainFarm.MainFarmEnabled then
@@ -14374,9 +14383,25 @@ StackTaskQueue.__index = StackTaskQueue
 
 local TASK_KIND = {
     CakePrince = true,
+    EliteHunter = true,
     Fruit = true,
     Berry = true,
 }
+
+local ELITE_HUNTER_NAMES = {
+    Deandre = true,
+    Urban = true,
+    Diablo = true,
+}
+
+local function isAliveEliteHunter(instance)
+    if not instance or not instance:IsA("Model") or not ELITE_HUNTER_NAMES[instance.Name] then
+        return false
+    end
+    local root = instance:FindFirstChild("HumanoidRootPart")
+    local humanoid = instance:FindFirstChildWhichIsA("Humanoid")
+    return root ~= nil and humanoid ~= nil and humanoid.Health > 0
+end
 
 local function isFruitCandidate(instance)
     return instance ~= nil
@@ -14446,12 +14471,14 @@ local function instancePivot(instance)
     return nil
 end
 
-function StackTaskQueue.new(workspaceService, collectionService)
+function StackTaskQueue.new(workspaceService, collectionService, replicatedStorage)
     return setmetatable({
         Workspace = workspaceService,
         CollectionService = collectionService,
+        ReplicatedStorage = replicatedStorage,
         Enabled = {
             CakePrince = false,
+            EliteHunter = false,
             Fruit = false,
             Berry = false,
         },
@@ -14465,6 +14492,7 @@ function StackTaskQueue.new(workspaceService, collectionService)
         BerryWatchers = setmetatable({}, { __mode = "k" }),
         BerryActiveByBush = setmetatable({}, { __mode = "k" }),
         BerryPickupByBush = setmetatable({}, { __mode = "k" }),
+        EliteByName = {},
         Sequence = 0,
         Connections = {},
         EnemiesConnection = nil,
@@ -14574,6 +14602,57 @@ function StackTaskQueue:_ObserveCakePrince(instance)
     end
     self:_RememberSpawn("CakePrince", instance)
     self:_Queue("CakePrince", instance)
+end
+
+function StackTaskQueue:_ObserveEliteHunter(instance)
+    if not isAliveEliteHunter(instance) then
+        return
+    end
+
+    self:_RememberSpawn("EliteHunter", instance)
+    if not self.Enabled.EliteHunter then
+        return
+    end
+
+    local existing = self.EliteByName[instance.Name]
+    if existing then
+        local existingInstance = existing.Instance
+        if existingInstance == instance then
+            return
+        end
+
+        local oldIsAlive = isAliveEliteHunter(existingInstance)
+        if not oldIsAlive then
+            self:_RemovePendingInstance("EliteHunter", existingInstance)
+            self.ActiveByInstance[existingInstance] = nil
+            self.EliteByName[instance.Name] = nil
+            existing = nil
+        end
+    end
+
+    if existing then
+        local existingInstance = existing.Instance
+        local wasActive = existingInstance and self.ActiveByInstance[existingInstance] == true
+        local oldIsInWorkspace = existingInstance
+            and existingInstance:IsDescendantOf(self.Workspace)
+        local newIsInWorkspace = instance:IsDescendantOf(self.Workspace)
+        if newIsInWorkspace and not oldIsInWorkspace then
+            self.PendingByInstance[existingInstance] = nil
+            self.ActiveByInstance[existingInstance] = nil
+            existing.Instance = instance
+            self.PendingByInstance[instance] = existing
+            if wasActive then
+                self.ActiveByInstance[instance] = true
+            end
+        end
+        return
+    end
+
+    self:_Queue("EliteHunter", instance)
+    local entry = self.PendingByInstance[instance]
+    if entry then
+        self.EliteByName[instance.Name] = entry
+    end
 end
 
 function StackTaskQueue:_ForgetBerryBush(bush)
@@ -14715,9 +14794,11 @@ function StackTaskQueue:_WatchEnemies(folder)
     self.EnemiesFolder = folder
     self.EnemiesConnection = folder.ChildAdded:Connect(function(instance)
         self:_ObserveCakePrince(instance)
+        self:_ObserveEliteHunter(instance)
     end)
     for _, instance in ipairs(folder:GetChildren()) do
         self:_ObserveCakePrince(instance)
+        self:_ObserveEliteHunter(instance)
     end
 end
 
@@ -14734,9 +14815,24 @@ function StackTaskQueue:Initialize()
         self:_ObserveFruit(instance)
     end))
 
+    local replicatedStorage = self.ReplicatedStorage
+    if replicatedStorage then
+        table.insert(
+            self.Connections,
+            replicatedStorage.ChildAdded:Connect(function(instance)
+                self:_ObserveEliteHunter(instance)
+            end)
+        )
+    end
+
     self:_WatchEnemies(workspaceService:FindFirstChild("Enemies"))
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
+    end
+    if replicatedStorage then
+        for _, instance in ipairs(replicatedStorage:GetChildren()) do
+            self:_ObserveEliteHunter(instance)
+        end
     end
 
     local collectionService = self.CollectionService
@@ -14773,6 +14869,20 @@ function StackTaskQueue:_QueueExisting(kind)
             self:_WatchEnemies(enemies)
             for _, instance in ipairs(enemies:GetChildren()) do
                 self:_ObserveCakePrince(instance)
+            end
+        end
+    elseif kind == "EliteHunter" then
+        local replicatedStorage = self.ReplicatedStorage
+        if replicatedStorage then
+            for _, instance in ipairs(replicatedStorage:GetChildren()) do
+                self:_ObserveEliteHunter(instance)
+            end
+        end
+        local enemies = workspaceService:FindFirstChild("Enemies")
+        if enemies then
+            self:_WatchEnemies(enemies)
+            for _, instance in ipairs(enemies:GetChildren()) do
+                self:_ObserveEliteHunter(instance)
             end
         end
     elseif kind == "Berry" then
@@ -14826,6 +14936,9 @@ function StackTaskQueue:SetEnabled(kind, enabled)
             if observedKind == kind then
                 self.CompletedByInstance[instance] = nil
             end
+        end
+        if kind == "EliteHunter" then
+            table.clear(self.EliteByName)
         end
     end
     return true
@@ -14957,6 +15070,7 @@ end
 
 function StackTaskQueue:HasEnabledTasks()
     return self.Enabled.CakePrince == true
+        or self.Enabled.EliteHunter == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
 end
@@ -15026,6 +15140,11 @@ function StackTaskQueue:Complete(entry, markCompleted)
     else
         self.CompletedByInstance[entry.Instance] = true
     end
+    if entry.Kind == "EliteHunter"
+        and self.EliteByName[entry.Instance.Name] == entry
+    then
+        self.EliteByName[entry.Instance.Name] = nil
+    end
 end
 
 function StackTaskQueue:Cleanup()
@@ -15053,9 +15172,11 @@ function StackTaskQueue:Cleanup()
     self.BerryWatchers = setmetatable({}, { __mode = "k" })
     self.BerryActiveByBush = setmetatable({}, { __mode = "k" })
     self.BerryPickupByBush = setmetatable({}, { __mode = "k" })
+    table.clear(self.EliteByName)
     self.EnemiesFolder = nil
     self.CollectionService = nil
     self.Workspace = nil
+    self.ReplicatedStorage = nil
 end
 
 return StackTaskQueue
@@ -15285,6 +15406,8 @@ end
 function MainFarm:_GetStackTaskLabel(entry)
     if entry and entry.Kind == "CakePrince" then
         return "Cake Prince"
+    elseif entry and entry.Kind == "EliteHunter" then
+        return "Elite Hunter: " .. tostring(entry.Instance and entry.Instance.Name or "target")
     elseif entry and entry.Kind == "Fruit" then
         return entry.Instance and entry.Instance.Name or "spawned fruit"
     elseif entry and entry.Kind == "Berry" then
@@ -15371,6 +15494,118 @@ function MainFarm:_FinishStackTask(entry, reason, markCompleted)
     end
 end
 
+function MainFarm:_IsEliteHunterQuestActive(targetName)
+    local questState = "unknown"
+    local activeTarget
+    if self.QuestService then
+        local stateOk, state, target = pcall(
+            self.QuestService.GetActiveQuestState,
+            self.QuestService
+        )
+        if stateOk then
+            questState = state
+            activeTarget = target
+        end
+    end
+
+    local targetLower = string.lower(tostring(targetName or ""))
+    if targetLower ~= "" and type(activeTarget) == "string"
+        and string.find(string.lower(activeTarget), targetLower, 1, true)
+    then
+        return true, questState, false
+    end
+
+    local visibleQuest = false
+    local questTitle = ""
+    local compatibility = self.Context and self.Context.Compatibility
+    local readOk = pcall(function()
+        local playerGui = compatibility and compatibility:GetPlayerGui()
+        local main = playerGui and playerGui:FindFirstChild("Main")
+        local quest = main and main:FindFirstChild("Quest")
+        local container = quest and quest:FindFirstChild("Container")
+        local questTitleFrame = container and container:FindFirstChild("QuestTitle")
+        local titleLabel = questTitleFrame and questTitleFrame:FindFirstChild("Title")
+        visibleQuest = main ~= nil
+            and (not main:IsA("ScreenGui") or main.Enabled)
+            and quest ~= nil
+            and quest:IsA("GuiObject")
+            and quest.Visible
+            and titleLabel ~= nil
+            and titleLabel:IsA("TextLabel")
+            and titleLabel.Visible
+        if visibleQuest then
+            questTitle = titleLabel.Text
+        end
+    end)
+    if not readOk then
+        visibleQuest = false
+        questTitle = ""
+    end
+
+    if visibleQuest and targetLower ~= ""
+        and string.find(string.lower(questTitle), targetLower, 1, true)
+    then
+        return true, questState, true
+    end
+    return false, questState, visibleQuest
+end
+
+function MainFarm:_EnsureEliteHunterQuest(entry, target)
+    local active, questState, visibleQuest = self:_IsEliteHunterQuestActive(target.Name)
+    if active then
+        entry.EliteQuestRequestAttempts = 0
+        entry.NextEliteQuestRequestAt = nil
+        return true
+    end
+
+    local now = os.clock()
+    if now < (entry.NextEliteQuestRequestAt or 0) then
+        self:_SetStatus("Waiting for the Elite Hunter quest: " .. target.Name, "info")
+        return false
+    end
+
+    local attempts = entry.EliteQuestRequestAttempts or 0
+    if attempts >= 3 then
+        self:_FinishStackTask(
+            entry,
+            "Could not accept the Elite Hunter quest; skipping this spawn"
+        )
+        return false
+    end
+
+    local compatibility = self.Context and self.Context.Compatibility
+    local remoteOk, commF = pcall(function()
+        return compatibility and compatibility:GetCommF()
+    end)
+    if not remoteOk then
+        commF = nil
+    end
+    if not commF then
+        entry.EliteQuestRequestAttempts = attempts + 1
+        entry.NextEliteQuestRequestAt = now + 1.5
+        self:_SetStatus("Waiting to accept the Elite Hunter quest", "warning")
+        return false
+    end
+
+    local requestOk, requestError = pcall(function()
+        if questState == "active" or questState == "active-unknown" or visibleQuest then
+            commF:InvokeServer("AbandonQuest")
+        end
+        commF:InvokeServer("EliteHunter")
+    end)
+    entry.EliteQuestRequestAttempts = attempts + 1
+    entry.NextEliteQuestRequestAt = now + 1.5
+    if requestOk then
+        self:_SetStatus("Requesting Elite Hunter quest for " .. target.Name, "info")
+    else
+        self:_SetStatus(
+            "Could not request the Elite Hunter quest: " .. tostring(requestError),
+            "warning"
+        )
+    end
+    return false
+end
+
 function MainFarm:_StepStackTasks(session)
     local queue = self.StackTaskQueue
     if not queue or not queue:HasEnabledTasks() then
@@ -15418,7 +15653,10 @@ function MainFarm:_StepStackTasks(session)
         if self.MainFarmEnabled then
             return false
         end
-        self:_SetStatus("Stack Farming is on; waiting for Cake Prince, fruit or berries", "info")
+        self:_SetStatus(
+            "Stack Farming is on; waiting for Elite Hunter, Cake Prince, fruit or berries",
+            "info"
+        )
         return true
     end
 
@@ -15440,7 +15678,20 @@ function MainFarm:_StepStackTasks(session)
         return true
     end
 
-    if entry.Kind == "CakePrince" then
+    if entry.Kind == "EliteHunter" then
+        if not self.EnemyService:IsAlive(target) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+        if not self:_EnsureEliteHunterQuest(entry, target) then
+            return true
+        end
+        self:_EngageModeTarget(target, true, root, session, "stack")
+        if not self.EnemyService:IsAlive(target) then
+            self:_FinishStackTask(entry)
+        end
+        return true
+    elseif entry.Kind == "CakePrince" then
         if not workspaceService or not target:IsDescendantOf(workspaceService) then
             self:_FinishStackTask(entry)
             return true
@@ -18949,7 +19200,8 @@ function MainFarm:Initialize(context)
     end
     self.StackTaskQueue = StackTaskQueue.new(
         context.Compatibility and context.Compatibility.Workspace,
-        context.Compatibility and context.Compatibility.CollectionService
+        context.Compatibility and context.Compatibility.CollectionService,
+        context.Compatibility and context.Compatibility.ReplicatedStorage
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then
@@ -18964,6 +19216,16 @@ function MainFarm:Initialize(context)
         self.StackTaskQueue:SetEnabled(
             "CakePrince",
             stackSettings.AutoAttackCakePrince == true
+        )
+        local thirdSea = context.Compatibility
+            and type(context.Compatibility.IsThirdSea) == "function"
+            and context.Compatibility:IsThirdSea()
+        if stackSettings.AutoEliteHunter == true and not thirdSea then
+            stackSettings.AutoEliteHunter = false
+        end
+        self.StackTaskQueue:SetEnabled(
+            "EliteHunter",
+            stackSettings.AutoEliteHunter == true and thirdSea == true
         )
         self.StackTaskQueue:SetEnabled(
             "Fruit",
@@ -19281,6 +19543,20 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         self:_SetStatus("Stack Farming setting is unavailable or invalid", "error")
         return false
     end
+    if payload and kind == "EliteHunter" then
+        local compatibility = self.Context and self.Context.Compatibility
+        local seaOk, thirdSea = pcall(function()
+            return compatibility and compatibility:IsThirdSea()
+        end)
+        if not seaOk or not thirdSea then
+            self:_SetStatus(
+                "Elite Hunter only works in Third Sea",
+                "error",
+                "Auto Elite Hunter is only available in Third Sea."
+            )
+            return false
+        end
+    end
     if not self.StackTaskQueue then
         self:_SetStatus(
             "Stack Farming is unavailable because spawn detection could not start",
@@ -19342,6 +19618,13 @@ function MainFarm:Handle(actionId, payload)
             "CakePrince",
             "AutoAttackCakePrince",
             "Auto Attack Cake Prince",
+            payload
+        )
+    elseif actionId == "stack.eliteHunter.enabled" then
+        return self:_SetStackTaskEnabled(
+            "EliteHunter",
+            "AutoEliteHunter",
+            "Auto Elite Hunter",
             payload
         )
     elseif actionId == "stack.fruit.enabled" then
@@ -19731,11 +20014,13 @@ function MainFarm:Cleanup()
         and self.Context.Config.StackFarmSettings
     if stackSettings then
         stackSettings.AutoAttackCakePrince = false
+        stackSettings.AutoEliteHunter = false
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
+        self.StackTaskQueue:SetEnabled("EliteHunter", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
     end

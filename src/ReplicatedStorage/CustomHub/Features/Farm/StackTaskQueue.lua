@@ -3,9 +3,25 @@ StackTaskQueue.__index = StackTaskQueue
 
 local TASK_KIND = {
     CakePrince = true,
+    EliteHunter = true,
     Fruit = true,
     Berry = true,
 }
+
+local ELITE_HUNTER_NAMES = {
+    Deandre = true,
+    Urban = true,
+    Diablo = true,
+}
+
+local function isAliveEliteHunter(instance)
+    if not instance or not instance:IsA("Model") or not ELITE_HUNTER_NAMES[instance.Name] then
+        return false
+    end
+    local root = instance:FindFirstChild("HumanoidRootPart")
+    local humanoid = instance:FindFirstChildWhichIsA("Humanoid")
+    return root ~= nil and humanoid ~= nil and humanoid.Health > 0
+end
 
 local function isFruitCandidate(instance)
     return instance ~= nil
@@ -75,12 +91,14 @@ local function instancePivot(instance)
     return nil
 end
 
-function StackTaskQueue.new(workspaceService, collectionService)
+function StackTaskQueue.new(workspaceService, collectionService, replicatedStorage)
     return setmetatable({
         Workspace = workspaceService,
         CollectionService = collectionService,
+        ReplicatedStorage = replicatedStorage,
         Enabled = {
             CakePrince = false,
+            EliteHunter = false,
             Fruit = false,
             Berry = false,
         },
@@ -94,6 +112,7 @@ function StackTaskQueue.new(workspaceService, collectionService)
         BerryWatchers = setmetatable({}, { __mode = "k" }),
         BerryActiveByBush = setmetatable({}, { __mode = "k" }),
         BerryPickupByBush = setmetatable({}, { __mode = "k" }),
+        EliteByName = {},
         Sequence = 0,
         Connections = {},
         EnemiesConnection = nil,
@@ -203,6 +222,57 @@ function StackTaskQueue:_ObserveCakePrince(instance)
     end
     self:_RememberSpawn("CakePrince", instance)
     self:_Queue("CakePrince", instance)
+end
+
+function StackTaskQueue:_ObserveEliteHunter(instance)
+    if not isAliveEliteHunter(instance) then
+        return
+    end
+
+    self:_RememberSpawn("EliteHunter", instance)
+    if not self.Enabled.EliteHunter then
+        return
+    end
+
+    local existing = self.EliteByName[instance.Name]
+    if existing then
+        local existingInstance = existing.Instance
+        if existingInstance == instance then
+            return
+        end
+
+        local oldIsAlive = isAliveEliteHunter(existingInstance)
+        if not oldIsAlive then
+            self:_RemovePendingInstance("EliteHunter", existingInstance)
+            self.ActiveByInstance[existingInstance] = nil
+            self.EliteByName[instance.Name] = nil
+            existing = nil
+        end
+    end
+
+    if existing then
+        local existingInstance = existing.Instance
+        local wasActive = existingInstance and self.ActiveByInstance[existingInstance] == true
+        local oldIsInWorkspace = existingInstance
+            and existingInstance:IsDescendantOf(self.Workspace)
+        local newIsInWorkspace = instance:IsDescendantOf(self.Workspace)
+        if newIsInWorkspace and not oldIsInWorkspace then
+            self.PendingByInstance[existingInstance] = nil
+            self.ActiveByInstance[existingInstance] = nil
+            existing.Instance = instance
+            self.PendingByInstance[instance] = existing
+            if wasActive then
+                self.ActiveByInstance[instance] = true
+            end
+        end
+        return
+    end
+
+    self:_Queue("EliteHunter", instance)
+    local entry = self.PendingByInstance[instance]
+    if entry then
+        self.EliteByName[instance.Name] = entry
+    end
 end
 
 function StackTaskQueue:_ForgetBerryBush(bush)
@@ -344,9 +414,11 @@ function StackTaskQueue:_WatchEnemies(folder)
     self.EnemiesFolder = folder
     self.EnemiesConnection = folder.ChildAdded:Connect(function(instance)
         self:_ObserveCakePrince(instance)
+        self:_ObserveEliteHunter(instance)
     end)
     for _, instance in ipairs(folder:GetChildren()) do
         self:_ObserveCakePrince(instance)
+        self:_ObserveEliteHunter(instance)
     end
 end
 
@@ -363,9 +435,24 @@ function StackTaskQueue:Initialize()
         self:_ObserveFruit(instance)
     end))
 
+    local replicatedStorage = self.ReplicatedStorage
+    if replicatedStorage then
+        table.insert(
+            self.Connections,
+            replicatedStorage.ChildAdded:Connect(function(instance)
+                self:_ObserveEliteHunter(instance)
+            end)
+        )
+    end
+
     self:_WatchEnemies(workspaceService:FindFirstChild("Enemies"))
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
+    end
+    if replicatedStorage then
+        for _, instance in ipairs(replicatedStorage:GetChildren()) do
+            self:_ObserveEliteHunter(instance)
+        end
     end
 
     local collectionService = self.CollectionService
@@ -402,6 +489,20 @@ function StackTaskQueue:_QueueExisting(kind)
             self:_WatchEnemies(enemies)
             for _, instance in ipairs(enemies:GetChildren()) do
                 self:_ObserveCakePrince(instance)
+            end
+        end
+    elseif kind == "EliteHunter" then
+        local replicatedStorage = self.ReplicatedStorage
+        if replicatedStorage then
+            for _, instance in ipairs(replicatedStorage:GetChildren()) do
+                self:_ObserveEliteHunter(instance)
+            end
+        end
+        local enemies = workspaceService:FindFirstChild("Enemies")
+        if enemies then
+            self:_WatchEnemies(enemies)
+            for _, instance in ipairs(enemies:GetChildren()) do
+                self:_ObserveEliteHunter(instance)
             end
         end
     elseif kind == "Berry" then
@@ -455,6 +556,9 @@ function StackTaskQueue:SetEnabled(kind, enabled)
             if observedKind == kind then
                 self.CompletedByInstance[instance] = nil
             end
+        end
+        if kind == "EliteHunter" then
+            table.clear(self.EliteByName)
         end
     end
     return true
@@ -586,6 +690,7 @@ end
 
 function StackTaskQueue:HasEnabledTasks()
     return self.Enabled.CakePrince == true
+        or self.Enabled.EliteHunter == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
 end
@@ -655,6 +760,11 @@ function StackTaskQueue:Complete(entry, markCompleted)
     else
         self.CompletedByInstance[entry.Instance] = true
     end
+    if entry.Kind == "EliteHunter"
+        and self.EliteByName[entry.Instance.Name] == entry
+    then
+        self.EliteByName[entry.Instance.Name] = nil
+    end
 end
 
 function StackTaskQueue:Cleanup()
@@ -682,9 +792,11 @@ function StackTaskQueue:Cleanup()
     self.BerryWatchers = setmetatable({}, { __mode = "k" })
     self.BerryActiveByBush = setmetatable({}, { __mode = "k" })
     self.BerryPickupByBush = setmetatable({}, { __mode = "k" })
+    table.clear(self.EliteByName)
     self.EnemiesFolder = nil
     self.CollectionService = nil
     self.Workspace = nil
+    self.ReplicatedStorage = nil
 end
 
 return StackTaskQueue

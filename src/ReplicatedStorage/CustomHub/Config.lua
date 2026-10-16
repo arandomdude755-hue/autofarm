@@ -457,6 +457,7 @@ local Config = {
     },
     StackFarmSettings = {
         AutoAttackCakePrince = false,
+        AutoEliteHunter = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
     },
@@ -713,6 +714,13 @@ local Config = {
                     Label = "Auto Attack Cake Prince",
                     Action = "stack.cakePrince.enabled",
                     Setting = "AutoAttackCakePrince",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto Elite Hunter",
+                    Action = "stack.eliteHunter.enabled",
+                    Setting = "AutoEliteHunter",
                     SettingsKey = "StackFarmSettings",
                 },
                 {
