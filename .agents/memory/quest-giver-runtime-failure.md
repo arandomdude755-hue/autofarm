@@ -20,3 +20,9 @@ Instant quest acceptance is an opt-in Farm setting, Off by default. It skips onl
 **Why:** the user wants a risk-labelled option that requests a quest immediately but does not make the normal, safer behavior the default.
 
 **How to apply:** use the same delay setting for regular and mode quest givers. Keep all existing dialogue and confirmation checks, and retain the spaced retry limit if the server does not accept the immediate request.
+
+Normal level quests should continue traveling to within 8 studs of the quest giver before calling `StartQuest`. The remote-first acceptance idea is deferred, not rejected; revisit it only if the user asks again.
+
+**Why:** the user chose to keep normal quests near the NPC for now and asked not to forget the remote-first possibility.
+
+**How to apply:** do not change the current proximity requirement as part of unrelated quest work. If reconsidered, test once from a distance, confirm the active quest state, and fall back to the NPC if the server does not accept it.

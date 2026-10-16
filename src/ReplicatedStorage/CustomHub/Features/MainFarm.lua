@@ -497,6 +497,38 @@ function MainFarm:_StepStackTasks(session)
         if not self:_EnsureEliteHunterQuest(entry, target) then
             return true
         end
+        local enemiesFolder = workspaceService
+            and workspaceService:FindFirstChild("Enemies")
+        local liveTarget
+        if enemiesFolder then
+            if target.Parent == enemiesFolder then
+                liveTarget = target
+            else
+                for _, candidate in ipairs(enemiesFolder:GetChildren()) do
+                    if candidate.Name == target.Name
+                        and self.EnemyService:IsAlive(candidate)
+                    then
+                        liveTarget = candidate
+                        break
+                    end
+                end
+            end
+        end
+        if not liveTarget then
+            if os.clock() - (self.StackTaskStartedAt or os.clock()) >= STACK_TASK_LOAD_TIMEOUT then
+                self:_FinishStackTask(
+                    entry,
+                    "Elite Hunter did not load into the world; skipping this spawn"
+                )
+            else
+                self:_SetStatus("Elite Hunter quest accepted; waiting for the target to load", "info")
+            end
+            return true
+        end
+        if liveTarget ~= target and self.StackTaskQueue then
+            self.StackTaskQueue:BindLiveEliteTarget(entry, liveTarget)
+            target = liveTarget
+        end
         self:_EngageModeTarget(target, true, root, session, "stack")
         if not self.EnemyService:IsAlive(target) then
             self:_FinishStackTask(entry)
@@ -4011,7 +4043,8 @@ function MainFarm:Initialize(context)
     end
     self.StackTaskQueue = StackTaskQueue.new(
         context.Compatibility and context.Compatibility.Workspace,
-        context.Compatibility and context.Compatibility.CollectionService
+        context.Compatibility and context.Compatibility.CollectionService,
+        context.Compatibility and context.Compatibility.ReplicatedStorage
     )
     local stackQueueReady, stackQueueError = self.StackTaskQueue:Initialize()
     if not stackQueueReady then

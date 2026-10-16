@@ -55,10 +55,11 @@ require(
     "Deandre = true" in QUEUE
     and "Urban = true" in QUEUE
     and "Diablo = true" in QUEUE
-    and "instance.Parent ~= self.EnemiesFolder" in QUEUE
     and 'folder.ChildAdded:Connect(function(instance)' in QUEUE
+    and 'replicatedStorage.ChildAdded:Connect(function(instance)' in QUEUE
+    and "function StackTaskQueue:BindLiveEliteTarget" in QUEUE
     and 'self:_ObserveEliteHunter(instance)' in QUEUE,
-    "Elite Hunter tasks should queue only live world targets from Workspace.Enemies",
+    "Elite Hunter should detect both reference sources and bind combat to its live world model",
 )
 require(
     '"BerryBush"' in QUEUE
@@ -117,6 +118,8 @@ require(
     and 'commF:InvokeServer("AbandonQuest")' in elite_quest
     and "string.find(string.lower(questTitle)" in MAIN_FARM
     and 'self:_EngageModeTarget(target, true, root, session, "stack")' in MAIN_FARM
+    and "Elite Hunter quest accepted; waiting for the target to load" in MAIN_FARM
+    and "BindLiveEliteTarget(entry, liveTarget)" in MAIN_FARM
     and "only available in Third Sea" in MAIN_FARM
     and "or self.Enabled.EliteHunter == true" in QUEUE,
     "Elite Hunter must accept and confirm its matching quest, use shared combat, and stay Sea 3 only",

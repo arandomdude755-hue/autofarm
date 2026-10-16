@@ -91,10 +91,11 @@ local function instancePivot(instance)
     return nil
 end
 
-function StackTaskQueue.new(workspaceService, collectionService)
+function StackTaskQueue.new(workspaceService, collectionService, replicatedStorage)
     return setmetatable({
         Workspace = workspaceService,
         CollectionService = collectionService,
+        ReplicatedStorage = replicatedStorage,
         Enabled = {
             CakePrince = false,
             EliteHunter = false,
@@ -224,10 +225,7 @@ function StackTaskQueue:_ObserveCakePrince(instance)
 end
 
 function StackTaskQueue:_ObserveEliteHunter(instance)
-    if not isAliveEliteHunter(instance)
-        or not self.EnemiesFolder
-        or instance.Parent ~= self.EnemiesFolder
-    then
+    if not isAliveEliteHunter(instance) then
         return
     end
 
@@ -275,6 +273,31 @@ function StackTaskQueue:_ObserveEliteHunter(instance)
     if entry then
         self.EliteByName[instance.Name] = entry
     end
+end
+
+function StackTaskQueue:BindLiveEliteTarget(entry, target)
+    if not entry
+        or entry.Kind ~= "EliteHunter"
+        or not isAliveEliteHunter(target)
+        or not self.EnemiesFolder
+        or target.Parent ~= self.EnemiesFolder
+    then
+        return false
+    end
+
+    local previous = entry.Instance
+    if previous ~= target then
+        self.PendingByInstance[previous] = nil
+        self.ActiveByInstance[previous] = nil
+        entry.Instance = target
+        self.PendingByInstance[target] = nil
+        self.ActiveByInstance[target] = true
+        self.CompletedByInstance[target] = nil
+        self.KindByInstance[target] = "EliteHunter"
+        self.SpawnOrderByInstance[target] = entry.QueueSequence
+        self.EliteByName[target.Name] = entry
+    end
+    return true
 end
 
 function StackTaskQueue:_ForgetBerryBush(bush)
@@ -437,9 +460,24 @@ function StackTaskQueue:Initialize()
         self:_ObserveFruit(instance)
     end))
 
+    local replicatedStorage = self.ReplicatedStorage
+    if replicatedStorage then
+        table.insert(
+            self.Connections,
+            replicatedStorage.ChildAdded:Connect(function(instance)
+                self:_ObserveEliteHunter(instance)
+            end)
+        )
+    end
+
     self:_WatchEnemies(workspaceService:FindFirstChild("Enemies"))
     for _, instance in ipairs(workspaceService:GetChildren()) do
         self:_ObserveFruit(instance)
+    end
+    if replicatedStorage then
+        for _, instance in ipairs(replicatedStorage:GetChildren()) do
+            self:_ObserveEliteHunter(instance)
+        end
     end
 
     local collectionService = self.CollectionService
@@ -479,6 +517,12 @@ function StackTaskQueue:_QueueExisting(kind)
             end
         end
     elseif kind == "EliteHunter" then
+        local replicatedStorage = self.ReplicatedStorage
+        if replicatedStorage then
+            for _, instance in ipairs(replicatedStorage:GetChildren()) do
+                self:_ObserveEliteHunter(instance)
+            end
+        end
         local enemies = workspaceService:FindFirstChild("Enemies")
         if enemies then
             self:_WatchEnemies(enemies)
@@ -689,7 +733,7 @@ function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
                 entry.Kind == "Fruit"
                     and instance.Parent == self.Workspace
                     or entry.Kind == "EliteHunter"
-                    and instance.Parent == self.EnemiesFolder
+                    and instance.Parent ~= nil
                     and isAliveEliteHunter(instance)
                     or entry.Kind ~= "Fruit"
                     and entry.Kind ~= "EliteHunter"
@@ -781,6 +825,7 @@ function StackTaskQueue:Cleanup()
     self.EnemiesFolder = nil
     self.CollectionService = nil
     self.Workspace = nil
+    self.ReplicatedStorage = nil
 end
 
 return StackTaskQueue
