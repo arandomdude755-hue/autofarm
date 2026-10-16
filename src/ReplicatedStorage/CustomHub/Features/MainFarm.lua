@@ -43,6 +43,9 @@ local MILITARY_DETECTIVE_POSITION = CFrame.new(4852, 6, 719)
 local RIP_INDRA_ISLAND_POSITION = CFrame.new(-1926.8, 12.2, 1739.8)
 
 local STACK_TASK_SEA_REQUIREMENTS = {
+    Saw = 1,
+    Greybeard = 1,
+    CursedCaptain = 2,
     CakePrince = 3,
     EliteHunter = 3,
     RipIndra = 3,
@@ -60,6 +63,9 @@ local INDRA_HAKI_COLORS = {
 }
 
 local STACK_BOSS_LABELS = {
+    Saw = "The Saw",
+    Greybeard = "Greybeard",
+    CursedCaptain = "Cursed Captain",
     RipIndra = "Rip Indra",
     SoulReaper = "Soul Reaper",
     DoughKing = "Dough King",
@@ -75,7 +81,9 @@ local function isStackTaskAvailableInCurrentSea(compatibility, kind)
     if not requiredSea then
         return true
     end
-    local method = requiredSea == 2 and "IsSecondSea" or "IsThirdSea"
+    local method = requiredSea == 1 and "IsFirstSea"
+        or requiredSea == 2 and "IsSecondSea"
+        or requiredSea == 3 and "IsThirdSea"
     local check = compatibility and compatibility[method]
     if type(check) ~= "function" then
         return false
@@ -5752,6 +5760,9 @@ function MainFarm:Initialize(context)
             { Kind = "SoulReaper", Setting = "AttackSoulReaper" },
             { Kind = "DoughKing", Setting = "AttackDoughKing" },
             { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
+            { Kind = "Saw", Setting = "AttackSaw" },
+            { Kind = "Greybeard", Setting = "AttackGreybeard" },
+            { Kind = "CursedCaptain", Setting = "AttackCursedCaptain" },
             { Kind = "FactoryRaid", Setting = "AutoFactoryRaid" },
             { Kind = "CastleRaid", Setting = "AutoCastleRaid" },
         }) do
@@ -6445,6 +6456,27 @@ function MainFarm:Handle(actionId, payload)
             "Auto attack/summon Darkbeard",
             payload
         )
+    elseif actionId == "stack.saw.enabled" then
+        return self:_SetStackTaskEnabled(
+            "Saw",
+            "AttackSaw",
+            "Auto attack The Saw",
+            payload
+        )
+    elseif actionId == "stack.greybeard.enabled" then
+        return self:_SetStackTaskEnabled(
+            "Greybeard",
+            "AttackGreybeard",
+            "Auto attack Greybeard",
+            payload
+        )
+    elseif actionId == "stack.cursedCaptain.enabled" then
+        return self:_SetStackTaskEnabled(
+            "CursedCaptain",
+            "AttackCursedCaptain",
+            "Auto attack Cursed Captain",
+            payload
+        )
     elseif actionId == "stack.factoryRaid.enabled" then
         return self:_SetStackTaskEnabled(
             "FactoryRaid",
@@ -6861,6 +6893,9 @@ function MainFarm:Cleanup()
         stackSettings.AttackSoulReaper = false
         stackSettings.AttackDoughKing = false
         stackSettings.AttackDarkbeard = false
+        stackSettings.AttackSaw = false
+        stackSettings.AttackGreybeard = false
+        stackSettings.AttackCursedCaptain = false
         stackSettings.AutoFactoryRaid = false
         stackSettings.AutoCastleRaid = false
         stackSettings.TeleportToFruit = false
@@ -6877,6 +6912,9 @@ function MainFarm:Cleanup()
         self.StackTaskQueue:SetEnabled("SoulReaper", false)
         self.StackTaskQueue:SetEnabled("DoughKing", false)
         self.StackTaskQueue:SetEnabled("Darkbeard", false)
+        self.StackTaskQueue:SetEnabled("Saw", false)
+        self.StackTaskQueue:SetEnabled("Greybeard", false)
+        self.StackTaskQueue:SetEnabled("CursedCaptain", false)
         self.StackTaskQueue:SetEnabled("FactoryRaid", false)
         self.StackTaskQueue:SetEnabled("CastleRaid", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)

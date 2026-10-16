@@ -8,6 +8,9 @@ local TASK_KIND = {
     SoulReaper = true,
     DoughKing = true,
     Darkbeard = true,
+    Saw = true,
+    Greybeard = true,
+    CursedCaptain = true,
     FactoryRaid = true,
     CastleRaid = true,
     Fruit = true,
@@ -28,6 +31,9 @@ local SPAWNED_BOSS_KINDS = {
     ["Soul Reaper"] = "SoulReaper",
     ["Dough King"] = "DoughKing",
     ["Darkbeard"] = "Darkbeard",
+    ["The Saw"] = "Saw",
+    ["Greybeard"] = "Greybeard",
+    ["Cursed Captain"] = "CursedCaptain",
     ["Core"] = "FactoryRaid",
 }
 
@@ -60,6 +66,9 @@ local function isSpawnedBossKind(kind)
         or kind == "SoulReaper"
         or kind == "DoughKing"
         or kind == "Darkbeard"
+        or kind == "Saw"
+        or kind == "Greybeard"
+        or kind == "CursedCaptain"
         or kind == "FactoryRaid"
 end
 
@@ -166,6 +175,9 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
             SoulReaper = false,
             DoughKing = false,
             Darkbeard = false,
+            Saw = false,
+            Greybeard = false,
+            CursedCaptain = false,
             FactoryRaid = false,
             CastleRaid = false,
             Fruit = false,
@@ -868,6 +880,9 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.SoulReaper == true
         or self.Enabled.DoughKing == true
         or self.Enabled.Darkbeard == true
+        or self.Enabled.Saw == true
+        or self.Enabled.Greybeard == true
+        or self.Enabled.CursedCaptain == true
         or self.Enabled.FactoryRaid == true
         or self.Enabled.CastleRaid == true
         or self.Enabled.Fruit == true

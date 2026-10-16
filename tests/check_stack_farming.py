@@ -47,6 +47,9 @@ require(
     and 'Action = "stack.soulReaper.enabled"' in CONFIG
     and 'Action = "stack.doughKing.enabled"' in CONFIG
     and 'Action = "stack.darkbeard.enabled"' in CONFIG
+    and 'Action = "stack.saw.enabled"' in CONFIG
+    and 'Action = "stack.greybeard.enabled"' in CONFIG
+    and 'Action = "stack.cursedCaptain.enabled"' in CONFIG
     and 'Action = "stack.fruit.enabled"' in CONFIG
     and 'Action = "stack.berry.enabled"' in CONFIG
     and 'Action = "stack.hop.eliteHunter.enabled"' in CONFIG
@@ -67,6 +70,9 @@ require(
     and "AttackSoulReaper = false" in CONFIG
     and "AttackDoughKing = false" in CONFIG
     and "AttackDarkbeard = false" in CONFIG
+    and "AttackSaw = false" in CONFIG
+    and "AttackGreybeard = false" in CONFIG
+    and "AttackCursedCaptain = false" in CONFIG
     and "TeleportToFruit = false" in CONFIG
     and "AutoCollectBerries = false" in CONFIG
     and "AutoFactoryRaid = false" in CONFIG
@@ -136,6 +142,17 @@ require(
     "spawned boss stack tasks must discover Enemy models without summoning actions",
 )
 require(
+    '["The Saw"] = "Saw"' in QUEUE
+    and '["Greybeard"] = "Greybeard"' in QUEUE
+    and '["Cursed Captain"] = "CursedCaptain"' in QUEUE
+    and all(f"{kind} = true" in QUEUE for kind in ("Saw", "Greybeard", "CursedCaptain"))
+    and all(
+        f"self.Enabled.{kind} == true" in QUEUE
+        for kind in ("Saw", "Greybeard", "CursedCaptain")
+    ),
+    "First and Second Sea live bosses should enter the shared stack task queue",
+)
+require(
     "function StackTaskQueue:_ObserveCastleRaid(instance)" in QUEUE
     and "CASTLE_RAID_CENTER = Vector3.new(-5543, 313, -2964)" in QUEUE
     and "CASTLE_RAID_RADIUS = 1000" in QUEUE
@@ -161,11 +178,38 @@ require(
 require(
     "FactoryRaid = 2" in MAIN_FARM
     and "CastleRaid = 3" in MAIN_FARM
+    and "Saw = 1" in MAIN_FARM
+    and "Greybeard = 1" in MAIN_FARM
+    and "CursedCaptain = 2" in MAIN_FARM
+    and 'requiredSea == 1 and "IsFirstSea"' in MAIN_FARM
     and 'Setting = "AutoFactoryRaid"' in MAIN_FARM
     and 'Setting = "AutoCastleRaid"' in MAIN_FARM
     and 'actionId == "stack.factoryRaid.enabled"' in MAIN_FARM
     and 'actionId == "stack.castleRaid.enabled"' in MAIN_FARM,
     "raid jobs should share Stack Farming's sea checks, settings, and action routing",
+)
+require(
+    all(
+        f'{{ Kind = "{kind}", Setting = "{setting}" }}' in MAIN_FARM
+        for kind, setting in (
+            ("Saw", "AttackSaw"),
+            ("Greybeard", "AttackGreybeard"),
+            ("CursedCaptain", "AttackCursedCaptain"),
+        )
+    )
+    and all(f'settingStackTask' not in CONFIG for _ in (0,))
+    and all(
+        f'Action = "stack.{action}.enabled",\n'
+        f'                    Setting = "{setting}",\n'
+        f'                    SettingsKey = "StackFarmSettings",\n'
+        f'                    RequiredSea = {sea},' in CONFIG
+        for action, setting, sea in (
+            ("saw", "AttackSaw", 1),
+            ("greybeard", "AttackGreybeard", 1),
+            ("cursedCaptain", "AttackCursedCaptain", 2),
+        )
+    ),
+    "Saw and Greybeard must be First Sea-only; Cursed Captain must be Second Sea-only",
 )
 require(
     "stackSettings.AutoFactoryRaid = false" in MAIN_FARM
