@@ -463,6 +463,8 @@ local Config = {
         AttackSoulReaper = false,
         AttackDoughKing = false,
         AttackDarkbeard = false,
+        AutoFactoryRaid = false,
+        AutoCastleRaid = false,
         PrioritizeRipIndra = false,
         PrioritizeDoughKing = false,
         TeleportToFruit = false,
@@ -799,6 +801,32 @@ local Config = {
                 },
                 {
                     Kind = "sectionHeader",
+                    Label = "Raids",
+                    RequiredSea = 2,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto attack Factory raid",
+                    Action = "stack.factoryRaid.enabled",
+                    Setting = "AutoFactoryRaid",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 2,
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Raids",
+                    RequiredSea = 3,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto attack Castle raid",
+                    Action = "stack.castleRaid.enabled",
+                    Setting = "AutoCastleRaid",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                },
+                {
+                    Kind = "sectionHeader",
                     Label = "World items",
                 },
                 {
@@ -981,7 +1009,7 @@ local Config = {
             Controls = {
                 {
                     Kind = "sectionHeader",
-                    Label = "Interface",
+                    Label = "Hub settings",
                 },
                 {
                     Kind = "settingDropdown",
@@ -1004,6 +1032,10 @@ local Config = {
                     Label = "Test teleport queue",
                     Action = "settings.autoExecute.probe",
                     Description = "Turn Auto Execute off first. This test will not reload the hub.",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Interface",
                 },
                 {
                     Kind = "settingDropdown",

@@ -30,6 +30,16 @@ require(
     'Title = "Main Farming"' in CONFIG and 'Title = "Stack Farming"' in CONFIG,
     "both Farm subsection pages must have clear page titles",
 )
+settings_page = CONFIG[
+    CONFIG.index('Title = "Main settings"') : CONFIG.index('Title = "Farm settings"')
+]
+require(
+    settings_page.index('Label = "Hub settings"')
+    < settings_page.index('Label = "Team to auto-select"')
+    < settings_page.index('Label = "Auto Execute"')
+    < settings_page.index('Label = "Interface"'),
+    "team selection and Auto Execute should be grouped under Hub settings",
+)
 require(
     'Action = "stack.cakePrince.enabled"' in CONFIG
     and 'Action = "stack.eliteHunter.enabled"' in CONFIG
@@ -59,9 +69,22 @@ require(
     and "AttackDarkbeard = false" in CONFIG
     and "TeleportToFruit = false" in CONFIG
     and "AutoCollectBerries = false" in CONFIG
+    and "AutoFactoryRaid = false" in CONFIG
+    and "AutoCastleRaid = false" in CONFIG
     and "HopForEliteHunter = false" in CONFIG
     and "HopForBerries = false" in CONFIG,
     "Stack Farming tasks must default to off",
+)
+require(
+    'Action = "stack.factoryRaid.enabled"' in CONFIG
+    and 'Setting = "AutoFactoryRaid"' in CONFIG
+    and 'Action = "stack.castleRaid.enabled"' in CONFIG
+    and 'Setting = "AutoCastleRaid"' in CONFIG
+    and 'Label = "Raids",\n                    RequiredSea = 2' in CONFIG
+    and 'Label = "Raids",\n                    RequiredSea = 3' in CONFIG
+    and CONFIG.count("RequiredSea = 2") >= 2
+    and CONFIG.count("RequiredSea = 3") >= 6,
+    "Factory and Castle Raid controls should be available only in their respective seas",
 )
 require(
     'Label = "Bosses"' in CONFIG
@@ -106,10 +129,20 @@ require(
     and '["Soul Reaper"] = "SoulReaper"' in QUEUE
     and '["Dough King"] = "DoughKing"' in QUEUE
     and '["Darkbeard"] = "Darkbeard"' in QUEUE
+    and '["Core"] = "FactoryRaid"' in QUEUE
     and "function StackTaskQueue:_ObserveSpawnedBoss" in QUEUE
     and "self:_ObserveSpawnedBoss(instance)" in QUEUE
     and "isSpawnedStackBoss(instance)" in QUEUE,
     "spawned boss stack tasks must discover Enemy models without summoning actions",
+)
+require(
+    "function StackTaskQueue:_ObserveCastleRaid(instance)" in QUEUE
+    and "CASTLE_RAID_CENTER = Vector3.new(-5543, 313, -2964)" in QUEUE
+    and "CASTLE_RAID_RADIUS = 1000" in QUEUE
+    and "self:_ObserveCastleRaid(instance)" in QUEUE
+    and 'elseif kind == "CastleRaid" then' in QUEUE
+    and "CastleRaid" in QUEUE[QUEUE.index("function StackTaskQueue:HasEnabledTasks()") :],
+    "Castle Raid should queue live eligible enemies near the Castle in the shared event queue",
 )
 require(
     "function StackTaskQueue:TakePendingKind(kind)" in QUEUE
@@ -124,6 +157,22 @@ require(
     and 'isStackTaskAvailableInCurrentSea(' in MAIN_FARM
     and "cakePrinceRequested and cakePrinceAvailable" in MAIN_FARM,
     "Cake Prince automation should remain disabled outside its Third Sea",
+)
+require(
+    "FactoryRaid = 2" in MAIN_FARM
+    and "CastleRaid = 3" in MAIN_FARM
+    and 'Setting = "AutoFactoryRaid"' in MAIN_FARM
+    and 'Setting = "AutoCastleRaid"' in MAIN_FARM
+    and 'actionId == "stack.factoryRaid.enabled"' in MAIN_FARM
+    and 'actionId == "stack.castleRaid.enabled"' in MAIN_FARM,
+    "raid jobs should share Stack Farming's sea checks, settings, and action routing",
+)
+require(
+    "stackSettings.AutoFactoryRaid = false" in MAIN_FARM
+    and "stackSettings.AutoCastleRaid = false" in MAIN_FARM
+    and 'self.StackTaskQueue:SetEnabled("FactoryRaid", false)' in MAIN_FARM
+    and 'self.StackTaskQueue:SetEnabled("CastleRaid", false)' in MAIN_FARM,
+    "raid toggles and queued jobs should be cleared when the hub is cleaned up",
 )
 require(
     'compatibility:GetInventoryMaterialCount("Conjured Cocoa")' in MAIN_FARM

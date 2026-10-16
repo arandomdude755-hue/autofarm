@@ -492,6 +492,8 @@ local Config = {
         AttackSoulReaper = false,
         AttackDoughKing = false,
         AttackDarkbeard = false,
+        AutoFactoryRaid = false,
+        AutoCastleRaid = false,
         PrioritizeRipIndra = false,
         PrioritizeDoughKing = false,
         TeleportToFruit = false,
@@ -828,6 +830,32 @@ local Config = {
                 },
                 {
                     Kind = "sectionHeader",
+                    Label = "Raids",
+                    RequiredSea = 2,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto attack Factory raid",
+                    Action = "stack.factoryRaid.enabled",
+                    Setting = "AutoFactoryRaid",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 2,
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Raids",
+                    RequiredSea = 3,
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto attack Castle raid",
+                    Action = "stack.castleRaid.enabled",
+                    Setting = "AutoCastleRaid",
+                    SettingsKey = "StackFarmSettings",
+                    RequiredSea = 3,
+                },
+                {
+                    Kind = "sectionHeader",
                     Label = "World items",
                 },
                 {
@@ -1010,7 +1038,7 @@ local Config = {
             Controls = {
                 {
                     Kind = "sectionHeader",
-                    Label = "Interface",
+                    Label = "Hub settings",
                 },
                 {
                     Kind = "settingDropdown",
@@ -1033,6 +1061,10 @@ local Config = {
                     Label = "Test teleport queue",
                     Action = "settings.autoExecute.probe",
                     Description = "Turn Auto Execute off first. This test will not reload the hub.",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Interface",
                 },
                 {
                     Kind = "settingDropdown",
@@ -16418,6 +16450,8 @@ local TASK_KIND = {
     SoulReaper = true,
     DoughKing = true,
     Darkbeard = true,
+    FactoryRaid = true,
+    CastleRaid = true,
     Fruit = true,
     Berry = true,
     HopEliteHunter = true,
@@ -16429,7 +16463,11 @@ local SPAWNED_BOSS_KINDS = {
     ["Soul Reaper"] = "SoulReaper",
     ["Dough King"] = "DoughKing",
     ["Darkbeard"] = "Darkbeard",
+    ["Core"] = "FactoryRaid",
 }
+
+local CASTLE_RAID_CENTER = Vector3.new(-5543, 313, -2964)
+local CASTLE_RAID_RADIUS = 1000
 
 local ELITE_HUNTER_NAMES = {
     Deandre = true,
@@ -16457,6 +16495,30 @@ local function isSpawnedBossKind(kind)
         or kind == "SoulReaper"
         or kind == "DoughKing"
         or kind == "Darkbeard"
+        or kind == "FactoryRaid"
+end
+
+local function isCastleRaidCandidate(instance)
+    if not instance or not instance:IsA("Model") then
+        return false
+    end
+
+    local name = string.lower(instance.Name)
+    if name == "oni2"
+        or string.find(name, "boss", 1, true)
+        or string.find(name, "friend", 1, true)
+        or string.find(name, "wraith", 1, true)
+        or name == "rip_indra true form"
+    then
+        return false
+    end
+
+    local root = instance:FindFirstChild("HumanoidRootPart")
+    local humanoid = instance:FindFirstChildWhichIsA("Humanoid")
+    return root ~= nil
+        and humanoid ~= nil
+        and humanoid.Health > 0
+        and (root.Position - CASTLE_RAID_CENTER).Magnitude <= CASTLE_RAID_RADIUS
 end
 
 local function isFruitCandidate(instance)
@@ -16539,6 +16601,8 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
             SoulReaper = false,
             DoughKing = false,
             Darkbeard = false,
+            FactoryRaid = false,
+            CastleRaid = false,
             Fruit = false,
             Berry = false,
             HopEliteHunter = false,
@@ -16726,6 +16790,14 @@ function StackTaskQueue:_ObserveSpawnedBoss(instance)
     self:_Queue(kind, instance)
 end
 
+function StackTaskQueue:_ObserveCastleRaid(instance)
+    if not isCastleRaidCandidate(instance) then
+        return
+    end
+    self:_RememberSpawn("CastleRaid", instance)
+    self:_Queue("CastleRaid", instance)
+end
+
 function StackTaskQueue:BindLiveEliteTarget(entry, target)
     if not entry
         or entry.Kind ~= "EliteHunter"
@@ -16892,11 +16964,13 @@ function StackTaskQueue:_WatchEnemies(folder)
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
         self:_ObserveSpawnedBoss(instance)
+        self:_ObserveCastleRaid(instance)
     end)
     for _, instance in ipairs(folder:GetChildren()) do
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
         self:_ObserveSpawnedBoss(instance)
+        self:_ObserveCastleRaid(instance)
     end
 end
 
@@ -16989,6 +17063,14 @@ function StackTaskQueue:_QueueExisting(kind)
             self:_WatchEnemies(enemies)
             for _, instance in ipairs(enemies:GetChildren()) do
                 self:_ObserveSpawnedBoss(instance)
+            end
+        end
+    elseif kind == "CastleRaid" then
+        local enemies = self.Workspace:FindFirstChild("Enemies")
+        if enemies then
+            self:_WatchEnemies(enemies)
+            for _, instance in ipairs(enemies:GetChildren()) do
+                self:_ObserveCastleRaid(instance)
             end
         end
     elseif kind == "Berry" then
@@ -17183,6 +17265,8 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.SoulReaper == true
         or self.Enabled.DoughKing == true
         or self.Enabled.Darkbeard == true
+        or self.Enabled.FactoryRaid == true
+        or self.Enabled.CastleRaid == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
         or self.Enabled.HopEliteHunter == true
@@ -18077,6 +18161,8 @@ local STACK_TASK_SEA_REQUIREMENTS = {
     SoulReaper = 3,
     DoughKing = 3,
     Darkbeard = 2,
+    FactoryRaid = 2,
+    CastleRaid = 3,
 }
 
 local INDRA_HAKI_COLORS = {
@@ -18090,6 +18176,8 @@ local STACK_BOSS_LABELS = {
     SoulReaper = "Soul Reaper",
     DoughKing = "Dough King",
     Darkbeard = "Darkbeard",
+    FactoryRaid = "Factory Core",
+    CastleRaid = "Castle Raid",
 }
 
 local function isStackTaskAvailableInCurrentSea(compatibility, kind)
@@ -22961,6 +23049,8 @@ function MainFarm:Initialize(context)
             { Kind = "SoulReaper", Setting = "AttackSoulReaper" },
             { Kind = "DoughKing", Setting = "AttackDoughKing" },
             { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
+            { Kind = "FactoryRaid", Setting = "AutoFactoryRaid" },
+            { Kind = "CastleRaid", Setting = "AutoCastleRaid" },
         }) do
             local requested = stackSettings[taskDefinition.Setting] == true
             local available = isStackTaskAvailableInCurrentSea(
@@ -23610,6 +23700,20 @@ function MainFarm:Handle(actionId, payload)
             "Auto attack/summon Darkbeard",
             payload
         )
+    elseif actionId == "stack.factoryRaid.enabled" then
+        return self:_SetStackTaskEnabled(
+            "FactoryRaid",
+            "AutoFactoryRaid",
+            "Auto attack Factory raid",
+            payload
+        )
+    elseif actionId == "stack.castleRaid.enabled" then
+        return self:_SetStackTaskEnabled(
+            "CastleRaid",
+            "AutoCastleRaid",
+            "Auto attack Castle raid",
+            payload
+        )
     elseif actionId == "stack.fruit.enabled" then
         return self:_SetStackTaskEnabled(
             "Fruit",
@@ -24011,6 +24115,8 @@ function MainFarm:Cleanup()
         stackSettings.AttackSoulReaper = false
         stackSettings.AttackDoughKing = false
         stackSettings.AttackDarkbeard = false
+        stackSettings.AutoFactoryRaid = false
+        stackSettings.AutoCastleRaid = false
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
@@ -24025,6 +24131,8 @@ function MainFarm:Cleanup()
         self.StackTaskQueue:SetEnabled("SoulReaper", false)
         self.StackTaskQueue:SetEnabled("DoughKing", false)
         self.StackTaskQueue:SetEnabled("Darkbeard", false)
+        self.StackTaskQueue:SetEnabled("FactoryRaid", false)
+        self.StackTaskQueue:SetEnabled("CastleRaid", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
         self.StackTaskQueue:SetEnabled("HopEliteHunter", false)

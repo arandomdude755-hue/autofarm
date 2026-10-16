@@ -45,6 +45,8 @@ local STACK_TASK_SEA_REQUIREMENTS = {
     SoulReaper = 3,
     DoughKing = 3,
     Darkbeard = 2,
+    FactoryRaid = 2,
+    CastleRaid = 3,
 }
 
 local INDRA_HAKI_COLORS = {
@@ -58,6 +60,8 @@ local STACK_BOSS_LABELS = {
     SoulReaper = "Soul Reaper",
     DoughKing = "Dough King",
     Darkbeard = "Darkbeard",
+    FactoryRaid = "Factory Core",
+    CastleRaid = "Castle Raid",
 }
 
 local function isStackTaskAvailableInCurrentSea(compatibility, kind)
@@ -4929,6 +4933,8 @@ function MainFarm:Initialize(context)
             { Kind = "SoulReaper", Setting = "AttackSoulReaper" },
             { Kind = "DoughKing", Setting = "AttackDoughKing" },
             { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
+            { Kind = "FactoryRaid", Setting = "AutoFactoryRaid" },
+            { Kind = "CastleRaid", Setting = "AutoCastleRaid" },
         }) do
             local requested = stackSettings[taskDefinition.Setting] == true
             local available = isStackTaskAvailableInCurrentSea(
@@ -5578,6 +5584,20 @@ function MainFarm:Handle(actionId, payload)
             "Auto attack/summon Darkbeard",
             payload
         )
+    elseif actionId == "stack.factoryRaid.enabled" then
+        return self:_SetStackTaskEnabled(
+            "FactoryRaid",
+            "AutoFactoryRaid",
+            "Auto attack Factory raid",
+            payload
+        )
+    elseif actionId == "stack.castleRaid.enabled" then
+        return self:_SetStackTaskEnabled(
+            "CastleRaid",
+            "AutoCastleRaid",
+            "Auto attack Castle raid",
+            payload
+        )
     elseif actionId == "stack.fruit.enabled" then
         return self:_SetStackTaskEnabled(
             "Fruit",
@@ -5979,6 +5999,8 @@ function MainFarm:Cleanup()
         stackSettings.AttackSoulReaper = false
         stackSettings.AttackDoughKing = false
         stackSettings.AttackDarkbeard = false
+        stackSettings.AutoFactoryRaid = false
+        stackSettings.AutoCastleRaid = false
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
@@ -5993,6 +6015,8 @@ function MainFarm:Cleanup()
         self.StackTaskQueue:SetEnabled("SoulReaper", false)
         self.StackTaskQueue:SetEnabled("DoughKing", false)
         self.StackTaskQueue:SetEnabled("Darkbeard", false)
+        self.StackTaskQueue:SetEnabled("FactoryRaid", false)
+        self.StackTaskQueue:SetEnabled("CastleRaid", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
         self.StackTaskQueue:SetEnabled("HopEliteHunter", false)

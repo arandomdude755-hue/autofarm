@@ -8,6 +8,8 @@ local TASK_KIND = {
     SoulReaper = true,
     DoughKing = true,
     Darkbeard = true,
+    FactoryRaid = true,
+    CastleRaid = true,
     Fruit = true,
     Berry = true,
     HopEliteHunter = true,
@@ -19,7 +21,11 @@ local SPAWNED_BOSS_KINDS = {
     ["Soul Reaper"] = "SoulReaper",
     ["Dough King"] = "DoughKing",
     ["Darkbeard"] = "Darkbeard",
+    ["Core"] = "FactoryRaid",
 }
+
+local CASTLE_RAID_CENTER = Vector3.new(-5543, 313, -2964)
+local CASTLE_RAID_RADIUS = 1000
 
 local ELITE_HUNTER_NAMES = {
     Deandre = true,
@@ -47,6 +53,30 @@ local function isSpawnedBossKind(kind)
         or kind == "SoulReaper"
         or kind == "DoughKing"
         or kind == "Darkbeard"
+        or kind == "FactoryRaid"
+end
+
+local function isCastleRaidCandidate(instance)
+    if not instance or not instance:IsA("Model") then
+        return false
+    end
+
+    local name = string.lower(instance.Name)
+    if name == "oni2"
+        or string.find(name, "boss", 1, true)
+        or string.find(name, "friend", 1, true)
+        or string.find(name, "wraith", 1, true)
+        or name == "rip_indra true form"
+    then
+        return false
+    end
+
+    local root = instance:FindFirstChild("HumanoidRootPart")
+    local humanoid = instance:FindFirstChildWhichIsA("Humanoid")
+    return root ~= nil
+        and humanoid ~= nil
+        and humanoid.Health > 0
+        and (root.Position - CASTLE_RAID_CENTER).Magnitude <= CASTLE_RAID_RADIUS
 end
 
 local function isFruitCandidate(instance)
@@ -129,6 +159,8 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
             SoulReaper = false,
             DoughKing = false,
             Darkbeard = false,
+            FactoryRaid = false,
+            CastleRaid = false,
             Fruit = false,
             Berry = false,
             HopEliteHunter = false,
@@ -316,6 +348,14 @@ function StackTaskQueue:_ObserveSpawnedBoss(instance)
     self:_Queue(kind, instance)
 end
 
+function StackTaskQueue:_ObserveCastleRaid(instance)
+    if not isCastleRaidCandidate(instance) then
+        return
+    end
+    self:_RememberSpawn("CastleRaid", instance)
+    self:_Queue("CastleRaid", instance)
+end
+
 function StackTaskQueue:BindLiveEliteTarget(entry, target)
     if not entry
         or entry.Kind ~= "EliteHunter"
@@ -482,11 +522,13 @@ function StackTaskQueue:_WatchEnemies(folder)
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
         self:_ObserveSpawnedBoss(instance)
+        self:_ObserveCastleRaid(instance)
     end)
     for _, instance in ipairs(folder:GetChildren()) do
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
         self:_ObserveSpawnedBoss(instance)
+        self:_ObserveCastleRaid(instance)
     end
 end
 
@@ -579,6 +621,14 @@ function StackTaskQueue:_QueueExisting(kind)
             self:_WatchEnemies(enemies)
             for _, instance in ipairs(enemies:GetChildren()) do
                 self:_ObserveSpawnedBoss(instance)
+            end
+        end
+    elseif kind == "CastleRaid" then
+        local enemies = self.Workspace:FindFirstChild("Enemies")
+        if enemies then
+            self:_WatchEnemies(enemies)
+            for _, instance in ipairs(enemies:GetChildren()) do
+                self:_ObserveCastleRaid(instance)
             end
         end
     elseif kind == "Berry" then
@@ -773,6 +823,8 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.SoulReaper == true
         or self.Enabled.DoughKing == true
         or self.Enabled.Darkbeard == true
+        or self.Enabled.FactoryRaid == true
+        or self.Enabled.CastleRaid == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
         or self.Enabled.HopEliteHunter == true
