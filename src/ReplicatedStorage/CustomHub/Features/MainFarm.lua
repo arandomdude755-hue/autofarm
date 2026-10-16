@@ -66,6 +66,8 @@ local STACK_BOSS_LABELS = {
     Darkbeard = "Darkbeard",
     FactoryRaid = "Factory Core",
     CastleRaid = "Castle Raid",
+    SeaUnlock2 = "Sea 2 unlock",
+    SeaUnlock3 = "Sea 3 unlock",
 }
 
 local function isStackTaskAvailableInCurrentSea(compatibility, kind)
@@ -345,66 +347,98 @@ function MainFarm:_InvokeProgressAction(name, ...)
     return ok, ok and result or tostring(result)
 end
 
-function MainFarm:_ProgressLease()
-    local coordinator = self.Context and self.Context.TaskCoordinator
-    if not coordinator then
-        return true
+function MainFarm:_QueueEligibleSeaProgression()
+    local settings = self:_GetProgressionSettings()
+    local queue = self.StackTaskQueue
+    if not settings or not queue then
+        return
     end
-    if self.SeaProgressLease then
-        local current = coordinator:GetCurrent()
-        if current and current.Label == "Sea progression" then
-            return true
-        end
-        self.SeaProgressLease = nil
-    end
-    local lease, blocker = coordinator:TryAcquire(
-        "SeaProgression",
-        "Sea progression",
-        "Protected"
-    )
-    if not lease then
-        self:_SetStatus(
-            "Sea progression is waiting for " ..
-                tostring(blocker and blocker.Label or "the current task") .. " to finish",
-            "info"
-        )
-        return false
-    end
-    self.SeaProgressLease = lease
-    self:_ReleaseMainFarmLease()
-    return true
-end
 
-function MainFarm:_ReleaseProgressLease()
-    local coordinator = self.Context and self.Context.TaskCoordinator
-    if coordinator and self.SeaProgressLease then
-        coordinator:Release(self.SeaProgressLease)
+    self.SeaProgressTokens = self.SeaProgressTokens or {}
+    local sea = self:_GetSeaIndex()
+    local level = self.QuestService and tonumber(self.QuestService:GetPlayerLevel())
+    for _, definition in ipairs({
+        {
+            Kind = "SeaUnlock2",
+            Setting = "AutoUnlockSea2",
+            DestinationSea = 2,
+            RequiredLevel = 700,
+        },
+        {
+            Kind = "SeaUnlock3",
+            Setting = "AutoUnlockSea3",
+            DestinationSea = 3,
+            RequiredLevel = 1500,
+        },
+    }) do
+        local enabled = settings[definition.Setting] == true
+            and queue.Enabled[definition.Kind] == true
+        if enabled and sea and sea >= definition.DestinationSea then
+            self:_CompleteSeaUnlock(definition.Setting, definition.DestinationSea)
+            enabled = false
+        end
+        local eligible = enabled
+            and sea == definition.DestinationSea - 1
+            and level ~= nil
+            and level >= definition.RequiredLevel
+        local token = self.SeaProgressTokens[definition.Kind]
+
+        if eligible then
+            if not token then
+                token = {}
+                self.SeaProgressTokens[definition.Kind] = token
+            end
+            queue:QueueManual(definition.Kind, token)
+        elseif token then
+            queue:RemoveManual(definition.Kind, token)
+            if not enabled then
+                self.SeaProgressTokens[definition.Kind] = nil
+            end
+        end
     end
-    self.SeaProgressLease = nil
 end
 
 function MainFarm:_CompleteSeaUnlock(settingName, destinationSea)
     local settings = self:_GetProgressionSettings()
+    local taskKind = destinationSea == 2 and "SeaUnlock2" or "SeaUnlock3"
+    local shouldResumeFarm = settings
+        and settings.ResumeMainFarmAfterSeaUnlock == true
+        and tonumber(settings.ResumeSea) == destinationSea
+    self.WaitingForTrevorFruit = false
     if settings then
         settings[settingName] = false
-        if tonumber(settings.ResumeSea) == destinationSea then
-            settings.ResumeSea = nil
-            settings.ResumeMainFarmAfterSeaUnlock = false
+        settings.ResumeSea = nil
+        settings.ResumeMainFarmAfterSeaUnlock = false
+    end
+    if shouldResumeFarm then
+        self.MainFarmEnabled = true
+        if self.Context and self.Context.State then
+            self.Context.State:SetFeatureEnabled("farm.main", true)
         end
     end
+    if self.StackTaskQueue then
+        self.StackTaskQueue:SetEnabled(taskKind, false)
+    end
+    if self.Context and self.Context.State then
+        self.Context.State:SetFeatureEnabled(
+            destinationSea == 2 and "progression.sea2.enabled" or "progression.sea3.enabled",
+            false
+        )
+    end
     self:_SaveProgressionSettings()
-    self:_ReleaseProgressLease()
     self:_SetStatus(
-        "Sea " .. tostring(destinationSea) .. " is unlocked. Main Farming can continue here.",
+        "Sea " .. tostring(destinationSea) .. " is unlocked; Stack Farming task complete",
         "success"
     )
 end
 
 function MainFarm:_PrepareSeaTransition(destinationSea)
     local settings = self:_GetProgressionSettings()
-    if settings and self.MainFarmEnabled then
-        settings.ResumeMainFarmAfterSeaUnlock = true
-        settings.ResumeSea = destinationSea
+    if settings then
+        settings.ResumeMainFarmAfterSeaUnlock = self.MainFarmEnabled == true
+        settings.ResumeSea = settings.ResumeMainFarmAfterSeaUnlock
+            and destinationSea
+            or nil
         self:_SaveProgressionSettings()
     end
 end
@@ -676,6 +710,7 @@ function MainFarm:_StepSea3Unlock(session, root)
         return true
     end
     if unlocks.FlamingoAccess == nil or unlocks.FlamingoAccess == false then
+        self.WaitingForTrevorFruit = true
         local settings = self:_GetProgressionSettings()
         local selectedFruit = settings and settings.TrevorFruit
         self:_HoldPosition(session)
@@ -687,6 +722,7 @@ function MainFarm:_StepSea3Unlock(session, root)
         )
         return true
     end
+    self.WaitingForTrevorFruit = false
 
     local checkOk, zQuest = self:_ProgressRemote("ZQuestProgress", "Check")
     if not checkOk then
@@ -756,32 +792,20 @@ function MainFarm:_StepSea3Unlock(session, root)
     return true
 end
 
-function MainFarm:_StepSeaProgression(session)
+function MainFarm:_StepSeaProgression(session, entry)
     local settings = self:_GetProgressionSettings()
-    if not settings then
-        self:_ReleaseProgressLease()
+    local destinationSea
+    local settingName
+    if entry and entry.Kind == "SeaUnlock2" then
+        destinationSea, settingName = 2, "AutoUnlockSea2"
+    elseif entry and entry.Kind == "SeaUnlock3" then
+        destinationSea, settingName = 3, "AutoUnlockSea3"
+    end
+    if not settings or not destinationSea or settings[settingName] ~= true then
         return false
     end
     local sea = self:_GetSeaIndex()
-    local settingName, destinationSea
-    if settings.AutoUnlockSea2 == true then
-        settingName, destinationSea = "AutoUnlockSea2", 2
-    elseif settings.AutoUnlockSea3 == true then
-        settingName, destinationSea = "AutoUnlockSea3", 3
-    else
-        self:_ReleaseProgressLease()
-        return false
-    end
     if sea and sea >= destinationSea then
-        if settings.ResumeMainFarmAfterSeaUnlock == true
-            and tonumber(settings.ResumeSea) == sea
-        then
-            settings.ResumeMainFarmAfterSeaUnlock = false
-            settings.ResumeSea = nil
-            self.MainFarmEnabled = true
-            self.Context.State:SetFeatureEnabled("farm.main", true)
-            self:_SaveProgressionSettings()
-        end
         self:_CompleteSeaUnlock(settingName, destinationSea)
         return true
     end
@@ -801,10 +825,6 @@ function MainFarm:_StepSeaProgression(session)
                 .. " is waiting for level " .. tostring(requiredLevel),
             "info"
         )
-        self:_ReleaseProgressLease()
-        return false
-    end
-    if not self:_ProgressLease() then
         return false
     end
     local _, _, root = self.Context.Compatibility:GetCharacterParts()
@@ -826,14 +846,47 @@ function MainFarm:ResumePendingSeaProgression()
     local sea = self:_GetSeaIndex()
     local resumeSea = tonumber(settings.ResumeSea)
     local resumedFarm = false
-    if settings.ResumeMainFarmAfterSeaUnlock == true and sea == resumeSea then
+    local settingsChanged = false
+    for _, definition in ipairs({
+        { Setting = "AutoUnlockSea2", Kind = "SeaUnlock2", DestinationSea = 2 },
+        { Setting = "AutoUnlockSea3", Kind = "SeaUnlock3", DestinationSea = 3 },
+    }) do
+        if settings[definition.Setting] == true
+            and sea
+            and sea >= definition.DestinationSea
+        then
+            settings[definition.Setting] = false
+            settingsChanged = true
+            if self.StackTaskQueue then
+                self.StackTaskQueue:SetEnabled(definition.Kind, false)
+            end
+            if self.Context and self.Context.State then
+                self.Context.State:SetFeatureEnabled(
+                    definition.DestinationSea == 2
+                        and "progression.sea2.enabled"
+                        or "progression.sea3.enabled",
+                    false
+                )
+            end
+        end
+    end
+    if settings.ResumeMainFarmAfterSeaUnlock == true
+        and sea
+        and resumeSea
+        and sea >= resumeSea
+    then
         settings.ResumeMainFarmAfterSeaUnlock = false
         settings.ResumeSea = nil
+        settingsChanged = true
         self.MainFarmEnabled = true
-        self.Context.State:SetFeatureEnabled("farm.main", true)
-        self:_SaveProgressionSettings()
+        if self.Context and self.Context.State then
+            self.Context.State:SetFeatureEnabled("farm.main", true)
+        end
         self:_SetStatus("Sea unlocked; resuming Main Farming in this sea", "success")
         resumedFarm = true
+    end
+    if settingsChanged then
+        self:_SaveProgressionSettings()
     end
     if settings.AutoUnlockSea2 == true or settings.AutoUnlockSea3 == true then
         return self:_StartWorker()
@@ -850,6 +903,16 @@ function MainFarm:_OfferTrevorFruit()
     local selected = settings and settings.TrevorFruit
     if not settings or settings.AutoUnlockSea3 ~= true or self:_GetSeaIndex() ~= 2 then
         self:_SetStatus("Turn on Auto unlock Sea 3 before offering a fruit to Trevor", "warning")
+        return false
+    end
+    if not self.ActiveStackTask
+        or self.ActiveStackTask.Kind ~= "SeaUnlock3"
+        or self.WaitingForTrevorFruit ~= true
+    then
+        self:_SetStatus(
+            "The Sea 3 unlock task will ask for a fruit when it reaches Trevor",
+            "warning"
+        )
         return false
     end
     if type(selected) ~= "string" or selected == "" then
@@ -876,6 +939,7 @@ function MainFarm:_OfferTrevorFruit()
     self:_InvokeProgressAction("TalkTrevor", "2")
     self:_InvokeProgressAction("TalkTrevor", "3")
     settings.TrevorFruit = nil
+    self.WaitingForTrevorFruit = false
     self:_SaveProgressionSettings()
     self:_SetStatus("Offered the selected fruit to Trevor", "success")
     return true
@@ -901,32 +965,63 @@ function MainFarm:_SetSeaUnlockEnabled(destinationSea, enabled)
         return false
     end
     local settingName = destinationSea == 2 and "AutoUnlockSea2" or "AutoUnlockSea3"
+    local taskKind = destinationSea == 2 and "SeaUnlock2" or "SeaUnlock3"
+    local siblingName = destinationSea == 2 and "AutoUnlockSea3" or "AutoUnlockSea2"
+    local siblingKind = destinationSea == 2 and "SeaUnlock3" or "SeaUnlock2"
+    local queue = self.StackTaskQueue
+    if not queue then
+        self:_SetStatus("Stack Farming is unavailable right now", "error")
+        return false
+    end
+    if settings[settingName] == enabled and queue.Enabled[taskKind] == enabled then
+        return true
+    end
+
     settings[settingName] = enabled
+    settings.ResumeMainFarmAfterSeaUnlock = false
+    settings.ResumeSea = nil
     if enabled then
-        local siblingName = destinationSea == 2 and "AutoUnlockSea3" or "AutoUnlockSea2"
         settings[siblingName] = false
+        queue:SetEnabled(siblingKind, false)
+        if self.ActiveStackTask and self.ActiveStackTask.Kind == siblingKind then
+            self:_FinishStackTask(self.ActiveStackTask, "Sea unlock task replaced", false)
+        end
         self.Context.State:SetFeatureEnabled(
             destinationSea == 2 and "progression.sea3.enabled" or "progression.sea2.enabled",
             false
         )
-        settings.ResumeMainFarmAfterSeaUnlock = self.MainFarmEnabled == true
-        settings.ResumeSea = nil
+    end
+    local queueReady, queueError = queue:SetEnabled(taskKind, enabled)
+    if not queueReady then
+        settings[settingName] = not enabled
+        self:_SetStatus("Sea unlock could not join Stack Farming: " .. tostring(queueError), "error")
+        return false
+    end
+    if enabled then
+        self.SeaProgressTokens = self.SeaProgressTokens or {}
+        self.SeaProgressTokens[taskKind] = nil
         self:_StartWorker()
         self:_SetStatus(
-            "Auto unlock Sea " .. tostring(destinationSea) .. " enabled",
+            "Sea " .. tostring(destinationSea) .. " unlock added to Stack Farming",
             "success"
         )
     else
-        settings.ResumeMainFarmAfterSeaUnlock = false
-        settings.ResumeSea = nil
-        self:_ReleaseProgressLease()
-        self:_SetStatus("Auto unlock Sea " .. tostring(destinationSea) .. " disabled", "info")
+        if self.SeaProgressTokens then
+            self.SeaProgressTokens[taskKind] = nil
+        end
+        if self.ActiveStackTask and self.ActiveStackTask.Kind == taskKind then
+            self:_FinishStackTask(self.ActiveStackTask, "Sea unlock task turned off", false)
+        end
+        self:_SetStatus("Sea " .. tostring(destinationSea) .. " unlock removed from Stack Farming", "info")
     end
     self.Context.State:SetFeatureEnabled(
         destinationSea == 2 and "progression.sea2.enabled" or "progression.sea3.enabled",
         enabled
     )
     self:_SaveProgressionSettings()
+    if not enabled and not self.MainFarmEnabled and not self:_HasEnabledStackTasks() then
+        self:_StopWorker()
+    end
     return true
 end
 
@@ -966,6 +1061,10 @@ function MainFarm:_GetStackTaskLabel(entry)
         return entry.Instance and entry.Instance.Name or "spawned fruit"
     elseif entry and entry.Kind == "Berry" then
         return "Berry collection"
+    elseif entry and entry.Kind == "SeaUnlock2" then
+        return "Sea 2 unlock"
+    elseif entry and entry.Kind == "SeaUnlock3" then
+        return "Sea 3 unlock"
     end
     return "stack task"
 end
@@ -988,7 +1087,11 @@ function MainFarm:_BeginStackTask(entry)
     entry.CoordinatorLease = lease
     self.StackTaskStartedAt = os.clock()
     self.StackInterruptedFarm = self.MainFarmEnabled == true
-    if self.ServerHopService then
+    self.WaitingForTrevorFruit = false
+    if self.ServerHopService
+        and entry.Kind ~= "SeaUnlock2"
+        and entry.Kind ~= "SeaUnlock3"
+    then
         self.ServerHopService:OnStackTaskStarted(entry.Kind)
     end
 
@@ -1028,7 +1131,21 @@ function MainFarm:_FinishStackTask(entry, reason, markCompleted)
     if self.StackTaskQueue then
         self.StackTaskQueue:Complete(entry, markCompleted)
     end
+    if markCompleted ~= false and self.SeaProgressTokens then
+        if entry.Kind == "SeaUnlock2"
+            and self.SeaProgressTokens.SeaUnlock2 == entry.Instance
+        then
+            self.SeaProgressTokens.SeaUnlock2 = nil
+        elseif entry.Kind == "SeaUnlock3"
+            and self.SeaProgressTokens.SeaUnlock3 == entry.Instance
+        then
+            self.SeaProgressTokens.SeaUnlock3 = nil
+        end
+    end
     self.ActiveStackTask = nil
+    if entry.Kind == "SeaUnlock2" or entry.Kind == "SeaUnlock3" then
+        self.WaitingForTrevorFruit = false
+    end
     if entry.PreparationKind
         and self.ActiveStackPrep
         and self.ActiveStackPrep.Kind == entry.PreparationKind
@@ -1901,9 +2018,20 @@ function MainFarm:_StepStackTasks(session)
             return false
         end
         self:_SetStatus(
-            "Stack Farming is on; waiting for a selected target to spawn",
+            "Stack Farming is waiting for a selected task to become available",
             "info"
         )
+        return true
+    end
+
+    if entry.Kind == "SeaUnlock2" or entry.Kind == "SeaUnlock3" then
+        if not self:_StepSeaProgression(session, entry) then
+            self:_FinishStackTask(
+                entry,
+                "Sea unlock paused; it will rejoin the queue when its requirements are met",
+                false
+            )
+        end
         return true
     end
 
@@ -5382,9 +5510,7 @@ end
 function MainFarm:_Run(session)
     while self:_IsCurrent(session) do
         local ok, err = pcall(function()
-            if self:_StepSeaProgression(session) then
-                return
-            end
+            self:_QueueEligibleSeaProgression()
             if self:_StepStackTasks(session) then
                 return
             end
@@ -5443,7 +5569,10 @@ function MainFarm:_Run(session)
             self.DoubleQuestScanTarget = nil
             self.NextDoubleQuestScanAt = 0
             self:_SetStatus(
-                (self.SeaProgressLease and "Sea progression step error: "
+                (self.ActiveStackTask
+                    and (self.ActiveStackTask.Kind == "SeaUnlock2"
+                        or self.ActiveStackTask.Kind == "SeaUnlock3")
+                    and "Sea unlock step error: "
                     or self.ActiveStackTask and "Stack Farming step error: "
                     or "Main Farm step error: ")
                     .. tostring(err),
@@ -5539,7 +5668,7 @@ function MainFarm:Initialize(context)
     self.ActiveStackLease = nil
     self.ActiveMainFarmLease = nil
     self.ActiveStackPrep = nil
-    self.SeaProgressLease = nil
+    self.SeaProgressTokens = {}
     self.ProgressRemoteCache = {}
     self.ProgressActionAt = {}
     self.NextSeaTransitionAt = 0
@@ -5547,6 +5676,7 @@ function MainFarm:Initialize(context)
     self.IndraColorState = nil
     self.StackTaskStartedAt = 0
     self.StackInterruptedFarm = false
+    self.WaitingForTrevorFruit = false
     self.ResumeServerHop = false
     if self.ServerHopService then
         self.ServerHopService:Destroy()
@@ -5645,6 +5775,16 @@ function MainFarm:Initialize(context)
         )
         self.StackTaskQueue:SetEnabled("HopEliteHunter", hopEliteRequested)
         self.StackTaskQueue:SetEnabled("HopBerry", hopBerryRequested)
+        local progressionSettings = context.Config
+            and context.Config.ProgressionSettings or {}
+        self.StackTaskQueue:SetEnabled(
+            "SeaUnlock2",
+            progressionSettings.AutoUnlockSea2 == true
+        )
+        self.StackTaskQueue:SetEnabled(
+            "SeaUnlock3",
+            progressionSettings.AutoUnlockSea3 == true
+        )
         self.ServerHopService = ServerHopService.new(
             context.Compatibility,
             context.SettingsPersistence,
@@ -5957,6 +6097,12 @@ end
 
 function MainFarm:Stop()
     self.MainFarmEnabled = false
+    local progressionSettings = self:_GetProgressionSettings()
+    if progressionSettings and progressionSettings.ResumeMainFarmAfterSeaUnlock == true then
+        progressionSettings.ResumeMainFarmAfterSeaUnlock = false
+        progressionSettings.ResumeSea = nil
+        self:_SaveProgressionSettings()
+    end
     if self.Context and self.Context.State then
         self.Context.State:SetFeatureEnabled("farm.main", false)
     end
@@ -6703,8 +6849,8 @@ function MainFarm:Handle(actionId, payload)
 end
 
 function MainFarm:Cleanup()
-    self:_ReleaseProgressLease()
     self.MainFarmEnabled = false
+    self.SeaProgressTokens = {}
     local stackSettings = self.Context
         and self.Context.Config
         and self.Context.Config.StackFarmSettings

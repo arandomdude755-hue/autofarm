@@ -14,6 +14,13 @@ local TASK_KIND = {
     Berry = true,
     HopEliteHunter = true,
     HopBerry = true,
+    SeaUnlock2 = true,
+    SeaUnlock3 = true,
+}
+
+local MANUAL_TASK_KIND = {
+    SeaUnlock2 = true,
+    SeaUnlock3 = true,
 }
 
 local SPAWNED_BOSS_KINDS = {
@@ -165,6 +172,8 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
             Berry = false,
             HopEliteHunter = false,
             HopBerry = false,
+            SeaUnlock2 = false,
+            SeaUnlock3 = false,
         },
         Pending = {},
         PendingByInstance = setmetatable({}, { __mode = "k" }),
@@ -666,7 +675,10 @@ function StackTaskQueue:SetEnabled(kind, enabled)
     self.Enabled[kind] = enabled
 
     if enabled then
-        if kind ~= "HopEliteHunter" and kind ~= "HopBerry" then
+        if kind ~= "HopEliteHunter"
+            and kind ~= "HopBerry"
+            and not MANUAL_TASK_KIND[kind]
+        then
             self:_QueueExisting(kind)
         end
     else
@@ -687,6 +699,39 @@ function StackTaskQueue:SetEnabled(kind, enabled)
         end
         if kind == "EliteHunter" then
             table.clear(self.EliteByName)
+        end
+    end
+    return true
+end
+
+function StackTaskQueue:QueueManual(kind, token)
+    if not MANUAL_TASK_KIND[kind] then
+        return false, "Unsupported manual stack task"
+    end
+    if type(token) ~= "table" then
+        return false, "Manual stack task token is invalid"
+    end
+    if not self.Enabled[kind] then
+        return false, "Manual stack task is disabled"
+    end
+    self:_Queue(kind, token)
+    return self.PendingByInstance[token] ~= nil
+        or self.ActiveByInstance[token] ~= nil
+end
+
+function StackTaskQueue:RemoveManual(kind, token)
+    if not MANUAL_TASK_KIND[kind] or type(token) ~= "table" then
+        return false
+    end
+    local entry = self.PendingByInstance[token]
+    if not entry or entry.Kind ~= kind then
+        return false
+    end
+    self.PendingByInstance[token] = nil
+    for index = #self.Pending, 1, -1 do
+        if self.Pending[index] == entry then
+            table.remove(self.Pending, index)
+            break
         end
     end
     return true
@@ -829,6 +874,8 @@ function StackTaskQueue:HasEnabledTasks()
         or self.Enabled.Berry == true
         or self.Enabled.HopEliteHunter == true
         or self.Enabled.HopBerry == true
+        or self.Enabled.SeaUnlock2 == true
+        or self.Enabled.SeaUnlock3 == true
 end
 
 function StackTaskQueue:TakePendingKind(kind)
@@ -869,6 +916,8 @@ function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
                     or isSpawnedBossKind(entry.Kind)
                     and instance.Parent == self.EnemiesFolder
                     and isSpawnedStackBoss(instance)
+                    or MANUAL_TASK_KIND[entry.Kind]
+                    and instance ~= nil
                     or entry.Kind ~= "Fruit"
                     and entry.Kind ~= "EliteHunter"
                     and not isSpawnedBossKind(entry.Kind)

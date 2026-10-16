@@ -601,7 +601,6 @@ local Config = {
         Farm = {
             { Label = "Main Farming", Page = "Farm" },
             { Label = "Stack Farming", Page = "StackFarming" },
-            { Label = "Farming Other", Page = "FarmOther" },
         },
         Status = {
             { Label = "Event Status", Page = "EventStatus" },
@@ -869,11 +868,6 @@ local Config = {
                     RequiredSea = 3,
                     Description = "Requires Collect Berries to be on.",
                 },
-            },
-        },
-        FarmOther = {
-            Title = "Farming Other",
-            Controls = {
                 {
                     Kind = "sectionHeader",
                     Label = "Sea progression",

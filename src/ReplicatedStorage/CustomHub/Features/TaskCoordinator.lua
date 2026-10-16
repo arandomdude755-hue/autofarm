@@ -16,8 +16,8 @@ function TaskCoordinator.new()
     }, TaskCoordinator)
 end
 
--- Background work is normal Main Farming or user-directed Travel. Stack work
--- may pause either; Protected progression work may take over from Main Farming.
+-- Background work is normal Main Farming or user-directed Travel. Stack tasks
+-- may interrupt either, but must wait for other task-owned work to finish.
 function TaskCoordinator:TryAcquire(owner, label, group, onPreempt)
     if self.Destroyed then
         return nil, "Task coordination has stopped"
