@@ -251,8 +251,26 @@ task.spawn(function()
         return nil
     end
 
-    local function report(message)
+    local function report(message, kind)
         warn("[Custom Hub Auto Execute] " .. message)
+        local player = game:GetService("Players").LocalPlayer
+        local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
+        local hubGui = playerGui and playerGui:FindFirstChild("CustomHubShell")
+        local notificationBridge = hubGui
+            and hubGui:FindFirstChild("CustomHubNotificationBridge")
+        if notificationBridge and notificationBridge:IsA("BindableFunction") then
+            local notified = pcall(function()
+                notificationBridge:Invoke(
+                    "Auto Execute",
+                    message,
+                    kind or "info"
+                )
+            end)
+            if notified then
+                return
+            end
+        end
+
         local starterGui = game:GetService("StarterGui")
         for _ = 1, 20 do
             local shown = pcall(function()
@@ -440,7 +458,7 @@ task.spawn(function()
 
     local runOk, runError = pcall(chunk)
     if not runOk then
-        report("Bundle execution failed: " .. tostring(runError))
+        report("Bundle execution failed: " .. tostring(runError), "error")
         return
     end
 
@@ -451,7 +469,10 @@ task.spawn(function()
     if loadedGui then
         report("Custom Hub loaded after teleport.")
     else
-        report("Bundle ran, but the hub window did not appear. Check executor errors.")
+        report(
+            "Bundle ran, but the hub window did not appear. Check executor errors.",
+            "warning"
+        )
     end
 end)
 ]], AUTO_EXECUTE_SOURCE_URL, AUTO_EXECUTE_BUNDLE_PATH,
@@ -704,18 +725,19 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         return false, "PlayerGui is unavailable"
     end
 
-    local function clearGuiSelection()
+    local function activateButton(button)
+        local fireSignal
         pcall(function()
-            game:GetService("GuiService").SelectedObject = nil
+            fireSignal = firesignal
         end)
-    end
-
-    local function clearGuiSelectionBriefly()
-        task.spawn(function()
-            for _ = 1, 12 do
-                clearGuiSelection()
-                task.wait(0.1)
+        if type(fireSignal) == "function" then
+            local activated = pcall(fireSignal, button.Activated)
+            if activated then
+                return true
             end
+        end
+        return pcall(function()
+            button:Activate()
         end)
     end
 
@@ -723,10 +745,7 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
     local deadline = os.clock() + timeout
     local attempted = false
     local sawPrompt = false
-    local remoteAttempts = 0
-    local nextRemoteAttemptAt = 0
-    local remoteAttemptPending = false
-    local lastRemoteError = nil
+    local nextButtonAttemptAt = 0
     while os.clock() <= deadline do
         if not game:IsLoaded() or not player:FindFirstChild("DataLoaded") then
             task.wait(0.1)
@@ -741,33 +760,11 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         end
         local promptVisible = chooseTeam ~= nil and chooseTeam.Visible == true
         if player.Team and (not chooseTeam or not promptVisible) then
-            clearGuiSelectionBriefly()
             return true, "Team selected"
         end
 
         if chooseTeam then
             sawPrompt = true
-            if remoteAttempts < 2
-                and not remoteAttemptPending
-                and os.clock() >= nextRemoteAttemptAt
-            then
-                remoteAttempts += 1
-                nextRemoteAttemptAt = os.clock() + 1.5
-                local remote = self:GetCommF()
-                if remote and remote:IsA("RemoteFunction") then
-                    remoteAttemptPending = true
-                    task.spawn(function()
-                        local invokeOk, invokeError = pcall(function()
-                            remote:InvokeServer("SetTeam", teamName)
-                        end)
-                        if not invokeOk then
-                            lastRemoteError = tostring(invokeError)
-                        end
-                        remoteAttemptPending = false
-                    end)
-                end
-            end
-
             local container = chooseTeam:FindFirstChild("Container")
             local teamCard = container and container:FindFirstChild(teamName)
             local frame = teamCard and teamCard:FindFirstChild("Frame")
@@ -779,41 +776,12 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
                 button = teamCard:FindFirstChildWhichIsA("GuiButton", true)
             end
 
-            if button then
+            if button and os.clock() >= nextButtonAttemptAt then
                 attempted = true
-                pcall(function()
-                    button.Selectable = true
-                end)
-                local inputOk = pcall(function()
-                    local guiService = game:GetService("GuiService")
-                    local inputManager = game:GetService("VirtualInputManager")
-                    guiService.SelectedObject = button
-                    inputManager:SendKeyEvent(
-                        true,
-                        Enum.KeyCode.Return,
-                        false,
-                        button
-                    )
-                    inputManager:SendKeyEvent(
-                        false,
-                        Enum.KeyCode.Return,
-                        false,
-                        button
-                    )
-                end)
-                if not inputOk or chooseTeam.Visible then
-                    pcall(function()
-                        button:Activate()
-                    end)
-                end
-                task.wait(0.4)
-                pcall(function()
-                    if game:GetService("GuiService").SelectedObject == button then
-                        game:GetService("GuiService").SelectedObject = nil
-                    end
-                end)
+                nextButtonAttemptAt = os.clock() + 0.5
+                activateButton(button)
             else
-                task.wait(0.2)
+                task.wait(0.1)
             end
         else
             if player.Team then
@@ -823,7 +791,6 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         end
 
         if player.Team and chooseTeam and not chooseTeam.Visible then
-            clearGuiSelectionBriefly()
             return true, "Team selected"
         end
     end
@@ -832,12 +799,10 @@ function Compatibility:SelectTeamIfPrompted(teamName, timeoutSeconds)
         or playerGui:FindFirstChild("Main")
     local chooseTeam = main and main:FindFirstChild("ChooseTeam")
     if player.Team and (not chooseTeam or not chooseTeam.Visible) then
-        clearGuiSelectionBriefly()
         return true, "A team is already selected"
     end
     if attempted then
         return false, "Could not confirm the " .. teamName .. " team selection"
-            .. (lastRemoteError and ("; SetTeam request failed: " .. lastRemoteError) or "")
     elseif sawPrompt then
         return false, "The team selection screen did not contain a usable button"
     end

@@ -8,6 +8,42 @@ local UI = require(script.UI)
 local Hub = {}
 Hub.__index = Hub
 local activeHub = nil
+local RUNTIME_GUARD_NAME = "__CustomHubRuntimeGuard"
+local RUNTIME_GUARD_TIMEOUT = 30
+
+function Hub:_AcquireRuntimeGuard(playerGui)
+    if playerGui:FindFirstChild("CustomHubShell") then
+        return false, "Custom Hub is already running"
+    end
+
+    local existingGuard = playerGui:FindFirstChild(RUNTIME_GUARD_NAME)
+    if existingGuard then
+        local startedAt = tonumber(existingGuard:GetAttribute("StartedAt"))
+        local isReady = existingGuard:GetAttribute("Ready") == true
+        if isReady or not startedAt or os.clock() - startedAt > RUNTIME_GUARD_TIMEOUT then
+            existingGuard:Destroy()
+        else
+            return false, "Custom Hub startup is already in progress"
+        end
+    end
+
+    local guard = Instance.new("Folder")
+    guard.Name = RUNTIME_GUARD_NAME
+    guard:SetAttribute("StartedAt", os.clock())
+    guard:SetAttribute("Ready", false)
+    guard.Parent = playerGui
+    self.RuntimeGuard = guard
+    return true
+end
+
+function Hub:_ReleaseRuntimeGuard()
+    if self.RuntimeGuard then
+        pcall(function()
+            self.RuntimeGuard:Destroy()
+        end)
+        self.RuntimeGuard = nil
+    end
+end
 
 function Hub.new()
     local compatibility = Compatibility.new()
@@ -47,13 +83,21 @@ function Hub:Start()
     end
 
     if activeHub and activeHub ~= self then
-        activeHub:Destroy()
-        self.SettingsPersistence:Load()
-        self.SettingsPersistence:SetState(self.State)
+        self.DuplicateExecution = true
+        self.SettingsPersistence:Destroy()
+        return true, "Duplicate execution ignored; the existing hub was kept open"
+    end
+
+    local guardAcquired = self:_AcquireRuntimeGuard(playerGui)
+    if not guardAcquired then
+        self.DuplicateExecution = true
+        self.SettingsPersistence:Destroy()
+        return true, "Duplicate execution ignored; the existing hub was kept open"
     end
 
     local initialized, initError = self.FeatureManager:Initialize()
     if not initialized then
+        self:_ReleaseRuntimeGuard()
         self.State:SetStatus("Feature setup error: " .. tostring(initError), "error")
         return false, initError
     end
@@ -78,12 +122,16 @@ function Hub:Start()
         self.UI:Destroy()
         self.UI = nil
         self.FeatureManager:Cleanup()
+        self:_ReleaseRuntimeGuard()
         self.State:SetStatus("UI mount error: " .. tostring(mountError), "error")
         return false, tostring(mountError)
     end
 
     self.Started = true
     activeHub = self
+    if self.RuntimeGuard and self.RuntimeGuard.Parent then
+        self.RuntimeGuard:SetAttribute("Ready", true)
+    end
     self.State:SetStatus("Hub UI ready; Main Farm is available but disabled.", "success")
     local startupSettings = Config.StartupSettings or {}
     local teamName = startupSettings.Team == "Pirates" and "Pirates" or "Marines"
@@ -139,6 +187,10 @@ function Hub:Destroy()
     if self.Destroying then
         return
     end
+    if self.DuplicateExecution then
+        self.DuplicateExecution = false
+        return
+    end
     self.Destroying = true
     self.TeamSelectionGeneration += 1
     if self.TeamSelectionTask then
@@ -150,6 +202,7 @@ function Hub:Destroy()
         self.UI:Destroy()
         self.UI = nil
     end
+    self:_ReleaseRuntimeGuard()
     if self.SettingsPersistence then
         self.SettingsPersistence:Flush()
     end

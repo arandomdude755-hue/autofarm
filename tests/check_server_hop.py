@@ -20,6 +20,12 @@ PERSISTENCE = (
 HUB = (ROOT / "src/ReplicatedStorage/CustomHub/init.lua").read_text(
     encoding="utf-8"
 )
+UI = (ROOT / "src/ReplicatedStorage/CustomHub/UI.lua").read_text(
+    encoding="utf-8"
+)
+TEAM_SELECT = COMPATIBILITY.split(
+    "function Compatibility:SelectTeamIfPrompted", 1
+)[1].split("\nfunction Compatibility:GetPublicServers", 1)[0]
 
 
 def require(condition, message):
@@ -96,15 +102,15 @@ require(
     and 'playerGui:FindFirstChild("Main (minimal)")' in COMPATIBILITY
     and 'playerGui:FindFirstChild("Main")' in COMPATIBILITY
     and 'player:FindFirstChild("DataLoaded")' in COMPATIBILITY
-    and "button.Selectable = true" in COMPATIBILITY
-    and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
-    and "player.Team and (not chooseTeam or not promptVisible)" in COMPATIBILITY
-    and "local function clearGuiSelectionBriefly()" in COMPATIBILITY
-    and "for _ = 1, 12 do" in COMPATIBILITY
-    and "VirtualInputManager" in COMPATIBILITY
-    and "button:Activate()" in COMPATIBILITY
+    and "local function activateButton(button)" in TEAM_SELECT
+    and "firesignal" in TEAM_SELECT
+    and "button:Activate()" in TEAM_SELECT
+    and "player.Team and (not chooseTeam or not promptVisible)" in TEAM_SELECT
+    and "VirtualInputManager" not in TEAM_SELECT
+    and "SelectedObject" not in TEAM_SELECT
+    and 'remote:InvokeServer("SetTeam", teamName)' not in TEAM_SELECT
     and "self.Compatibility:SelectTeamIfPrompted" in HUB,
-    "team selection must wait for game data and retry the selectable team button",
+    "team selection must use touch-safe button activation without keyboard focus or synthetic keyboard input",
 )
 require(
     HUB.index("self.FeatureManager:Initialize()")
@@ -125,7 +131,6 @@ require(
         ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"
     ).read_text(encoding="utf-8")
     and 'AUTO_EXECUTE_SOURCE_URL = "https://raw.githubusercontent.com/arandomdude755-hue/autofarm/dev/dist/customhub.bundle.lua"' in COMPATIBILITY
-    and 'remote:InvokeServer("SetTeam", teamName)' in COMPATIBILITY
     and "function Compatibility:SetAutoExecuteEnabled(enabled)" in COMPATIBILITY
     and "function Compatibility:QueueAutoExecuteProbe()" in COMPATIBILITY
     and 'AUTO_EXECUTE_BUNDLE_PATH = "CustomHub/customhub.bundle.lua"' in COMPATIBILITY
@@ -134,6 +139,13 @@ require(
     and "autoExecuteEnabled == false" in COMPATIBILITY
     and "currentGeneration ~= nil and currentGeneration ~= expectedGeneration" in COMPATIBILITY
     and "Bundle ran, but the hub window did not appear." in COMPATIBILITY
+    and 'notificationBridge:Invoke(' in COMPATIBILITY
+    and 'Name = "CustomHubNotificationBridge"' in UI
+    and 'Key = "auto-execute-loaded"' in UI
+    and "function Hub:_AcquireRuntimeGuard(playerGui)" in HUB
+    and 'RUNTIME_GUARD_NAME = "__CustomHubRuntimeGuard"' in HUB
+    and "Duplicate execution ignored; the existing hub was kept open" in HUB
+    and "if self.DuplicateExecution then" in HUB
     and 'starterGui:SetCore("SendNotification"' in COMPATIBILITY
     and "startupSettings.AutoExecute == true" in (
         ROOT / "src/ReplicatedStorage/CustomHub/FeatureManager.lua"

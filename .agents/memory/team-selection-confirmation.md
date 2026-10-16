@@ -3,8 +3,8 @@ name: Team-selection confirmation
 description: Reliable startup team selection in Blox Fruits when the client may already expose a Team before the chooser closes.
 ---
 
-Do not treat `Player.Team ~= nil` alone as proof that startup team selection is finished. The chooser can still be open; success requires an assigned team and a closed/missing `ChooseTeam` prompt. BNN also invokes `CommF_:InvokeServer("SetTeam", teamName)`, while Vxeze retries the selected UI button until the chooser is dismissed.
+Do not treat `Player.Team ~= nil` alone as proof that startup team selection is finished. The chooser can still be open; success requires an assigned team and a closed/missing `ChooseTeam` prompt. For mobile-safe startup selection, activate the chooser button directly (`Activated` signal when supported, otherwise `GuiButton:Activate()`); avoid selecting GUI focus or simulating keyboard input.
 
-**Why:** An early return on an already-populated `Player.Team` left the join screen open and made auto-selection appear broken.
+**Why:** Keyboard-based selection switched mobile players to computer controls and left a visible focus outline. The supplied BloxFruits source fires `Activated`, while BNN/Vxeze use a keyboard Return key.
 
-**How to apply:** For future startup selection changes, validate both the team property and chooser state; keep the source-backed `SetTeam` request and UI-input retry as bounded paths.
+**How to apply:** Retry direct button activation at a bounded interval, then verify both the team property and that the chooser closed. Do not add a `SetTeam` remote or virtual keyboard path to startup selection.

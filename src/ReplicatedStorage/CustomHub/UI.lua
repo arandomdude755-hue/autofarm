@@ -2606,6 +2606,20 @@ function UI:Mount()
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         DisplayOrder = 100,
     }, self.PlayerGui)
+    self.NotificationBridge = Instance.new("BindableFunction")
+    self.NotificationBridge.Name = "CustomHubNotificationBridge"
+    self.NotificationBridge.OnInvoke = function(title, message, kind)
+        return self.State:PushNotification(
+            title,
+            message,
+            kind,
+            {
+                Key = "auto-execute-loaded",
+                Cooldown = 8,
+            }
+        )
+    end
+    self.NotificationBridge.Parent = self.Gui
 
     self.Root = create("Frame", {
         Name = "Window",

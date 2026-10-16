@@ -15,8 +15,8 @@ Share UI appearance preferences across Roblox accounts using the same executor s
 
 **How to apply:** Store interface preferences separately from per-account gameplay settings; do not move Auto Execute or automation toggles into shared settings.
 
-On Delta, the `queue_on_teleport` marker successfully ran after a teleport even when the full hub reload did not.
+On Delta, `queue_on_teleport` plus the staged-bundle/URL loader successfully reloads the hub after teleport.
 
-**Why:** the user's test confirmed the queue API works there, so a missing hub window points to the loader after the queued script starts rather than queue registration.
+**Why:** the user tested and confirmed the full reload works; queue registration and bundle loading are separate stages with different failure causes.
 
-**How to apply:** Keep queue execution, bundle download/compilation, and hub startup as separately reported stages when debugging Auto Execute.
+**How to apply:** Preserve the local staged-bundle path and URL fallback, and keep queue, download/compile, and UI-startup diagnostics distinct if Auto Execute regresses.
