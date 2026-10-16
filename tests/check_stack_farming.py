@@ -33,14 +33,22 @@ require(
 require(
     'Action = "stack.cakePrince.enabled"' in CONFIG
     and 'Action = "stack.eliteHunter.enabled"' in CONFIG
+    and 'Action = "stack.ripIndra.enabled"' in CONFIG
+    and 'Action = "stack.soulReaper.enabled"' in CONFIG
+    and 'Action = "stack.doughKing.enabled"' in CONFIG
+    and 'Action = "stack.darkbeard.enabled"' in CONFIG
     and 'Action = "stack.fruit.enabled"' in CONFIG
     and 'Action = "stack.berry.enabled"' in CONFIG
     and "SpecialHop" not in CONFIG,
-    "Stack Farming must expose Cake Prince, Elite Hunter, fruit and berries without hop controls",
+    "Stack Farming must expose the supported bosses, fruit and berries without hop controls",
 )
 require(
     "AutoAttackCakePrince = false" in CONFIG
     and "AutoEliteHunter = false" in CONFIG
+    and "AttackRipIndra = false" in CONFIG
+    and "AttackSoulReaper = false" in CONFIG
+    and "AttackDoughKing = false" in CONFIG
+    and "AttackDarkbeard = false" in CONFIG
     and "TeleportToFruit = false" in CONFIG
     and "AutoCollectBerries = false" in CONFIG,
     "Stack Farming tasks must default to off",
@@ -60,6 +68,24 @@ require(
     and "function StackTaskQueue:BindLiveEliteTarget" in QUEUE
     and 'self:_ObserveEliteHunter(instance)' in QUEUE,
     "Elite Hunter should detect both reference sources and bind combat to its live world model",
+)
+require(
+    '["rip_indra True Form"] = "RipIndra"' in QUEUE
+    and '["Soul Reaper"] = "SoulReaper"' in QUEUE
+    and '["Dough King"] = "DoughKing"' in QUEUE
+    and '["Darkbeard"] = "Darkbeard"' in QUEUE
+    and "function StackTaskQueue:_ObserveSpawnedBoss" in QUEUE
+    and "self:_ObserveSpawnedBoss(instance)" in QUEUE
+    and "isSpawnedStackBoss(instance)" in QUEUE,
+    "spawned boss stack tasks must discover Enemy models without summoning actions",
+)
+require(
+    "instance.Parent == self.EnemiesFolder" in QUEUE
+    and "isSpawnedBossKind(entry.Kind)" in QUEUE
+    and "isStackTaskAvailableInCurrentSea" in MAIN_FARM
+    and 'Kind = "Darkbeard", Setting = "AttackDarkbeard"' in MAIN_FARM
+    and 'Kind = "RipIndra", Setting = "AttackRipIndra"' in MAIN_FARM,
+    "new boss jobs must be sea-gated and use live spawned enemies",
 )
 require(
     '"BerryBush"' in QUEUE
@@ -123,7 +149,9 @@ require(
     and "Elite Hunter quest accepted; waiting for the target to load" in MAIN_FARM
     and "BindLiveEliteTarget(entry, liveTarget)" in MAIN_FARM
     and "target:IsDescendantOf(self.StackTaskQueue.ReplicatedStorage)" in MAIN_FARM
-    and "only available in Third Sea" in MAIN_FARM
+    and "STACK_TASK_SEA_REQUIREMENTS" in MAIN_FARM
+    and '"IsSecondSea"' in MAIN_FARM
+    and "isStackTaskAvailableInCurrentSea" in MAIN_FARM
     and "or self.Enabled.EliteHunter == true" in QUEUE,
     "Elite Hunter must confirm the Sea 3 tracked quest, attack the reference-resolved target, and use shared combat",
 )
@@ -160,7 +188,11 @@ require(
 )
 require(
     "AutoCollectBerries == true" in TELEPORT
-    and "AutoEliteHunter == true" in TELEPORT,
+    and "AutoEliteHunter == true" in TELEPORT
+    and "AttackRipIndra == true" in TELEPORT
+    and "AttackSoulReaper == true" in TELEPORT
+    and "AttackDoughKing == true" in TELEPORT
+    and "AttackDarkbeard == true" in TELEPORT,
     "berry collection and Elite Hunter must prevent conflicting manual travel",
 )
 

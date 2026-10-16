@@ -458,6 +458,10 @@ local Config = {
     StackFarmSettings = {
         AutoAttackCakePrince = false,
         AutoEliteHunter = false,
+        AttackRipIndra = false,
+        AttackSoulReaper = false,
+        AttackDoughKing = false,
+        AttackDarkbeard = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
     },
@@ -721,6 +725,42 @@ local Config = {
                     Label = "Auto Elite Hunter",
                     Action = "stack.eliteHunter.enabled",
                     Setting = "AutoEliteHunter",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Second Sea",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Darkbeard when spawned",
+                    Action = "stack.darkbeard.enabled",
+                    Setting = "AttackDarkbeard",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Third Sea",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Rip Indra when spawned",
+                    Action = "stack.ripIndra.enabled",
+                    Setting = "AttackRipIndra",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Soul Reaper when spawned",
+                    Action = "stack.soulReaper.enabled",
+                    Setting = "AttackSoulReaper",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Dough King when spawned",
+                    Action = "stack.doughKing.enabled",
+                    Setting = "AttackDoughKing",
                     SettingsKey = "StackFarmSettings",
                 },
                 {

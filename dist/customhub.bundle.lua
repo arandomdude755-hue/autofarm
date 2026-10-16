@@ -487,6 +487,10 @@ local Config = {
     StackFarmSettings = {
         AutoAttackCakePrince = false,
         AutoEliteHunter = false,
+        AttackRipIndra = false,
+        AttackSoulReaper = false,
+        AttackDoughKing = false,
+        AttackDarkbeard = false,
         TeleportToFruit = false,
         AutoCollectBerries = false,
     },
@@ -750,6 +754,42 @@ local Config = {
                     Label = "Auto Elite Hunter",
                     Action = "stack.eliteHunter.enabled",
                     Setting = "AutoEliteHunter",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Second Sea",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Darkbeard when spawned",
+                    Action = "stack.darkbeard.enabled",
+                    Setting = "AttackDarkbeard",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "Third Sea",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Rip Indra when spawned",
+                    Action = "stack.ripIndra.enabled",
+                    Setting = "AttackRipIndra",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Soul Reaper when spawned",
+                    Action = "stack.soulReaper.enabled",
+                    Setting = "AttackSoulReaper",
+                    SettingsKey = "StackFarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Attack Dough King when spawned",
+                    Action = "stack.doughKing.enabled",
+                    Setting = "AttackDoughKing",
                     SettingsKey = "StackFarmSettings",
                 },
                 {
@@ -9897,6 +9937,10 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
         local stackSettings = context.Config and context.Config.StackFarmSettings or {}
         local stackActive = stackSettings.AutoAttackCakePrince == true
             or stackSettings.AutoEliteHunter == true
+            or stackSettings.AttackRipIndra == true
+            or stackSettings.AttackSoulReaper == true
+            or stackSettings.AttackDoughKing == true
+            or stackSettings.AttackDarkbeard == true
             or stackSettings.TeleportToFruit == true
             or stackSettings.AutoCollectBerries == true
         if mainFarm.MainFarmEnabled then
@@ -14384,8 +14428,19 @@ StackTaskQueue.__index = StackTaskQueue
 local TASK_KIND = {
     CakePrince = true,
     EliteHunter = true,
+    RipIndra = true,
+    SoulReaper = true,
+    DoughKing = true,
+    Darkbeard = true,
     Fruit = true,
     Berry = true,
+}
+
+local SPAWNED_BOSS_KINDS = {
+    ["rip_indra True Form"] = "RipIndra",
+    ["Soul Reaper"] = "SoulReaper",
+    ["Dough King"] = "DoughKing",
+    ["Darkbeard"] = "Darkbeard",
 }
 
 local ELITE_HUNTER_NAMES = {
@@ -14401,6 +14456,19 @@ local function isAliveEliteHunter(instance)
     local root = instance:FindFirstChild("HumanoidRootPart")
     local humanoid = instance:FindFirstChildWhichIsA("Humanoid")
     return root ~= nil and humanoid ~= nil and humanoid.Health > 0
+end
+
+local function isSpawnedStackBoss(instance)
+    return instance ~= nil
+        and instance:IsA("Model")
+        and SPAWNED_BOSS_KINDS[instance.Name] ~= nil
+end
+
+local function isSpawnedBossKind(kind)
+    return kind == "RipIndra"
+        or kind == "SoulReaper"
+        or kind == "DoughKing"
+        or kind == "Darkbeard"
 end
 
 local function isFruitCandidate(instance)
@@ -14479,6 +14547,10 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
         Enabled = {
             CakePrince = false,
             EliteHunter = false,
+            RipIndra = false,
+            SoulReaper = false,
+            DoughKing = false,
+            Darkbeard = false,
             Fruit = false,
             Berry = false,
         },
@@ -14655,6 +14727,15 @@ function StackTaskQueue:_ObserveEliteHunter(instance)
     end
 end
 
+function StackTaskQueue:_ObserveSpawnedBoss(instance)
+    if not isSpawnedStackBoss(instance) then
+        return
+    end
+    local kind = SPAWNED_BOSS_KINDS[instance.Name]
+    self:_RememberSpawn(kind, instance)
+    self:_Queue(kind, instance)
+end
+
 function StackTaskQueue:BindLiveEliteTarget(entry, target)
     if not entry
         or entry.Kind ~= "EliteHunter"
@@ -14820,10 +14901,12 @@ function StackTaskQueue:_WatchEnemies(folder)
     self.EnemiesConnection = folder.ChildAdded:Connect(function(instance)
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
+        self:_ObserveSpawnedBoss(instance)
     end)
     for _, instance in ipairs(folder:GetChildren()) do
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
+        self:_ObserveSpawnedBoss(instance)
     end
 end
 
@@ -14908,6 +14991,14 @@ function StackTaskQueue:_QueueExisting(kind)
             self:_WatchEnemies(enemies)
             for _, instance in ipairs(enemies:GetChildren()) do
                 self:_ObserveEliteHunter(instance)
+            end
+        end
+    elseif isSpawnedBossKind(kind) then
+        local enemies = self.Workspace:FindFirstChild("Enemies")
+        if enemies then
+            self:_WatchEnemies(enemies)
+            for _, instance in ipairs(enemies:GetChildren()) do
+                self:_ObserveSpawnedBoss(instance)
             end
         end
     elseif kind == "Berry" then
@@ -15096,6 +15187,10 @@ end
 function StackTaskQueue:HasEnabledTasks()
     return self.Enabled.CakePrince == true
         or self.Enabled.EliteHunter == true
+        or self.Enabled.RipIndra == true
+        or self.Enabled.SoulReaper == true
+        or self.Enabled.DoughKing == true
+        or self.Enabled.Darkbeard == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
 end
@@ -15115,8 +15210,12 @@ function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
                     or entry.Kind == "EliteHunter"
                     and instance.Parent ~= nil
                     and isAliveEliteHunter(instance)
+                    or isSpawnedBossKind(entry.Kind)
+                    and instance.Parent == self.EnemiesFolder
+                    and isSpawnedStackBoss(instance)
                     or entry.Kind ~= "Fruit"
                     and entry.Kind ~= "EliteHunter"
+                    and not isSpawnedBossKind(entry.Kind)
                     and instance.Parent ~= nil
             )
         if self:IsEnabled(entry) and isPresent and not self.CompletedByInstance[instance] then
@@ -15252,6 +15351,35 @@ local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
 local STACK_TASK_LOAD_TIMEOUT = 8
+
+local STACK_TASK_SEA_REQUIREMENTS = {
+    EliteHunter = 3,
+    RipIndra = 3,
+    SoulReaper = 3,
+    DoughKing = 3,
+    Darkbeard = 2,
+}
+
+local STACK_BOSS_LABELS = {
+    RipIndra = "Rip Indra",
+    SoulReaper = "Soul Reaper",
+    DoughKing = "Dough King",
+    Darkbeard = "Darkbeard",
+}
+
+local function isStackTaskAvailableInCurrentSea(compatibility, kind)
+    local requiredSea = STACK_TASK_SEA_REQUIREMENTS[kind]
+    if not requiredSea then
+        return true
+    end
+    local method = requiredSea == 2 and "IsSecondSea" or "IsThirdSea"
+    local check = compatibility and compatibility[method]
+    if type(check) ~= "function" then
+        return false
+    end
+    local ok, isCurrentSea = pcall(check, compatibility)
+    return ok and isCurrentSea == true
+end
 
 local MainFarm = {
     Running = false,
@@ -15437,6 +15565,8 @@ function MainFarm:_GetStackTaskLabel(entry)
         return "Cake Prince"
     elseif entry and entry.Kind == "EliteHunter" then
         return "Elite Hunter: " .. tostring(entry.Instance and entry.Instance.Name or "target")
+    elseif entry and STACK_BOSS_LABELS[entry.Kind] then
+        return STACK_BOSS_LABELS[entry.Kind]
     elseif entry and entry.Kind == "Fruit" then
         return entry.Instance and entry.Instance.Name or "spawned fruit"
     elseif entry and entry.Kind == "Berry" then
@@ -15707,7 +15837,7 @@ function MainFarm:_StepStackTasks(session)
             return false
         end
         self:_SetStatus(
-            "Stack Farming is on; waiting for Elite Hunter, Cake Prince, fruit or berries",
+            "Stack Farming is on; waiting for a selected target to spawn",
             "info"
         )
         return true
@@ -15800,6 +15930,31 @@ function MainFarm:_StepStackTasks(session)
             return true
         end
 
+        self:_EngageModeTarget(target, true, root, session, "stack")
+        if not self.EnemyService:IsAlive(target) then
+            self:_FinishStackTask(entry)
+        end
+        return true
+    elseif STACK_BOSS_LABELS[entry.Kind] then
+        if not target:IsDescendantOf(workspaceService) then
+            self:_FinishStackTask(entry)
+            return true
+        end
+        if not self.EnemyService:IsAlive(target) then
+            if os.clock() - (self.StackTaskStartedAt or os.clock()) < STACK_TASK_LOAD_TIMEOUT then
+                self:_HoldPosition(session)
+                self:_SetStatus(
+                    "Waiting for " .. STACK_BOSS_LABELS[entry.Kind] .. " to load",
+                    "info"
+                )
+            else
+                self:_FinishStackTask(
+                    entry,
+                    STACK_BOSS_LABELS[entry.Kind] .. " did not become available"
+                )
+            end
+            return true
+        end
         self:_EngageModeTarget(target, true, root, session, "stack")
         if not self.EnemyService:IsAlive(target) then
             self:_FinishStackTask(entry)
@@ -19311,16 +19466,23 @@ function MainFarm:Initialize(context)
             "CakePrince",
             stackSettings.AutoAttackCakePrince == true
         )
-        local thirdSea = context.Compatibility
-            and type(context.Compatibility.IsThirdSea) == "function"
-            and context.Compatibility:IsThirdSea()
-        if stackSettings.AutoEliteHunter == true and not thirdSea then
-            stackSettings.AutoEliteHunter = false
+        for _, taskDefinition in ipairs({
+            { Kind = "EliteHunter", Setting = "AutoEliteHunter" },
+            { Kind = "RipIndra", Setting = "AttackRipIndra" },
+            { Kind = "SoulReaper", Setting = "AttackSoulReaper" },
+            { Kind = "DoughKing", Setting = "AttackDoughKing" },
+            { Kind = "Darkbeard", Setting = "AttackDarkbeard" },
+        }) do
+            local requested = stackSettings[taskDefinition.Setting] == true
+            local available = isStackTaskAvailableInCurrentSea(
+                context.Compatibility,
+                taskDefinition.Kind
+            )
+            if requested and not available then
+                stackSettings[taskDefinition.Setting] = false
+            end
+            self.StackTaskQueue:SetEnabled(taskDefinition.Kind, requested and available)
         end
-        self.StackTaskQueue:SetEnabled(
-            "EliteHunter",
-            stackSettings.AutoEliteHunter == true and thirdSea == true
-        )
         self.StackTaskQueue:SetEnabled(
             "Fruit",
             stackSettings.TeleportToFruit == true
@@ -19637,16 +19799,16 @@ function MainFarm:_SetStackTaskEnabled(kind, settingKey, label, payload)
         self:_SetStatus("Stack Farming setting is unavailable or invalid", "error")
         return false
     end
-    if payload and kind == "EliteHunter" then
+    local requiredSea = STACK_TASK_SEA_REQUIREMENTS[kind]
+    if payload and requiredSea then
         local compatibility = self.Context and self.Context.Compatibility
-        local seaOk, thirdSea = pcall(function()
-            return compatibility and compatibility:IsThirdSea()
-        end)
-        if not seaOk or not thirdSea then
+        if not isStackTaskAvailableInCurrentSea(compatibility, kind) then
+            local seaName = requiredSea == 2 and "Second" or "Third"
+            local featureName = STACK_BOSS_LABELS[kind] or "Elite Hunter"
             self:_SetStatus(
-                "Elite Hunter only works in Third Sea",
+                featureName .. " only works in " .. seaName .. " Sea",
                 "error",
-                "Auto Elite Hunter is only available in Third Sea."
+                label .. " is only available in " .. seaName .. " Sea."
             )
             return false
         end
@@ -19719,6 +19881,34 @@ function MainFarm:Handle(actionId, payload)
             "EliteHunter",
             "AutoEliteHunter",
             "Auto Elite Hunter",
+            payload
+        )
+    elseif actionId == "stack.ripIndra.enabled" then
+        return self:_SetStackTaskEnabled(
+            "RipIndra",
+            "AttackRipIndra",
+            "Attack Rip Indra when spawned",
+            payload
+        )
+    elseif actionId == "stack.soulReaper.enabled" then
+        return self:_SetStackTaskEnabled(
+            "SoulReaper",
+            "AttackSoulReaper",
+            "Attack Soul Reaper when spawned",
+            payload
+        )
+    elseif actionId == "stack.doughKing.enabled" then
+        return self:_SetStackTaskEnabled(
+            "DoughKing",
+            "AttackDoughKing",
+            "Attack Dough King when spawned",
+            payload
+        )
+    elseif actionId == "stack.darkbeard.enabled" then
+        return self:_SetStackTaskEnabled(
+            "Darkbeard",
+            "AttackDarkbeard",
+            "Attack Darkbeard when spawned",
             payload
         )
     elseif actionId == "stack.fruit.enabled" then
@@ -20109,12 +20299,20 @@ function MainFarm:Cleanup()
     if stackSettings then
         stackSettings.AutoAttackCakePrince = false
         stackSettings.AutoEliteHunter = false
+        stackSettings.AttackRipIndra = false
+        stackSettings.AttackSoulReaper = false
+        stackSettings.AttackDoughKing = false
+        stackSettings.AttackDarkbeard = false
         stackSettings.TeleportToFruit = false
         stackSettings.AutoCollectBerries = false
     end
     if self.StackTaskQueue then
         self.StackTaskQueue:SetEnabled("CakePrince", false)
         self.StackTaskQueue:SetEnabled("EliteHunter", false)
+        self.StackTaskQueue:SetEnabled("RipIndra", false)
+        self.StackTaskQueue:SetEnabled("SoulReaper", false)
+        self.StackTaskQueue:SetEnabled("DoughKing", false)
+        self.StackTaskQueue:SetEnabled("Darkbeard", false)
         self.StackTaskQueue:SetEnabled("Fruit", false)
         self.StackTaskQueue:SetEnabled("Berry", false)
     end

@@ -4,8 +4,19 @@ StackTaskQueue.__index = StackTaskQueue
 local TASK_KIND = {
     CakePrince = true,
     EliteHunter = true,
+    RipIndra = true,
+    SoulReaper = true,
+    DoughKing = true,
+    Darkbeard = true,
     Fruit = true,
     Berry = true,
+}
+
+local SPAWNED_BOSS_KINDS = {
+    ["rip_indra True Form"] = "RipIndra",
+    ["Soul Reaper"] = "SoulReaper",
+    ["Dough King"] = "DoughKing",
+    ["Darkbeard"] = "Darkbeard",
 }
 
 local ELITE_HUNTER_NAMES = {
@@ -21,6 +32,19 @@ local function isAliveEliteHunter(instance)
     local root = instance:FindFirstChild("HumanoidRootPart")
     local humanoid = instance:FindFirstChildWhichIsA("Humanoid")
     return root ~= nil and humanoid ~= nil and humanoid.Health > 0
+end
+
+local function isSpawnedStackBoss(instance)
+    return instance ~= nil
+        and instance:IsA("Model")
+        and SPAWNED_BOSS_KINDS[instance.Name] ~= nil
+end
+
+local function isSpawnedBossKind(kind)
+    return kind == "RipIndra"
+        or kind == "SoulReaper"
+        or kind == "DoughKing"
+        or kind == "Darkbeard"
 end
 
 local function isFruitCandidate(instance)
@@ -99,6 +123,10 @@ function StackTaskQueue.new(workspaceService, collectionService, replicatedStora
         Enabled = {
             CakePrince = false,
             EliteHunter = false,
+            RipIndra = false,
+            SoulReaper = false,
+            DoughKing = false,
+            Darkbeard = false,
             Fruit = false,
             Berry = false,
         },
@@ -275,6 +303,15 @@ function StackTaskQueue:_ObserveEliteHunter(instance)
     end
 end
 
+function StackTaskQueue:_ObserveSpawnedBoss(instance)
+    if not isSpawnedStackBoss(instance) then
+        return
+    end
+    local kind = SPAWNED_BOSS_KINDS[instance.Name]
+    self:_RememberSpawn(kind, instance)
+    self:_Queue(kind, instance)
+end
+
 function StackTaskQueue:BindLiveEliteTarget(entry, target)
     if not entry
         or entry.Kind ~= "EliteHunter"
@@ -440,10 +477,12 @@ function StackTaskQueue:_WatchEnemies(folder)
     self.EnemiesConnection = folder.ChildAdded:Connect(function(instance)
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
+        self:_ObserveSpawnedBoss(instance)
     end)
     for _, instance in ipairs(folder:GetChildren()) do
         self:_ObserveCakePrince(instance)
         self:_ObserveEliteHunter(instance)
+        self:_ObserveSpawnedBoss(instance)
     end
 end
 
@@ -528,6 +567,14 @@ function StackTaskQueue:_QueueExisting(kind)
             self:_WatchEnemies(enemies)
             for _, instance in ipairs(enemies:GetChildren()) do
                 self:_ObserveEliteHunter(instance)
+            end
+        end
+    elseif isSpawnedBossKind(kind) then
+        local enemies = self.Workspace:FindFirstChild("Enemies")
+        if enemies then
+            self:_WatchEnemies(enemies)
+            for _, instance in ipairs(enemies:GetChildren()) do
+                self:_ObserveSpawnedBoss(instance)
             end
         end
     elseif kind == "Berry" then
@@ -716,6 +763,10 @@ end
 function StackTaskQueue:HasEnabledTasks()
     return self.Enabled.CakePrince == true
         or self.Enabled.EliteHunter == true
+        or self.Enabled.RipIndra == true
+        or self.Enabled.SoulReaper == true
+        or self.Enabled.DoughKing == true
+        or self.Enabled.Darkbeard == true
         or self.Enabled.Fruit == true
         or self.Enabled.Berry == true
 end
@@ -735,8 +786,12 @@ function StackTaskQueue:PopNext(currentPosition, estimateTravelCost)
                     or entry.Kind == "EliteHunter"
                     and instance.Parent ~= nil
                     and isAliveEliteHunter(instance)
+                    or isSpawnedBossKind(entry.Kind)
+                    and instance.Parent == self.EnemiesFolder
+                    and isSpawnedStackBoss(instance)
                     or entry.Kind ~= "Fruit"
                     and entry.Kind ~= "EliteHunter"
+                    and not isSpawnedBossKind(entry.Kind)
                     and instance.Parent ~= nil
             )
         if self:IsEnabled(entry) and isPresent and not self.CompletedByInstance[instance] then
