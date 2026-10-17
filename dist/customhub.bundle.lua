@@ -1217,14 +1217,14 @@ local Config = {
                 },
                 {
                     Kind = "sectionHeader",
-                    Label = "Low-health combat retreat",
+                    Label = "Low-health retreat",
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Move above enemy at low health",
+                    Label = "Rise straight up at low health",
                     Action = "farm.settings.lowHealthRise",
                     Setting = "LowHealthRiseEnabled",
-                    Description = "Only changes movement while pursuing a live enemy.",
+                    Description = "Temporarily pauses movement, then continues the current task.",
                 },
                 {
                     Kind = "settingSlider",
@@ -1238,7 +1238,7 @@ local Config = {
                 },
                 {
                     Kind = "settingSlider",
-                    Label = "Height above enemy",
+                    Label = "Rise height",
                     Action = "farm.lowHealthRise.height.set",
                     Setting = "LowHealthRiseHeight",
                     Min = 100,
@@ -4212,9 +4212,13 @@ local FeatureManager = {}
 FeatureManager.__index = FeatureManager
 
 function FeatureManager.new(state, compatibility, config, settingsPersistence)
-    local movementService = MovementService.new(compatibility, function(message, kind)
-        state:SetStatus(message, kind or "info")
-    end)
+    local movementService = MovementService.new(
+        compatibility,
+        function(message, kind)
+            state:SetStatus(message, kind or "info")
+        end,
+        config and config.FarmSettings
+    )
     local taskCoordinator = TaskCoordinator.new()
     return setmetatable({
         State = state,
@@ -4446,6 +4450,12 @@ function FeatureManager:Dispatch(actionId, payload)
             return false, tostring(handled)
         end
         if handled then
+            local movementService = self.Context and self.Context.MovementService
+            if movementService
+                and type(movementService.RefreshLowHealthRetreat) == "function"
+            then
+                movementService:RefreshLowHealthRetreat()
+            end
             self:_ScheduleSettingsSave()
             return true
         end
@@ -4467,6 +4477,10 @@ function FeatureManager:Cleanup()
     end
     if self.Context and self.Context.TaskCoordinator then
         self.Context.TaskCoordinator:Cleanup()
+    end
+    local movementService = self.Context and self.Context.MovementService
+    if movementService and type(movementService.Destroy) == "function" then
+        movementService:Destroy()
     end
 end
 
@@ -9671,9 +9685,10 @@ local function getNoAccessCacheKey(compatibility, source)
     }, "|")
 end
 
-function MapGatewayService.new(compatibility)
+function MapGatewayService.new(compatibility, movementService)
     return setmetatable({
         Compatibility = compatibility,
+        MovementService = movementService,
         FailedUntil = {},
         LastFailures = {},
         TikiNoAccessCache = {},
@@ -10357,6 +10372,15 @@ function MapGatewayService:Use(route, isCurrent)
         root.AssemblyAngularVelocity = Vector3.zero
     end)
 
+    local retreatDeferral = self.MovementService
+        and self.MovementService:BeginLowHealthRetreatDeferral()
+    local function endRetreatDeferral()
+        if retreatDeferral then
+            self.MovementService:EndLowHealthRetreatDeferral(retreatDeferral)
+            retreatDeferral = nil
+        end
+    end
+
     local activationStartPosition = root.Position
     self:RecordTravelPhase("activating gateway", route, {
         PositionBeforeActivation = root.Position,
@@ -10457,6 +10481,7 @@ function MapGatewayService:Use(route, isCurrent)
                 TouchTriggerStatus = "not loaded",
                 TouchTriggerLoadAttempts = touchLoadAttempts,
             })
+            endRetreatDeferral()
             return false, failure
         end
 
@@ -10480,6 +10505,7 @@ function MapGatewayService:Use(route, isCurrent)
             self:RecordTravelPhase("gateway touch failed", route, {
                 Failure = touchError,
             })
+            endRetreatDeferral()
             return false, touchError
         end
     else
@@ -10490,6 +10516,7 @@ function MapGatewayService:Use(route, isCurrent)
                 Failure = remoteError,
                 RemoteCallStatus = "not started",
             })
+            endRetreatDeferral()
             return false, remoteError
         end
     end
@@ -10505,6 +10532,7 @@ function MapGatewayService:Use(route, isCurrent)
                 PositionAfterActivation = currentRoot and currentRoot.Position or nil,
                 Failure = "Character changed during gateway travel",
             })
+            endRetreatDeferral()
             return false, "Character changed during gateway travel"
         end
         if diagnostic and diagnostic.LastAttempt
@@ -10537,6 +10565,7 @@ function MapGatewayService:Use(route, isCurrent)
                 DistanceAfterActivation = destinationDistance,
                 ActivationDisplacement = activationDisplacement,
             })
+            endRetreatDeferral()
             return true
         end
         if remote and distance(currentRoot.Position, route.Stand) <= GATEWAY_ARRIVAL_RADIUS then
@@ -10553,6 +10582,7 @@ function MapGatewayService:Use(route, isCurrent)
         self:RecordTravelPhase("gateway activation cancelled", route, {
             Failure = "Travel was cancelled",
         })
+        endRetreatDeferral()
         return false, "Travel was cancelled"
     end
     local _, _, finalRoot = compatibility:GetCharacterParts()
@@ -10565,6 +10595,7 @@ function MapGatewayService:Use(route, isCurrent)
             .. tostring(GATEWAY_ACTIVATION_TIMEOUT)
             .. " seconds",
     })
+    endRetreatDeferral()
     return false, "Gateway did not confirm arrival"
 end
 
@@ -11054,7 +11085,8 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
     if not moved then
         return false, tostring(moveResult)
     end
-    if moveResult == "arrived" then
+    local needsRestartAfterRetreat = moveResult == "arrived"
+    if moveResult == "arrived" and not self.MovementService.LowHealthRetreatInProgress then
         return true
     end
 
@@ -11079,6 +11111,31 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
             return false, "Character changed during travel"
         end
         local remaining = (destination.Position - currentRoot.Position).Magnitude
+        if self.MovementService.LowHealthRetreatInProgress then
+            deadline += 0.1
+            task.wait(0.1)
+            continue
+        end
+        if needsRestartAfterRetreat then
+            needsRestartAfterRetreat = false
+            local retryCallOk, retryMoved, retryResult = startMovement()
+            if not retryCallOk then
+                self:_StopMovementSession()
+                return false, tostring(retryMoved)
+            end
+            if not retryMoved then
+                return false, tostring(retryResult)
+            end
+            if retryResult == "arrived"
+                and not self.MovementService.LowHealthRetreatInProgress
+            then
+                return true
+            end
+            if retryResult == "arrived" then
+                needsRestartAfterRetreat = true
+            end
+            continue
+        end
         if not self.MovementService.Active then
             if remaining <= 14 then
                 return true
@@ -11114,8 +11171,15 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
                 if not retryMoved then
                     return false, tostring(retryResult)
                 end
-                if retryResult == "arrived" then
+                if retryResult == "arrived"
+                    and not self.MovementService.LowHealthRetreatInProgress
+                then
                     return true
+                end
+                if retryResult == "arrived"
+                    and self.MovementService.LowHealthRetreatInProgress
+                then
+                    needsRestartAfterRetreat = true
                 end
                 continue
             end
@@ -11137,10 +11201,16 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
                     if transitionCharacter ~= character or not transitionRoot then
                         return false, "Character changed during map transition"
                     end
+                    if self.MovementService.LowHealthRetreatInProgress then
+                        transitionDeadline += 0.1
+                        task.wait(0.1)
+                        continue
+                    end
                     if (destination.Position - transitionRoot.Position).Magnitude <= 14 then
                         return true
                     end
-                    if (transitionRoot.Position - startRoot.Position).Magnitude >= 200 then
+                    local transitionOffset = transitionRoot.Position - startRoot.Position
+                    if Vector3.new(transitionOffset.X, 0, transitionOffset.Z).Magnitude >= 200 then
                         return false, "Map transition completed; continue toward the destination"
                     end
                     task.wait(0.1)
@@ -12602,7 +12672,10 @@ function TeleportFeature:Initialize(context)
     self.ActiveFarmTravel = nil
     self.LastFarmGatewayPlanCheck = nil
     self.MovementService = context.MovementService
-    self.GatewayService = MapGatewayService.new(context.Compatibility)
+    self.GatewayService = MapGatewayService.new(
+        context.Compatibility,
+        self.MovementService
+    )
     if self.MovementService then
         self.MovementService.OnCancel = function()
             self:CancelFarmTravel(true)
@@ -14612,10 +14685,23 @@ local function formatPosition(position)
     return string.format("(%.1f, %.1f, %.1f)", position.X, position.Y, position.Z)
 end
 
-function MovementService.new(compatibility, report)
-    return setmetatable({
+function MovementService.new(compatibility, report, lowHealthSettings)
+    local self = setmetatable({
         Compatibility = compatibility,
         Report = report,
+        LowHealthRetreatSettings = lowHealthSettings or {},
+        Destroyed = false,
+        LowHealthRetreatLatched = false,
+        LowHealthRetreatPending = false,
+        LowHealthRetreatInProgress = false,
+        LowHealthRetreatDeferralGeneration = 0,
+        LowHealthRetreatDeferrals = {},
+        LowHealthRetreatCharacter = nil,
+        LowHealthRetreatHumanoidConnection = nil,
+        LowHealthRetreatChildAddedConnection = nil,
+        LowHealthRetreatCharacterAddedConnection = nil,
+        LowHealthRetreatCharacterRemovingConnection = nil,
+        LowHealthRetreat = nil,
         Active = nil,
         Generation = 0,
         RouteGeneration = 0,
@@ -14635,6 +14721,328 @@ function MovementService.new(compatibility, report)
         HoldForce = nil,
         LastStallDiagnostic = nil,
     }, MovementService)
+    self:_InitializeLowHealthRetreat()
+    return self
+end
+
+function MovementService:_InitializeLowHealthRetreat()
+    local player = self.Compatibility and self.Compatibility.Player
+    if not player then
+        return
+    end
+    self.LowHealthRetreatCharacterAddedConnection = player.CharacterAdded:Connect(function(character)
+        self:_BindLowHealthRetreatCharacter(character)
+    end)
+    self.LowHealthRetreatCharacterRemovingConnection = player.CharacterRemoving:Connect(function(character)
+        if self.LowHealthRetreatCharacter == character then
+            self:_BindLowHealthRetreatCharacter(nil)
+        end
+    end)
+    self:_BindLowHealthRetreatCharacter(player.Character)
+end
+
+function MovementService:_BindLowHealthRetreatCharacter(character)
+    disconnect(self.LowHealthRetreatHumanoidConnection)
+    disconnect(self.LowHealthRetreatChildAddedConnection)
+    self.LowHealthRetreatHumanoidConnection = nil
+    self.LowHealthRetreatChildAddedConnection = nil
+
+    if self.LowHealthRetreat then
+        self:_FinishLowHealthRetreat()
+    end
+    self.LowHealthRetreatCharacter = character
+    self.LowHealthRetreatLatched = false
+    self.LowHealthRetreatPending = false
+    if not character then
+        return
+    end
+
+    local function bindHumanoid(humanoid)
+        if self.LowHealthRetreatCharacter ~= character or not humanoid then
+            return
+        end
+        disconnect(self.LowHealthRetreatHumanoidConnection)
+        self.LowHealthRetreatHumanoidConnection = humanoid.HealthChanged:Connect(function()
+            self:RefreshLowHealthRetreat()
+        end)
+        self:RefreshLowHealthRetreat()
+    end
+
+    bindHumanoid(character:FindFirstChildOfClass("Humanoid"))
+    self.LowHealthRetreatChildAddedConnection = character.ChildAdded:Connect(function(child)
+        if child:IsA("Humanoid") then
+            bindHumanoid(child)
+        end
+    end)
+end
+
+function MovementService:SetLowHealthRetreatSettings(settings)
+    if self.Destroyed then
+        return
+    end
+    self.LowHealthRetreatSettings = type(settings) == "table" and settings or {}
+    self:RefreshLowHealthRetreat()
+end
+
+function MovementService:BeginLowHealthRetreatDeferral()
+    if self.Destroyed then
+        return nil
+    end
+    self.LowHealthRetreatDeferralGeneration += 1
+    local token = self.LowHealthRetreatDeferralGeneration
+    self.LowHealthRetreatDeferrals[token] = true
+    task.delay(20, function()
+        self:EndLowHealthRetreatDeferral(token)
+    end)
+    return token
+end
+
+function MovementService:EndLowHealthRetreatDeferral(token)
+    if token == nil or not self.LowHealthRetreatDeferrals[token] then
+        return false
+    end
+    self.LowHealthRetreatDeferrals[token] = nil
+    if next(self.LowHealthRetreatDeferrals) == nil then
+        self:RefreshLowHealthRetreat()
+    end
+    return true
+end
+
+function MovementService:_TrackLowHealthRetreatCollisionPart(retreat, part)
+    if not part:IsA("BasePart") or retreat.CollisionOriginals[part] ~= nil then
+        return
+    end
+
+    local original = part.CanCollide
+    local farmOriginal = self.FarmCollisionActive
+        and self.FarmCollisionOriginals[part]
+    local movementOriginal = self.Active
+        and self.Active.CollisionOriginals
+        and self.Active.CollisionOriginals[part]
+    if farmOriginal ~= nil then
+        original = farmOriginal
+    elseif movementOriginal ~= nil then
+        original = movementOriginal
+    end
+    retreat.CollisionOriginals[part] = original
+    retreat.PartConnections[part] = part:GetPropertyChangedSignal("CanCollide"):Connect(function()
+        if self.LowHealthRetreat == retreat
+            and not retreat.Restoring
+            and part.Parent
+            and part.CanCollide
+        then
+            part.CanCollide = false
+        end
+    end)
+    part.CanCollide = false
+end
+
+function MovementService:_RestoreLowHealthRetreatCollision(retreat)
+    retreat.Restoring = true
+    disconnect(retreat.DescendantAddedConnection)
+    retreat.DescendantAddedConnection = nil
+    for part, original in pairs(retreat.CollisionOriginals) do
+        disconnect(retreat.PartConnections[part])
+        if part.Parent then
+            local keepSuppressed = self.FarmCollisionActive == true
+            local active = self.Active
+            if not keepSuppressed and active and active.CollisionOriginals
+                and active.CollisionOriginals[part] ~= nil
+            then
+                keepSuppressed = true
+            end
+            if keepSuppressed then
+                part.CanCollide = false
+            else
+                part.CanCollide = original
+            end
+        end
+    end
+    table.clear(retreat.CollisionOriginals)
+    table.clear(retreat.PartConnections)
+end
+
+function MovementService:_FinishLowHealthRetreat()
+    local retreat = self.LowHealthRetreat
+    if not retreat then
+        self.LowHealthRetreatInProgress = false
+        return
+    end
+
+    disconnect(retreat.Connection)
+    retreat.Connection = nil
+    self:_RestoreLowHealthRetreatCollision(retreat)
+    self.LowHealthRetreat = nil
+    self.LowHealthRetreatInProgress = false
+
+    local _, humanoid = self.Compatibility:GetCharacterParts()
+    local recovered = humanoid
+        and humanoid.MaxHealth > 0
+        and humanoid.Health / humanoid.MaxHealth * 100 >= 80
+    if retreat.ResetLatchAfterLift or recovered then
+        self.LowHealthRetreatLatched = false
+        self.LowHealthRetreatPending = false
+    end
+    if self.Report then
+        self.Report("Low-health lift complete; resuming the current task.", "info")
+    end
+end
+
+function MovementService:_StartLowHealthRetreat(character, humanoid, root)
+    if self.LowHealthRetreatInProgress or not character or not humanoid or not root then
+        return false
+    end
+
+    local settings = self.LowHealthRetreatSettings or {}
+    local height = math.clamp(
+        tonumber(settings.LowHealthRiseHeight) or 800,
+        tonumber(settings.LowHealthRiseHeightMin) or 100,
+        tonumber(settings.LowHealthRiseHeightMax) or 2000
+    )
+    local retreat = {
+        Character = character,
+        Humanoid = humanoid,
+        Root = root,
+        GoalY = root.Position.Y + height,
+        LastHorizontalPosition = Vector3.new(root.Position.X, 0, root.Position.Z),
+        CollisionOriginals = {},
+        PartConnections = {},
+        ResetLatchAfterLift = false,
+    }
+    self.LowHealthRetreat = retreat
+    self.LowHealthRetreatInProgress = true
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        self:_TrackLowHealthRetreatCollisionPart(retreat, descendant)
+    end
+    retreat.DescendantAddedConnection = character.DescendantAdded:Connect(function(descendant)
+        if self.LowHealthRetreat == retreat then
+            self:_TrackLowHealthRetreatCollisionPart(retreat, descendant)
+        end
+    end)
+    retreat.Connection = self.Compatibility.RunService.Heartbeat:Connect(function(deltaTime)
+        local ok, err = pcall(self._StepLowHealthRetreat, self, retreat, deltaTime)
+        if not ok then
+            if self.Report then
+                self.Report("Low-health lift stopped safely: " .. tostring(err), "warning")
+            end
+            self:_FinishLowHealthRetreat()
+        end
+    end)
+    if self.Report then
+        self.Report("Health is low; rising vertically before resuming the current task.", "warning")
+    end
+    return true
+end
+
+function MovementService:_StepLowHealthRetreat(retreat, deltaTime)
+    if self.LowHealthRetreat ~= retreat then
+        return
+    end
+    local character, humanoid, root = self.Compatibility:GetCharacterParts()
+    if character ~= retreat.Character or humanoid ~= retreat.Humanoid or root ~= retreat.Root then
+        self.LowHealthRetreatLatched = false
+        self.LowHealthRetreatPending = false
+        self:_FinishLowHealthRetreat()
+        return
+    end
+    if humanoid.Health <= 0 then
+        self.LowHealthRetreatLatched = false
+        self.LowHealthRetreatPending = false
+        self:_FinishLowHealthRetreat()
+        return
+    end
+    if root.Anchored then
+        return
+    end
+
+    local horizontalPosition = Vector3.new(root.Position.X, 0, root.Position.Z)
+    if (horizontalPosition - retreat.LastHorizontalPosition).Magnitude > 100 then
+        retreat.GoalY = root.Position.Y
+            + math.clamp(
+                tonumber(self.LowHealthRetreatSettings.LowHealthRiseHeight) or 800,
+                tonumber(self.LowHealthRetreatSettings.LowHealthRiseHeightMin) or 100,
+                tonumber(self.LowHealthRetreatSettings.LowHealthRiseHeightMax) or 2000
+            )
+        retreat.LastHorizontalPosition = horizontalPosition
+    end
+
+    local remainingY = retreat.GoalY - root.Position.Y
+    if remainingY <= 1 then
+        root.CFrame = root.CFrame + Vector3.new(0, remainingY, 0)
+        self:_FinishLowHealthRetreat()
+        return
+    end
+    local frameTime = math.clamp(tonumber(deltaTime) or 0, 0, 0.1)
+    local step = math.min(190 * frameTime, 18, remainingY)
+    if step > 0 then
+        root.CFrame = root.CFrame + Vector3.new(0, step, 0)
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+end
+
+function MovementService:RefreshLowHealthRetreat()
+    if self.Destroyed then
+        return false
+    end
+    local settings = self.LowHealthRetreatSettings or {}
+    if settings.LowHealthRiseEnabled ~= true then
+        self.LowHealthRetreatLatched = false
+        self.LowHealthRetreatPending = false
+        self:_FinishLowHealthRetreat()
+        return false
+    end
+
+    local character, humanoid, root = self.Compatibility:GetCharacterParts()
+    if not character or not humanoid or not root or humanoid.MaxHealth <= 0 then
+        return false
+    end
+    local healthPercent = humanoid.Health / humanoid.MaxHealth * 100
+    if healthPercent >= 80 then
+        self.LowHealthRetreatPending = false
+        if self.LowHealthRetreatInProgress then
+            self.LowHealthRetreat.ResetLatchAfterLift = true
+        else
+            self.LowHealthRetreatLatched = false
+        end
+        return false
+    end
+
+    if self.LowHealthRetreatPending and next(self.LowHealthRetreatDeferrals) == nil then
+        self.LowHealthRetreatPending = false
+        return self:_StartLowHealthRetreat(character, humanoid, root)
+    end
+    if healthPercent > (tonumber(settings.LowHealthRiseThreshold) or 40)
+        or self.LowHealthRetreatLatched
+    then
+        return false
+    end
+
+    self.LowHealthRetreatLatched = true
+    if next(self.LowHealthRetreatDeferrals) ~= nil then
+        self.LowHealthRetreatPending = true
+        return true
+    end
+    return self:_StartLowHealthRetreat(character, humanoid, root)
+end
+
+function MovementService:Destroy()
+    self.Destroyed = true
+    self.LowHealthRetreatLatched = false
+    self.LowHealthRetreatPending = false
+    table.clear(self.LowHealthRetreatDeferrals)
+    self:_FinishLowHealthRetreat()
+    disconnect(self.LowHealthRetreatHumanoidConnection)
+    disconnect(self.LowHealthRetreatChildAddedConnection)
+    disconnect(self.LowHealthRetreatCharacterAddedConnection)
+    disconnect(self.LowHealthRetreatCharacterRemovingConnection)
+    self.LowHealthRetreatHumanoidConnection = nil
+    self.LowHealthRetreatChildAddedConnection = nil
+    self.LowHealthRetreatCharacterAddedConnection = nil
+    self.LowHealthRetreatCharacterRemovingConnection = nil
+    self:Cancel()
+    self:SetFarmCollisionSuppression(false)
 end
 
 function MovementService:_GetRoute(destination, currentPosition)
@@ -15024,6 +15432,9 @@ function MovementService:Cancel()
 end
 
 function MovementService:HoldPosition(isCurrent)
+    if self.LowHealthRetreatInProgress then
+        return true, "low-health lift is temporarily overriding movement"
+    end
     local character, humanoid, root = self.Compatibility:GetCharacterParts()
     if not character or not humanoid or not root then
         return false, "Character is unavailable"
@@ -15093,6 +15504,7 @@ function MovementService:_RequestRoute(route, isCurrent, routeGeneration)
             return
         end
 
+        local deferral = self:BeginLowHealthRetreatDeferral()
         local ok, err = pcall(function()
             if route.Name == "Submerged" then
                 local remote = netContainer:FindFirstChild("RF/SubmarineWorkerSpeak")
@@ -15114,6 +15526,7 @@ function MovementService:_RequestRoute(route, isCurrent, routeGeneration)
                 end
             end
         end)
+        self:EndLowHealthRetreatDeferral(deferral)
         if not isCurrent() or self.RouteGeneration ~= routeGeneration then
             return
         end
@@ -15140,10 +15553,7 @@ function MovementService:MoveTo(destination, options)
         return false, "Movement retry cooldown after a stall"
     end
 
-    local route
-    if options.SkipSpecialRoute ~= true then
-        route = self:_GetRoute(destination, root.Position)
-    end
+    local route = self:_GetRoute(destination, root.Position)
     local goal = route and route.Stage or destination
     local threshold = route and 8 or (tonumber(options.Threshold) or 2.5)
     local isCurrent = options.IsCurrent or function()
@@ -15214,7 +15624,15 @@ function MovementService:MoveTo(destination, options)
     local collisionOriginals = {}
     for _, descendant in ipairs(character:GetDescendants()) do
         if descendant:IsA("BasePart") then
-            collisionOriginals[descendant] = descendant.CanCollide
+            local retreatOriginals = self.LowHealthRetreat
+                and self.LowHealthRetreat.CollisionOriginals
+            local retreatOriginal = retreatOriginals
+                and retreatOriginals[descendant]
+            if retreatOriginal ~= nil then
+                collisionOriginals[descendant] = retreatOriginal
+            else
+                collisionOriginals[descendant] = descendant.CanCollide
+            end
             descendant.CanCollide = false
         end
     end
@@ -15272,11 +15690,26 @@ function MovementService:MoveTo(destination, options)
         if currentCharacter ~= character
             or currentHumanoid ~= humanoid
             or currentRoot ~= root
-            or root.Anchored
         then
             self.LastStallAt = os.clock()
             self:_Finish(active, true)
-            self.Report("Movement interrupted by character replacement or an anchored root", "warning")
+            self.Report("Movement interrupted by character replacement", "warning")
+            return
+        end
+
+        if self.LowHealthRetreatInProgress
+            and self.LowHealthRetreat
+            and self.LowHealthRetreat.Character == character
+        then
+            active.BestDistance = (active.Goal.Position - root.Position).Magnitude
+            active.LastProgressAt = os.clock()
+            return
+        end
+
+        if root.Anchored then
+            self.LastStallAt = os.clock()
+            self:_Finish(active, true)
+            self.Report("Movement interrupted because the character root is anchored", "warning")
             return
         end
 
@@ -18697,7 +19130,6 @@ local MAX_EMPTY_SPAWN_CYCLES = 2
 local STACK_TASK_LOAD_TIMEOUT = 8
 local INDRA_COLOR_REQUEST_TIMEOUT = 6
 local MAX_INDRA_COLOR_REQUEST_ATTEMPTS = 2
-local LOW_HEALTH_RISE_ACTIVATION_DISTANCE = 300
 local SEA_PROGRESS_POLL_INTERVAL = 1
 local SEA_PROGRESS_MOVE_THRESHOLD = 8
 local MILITARY_DETECTIVE_POSITION = CFrame.new(4852, 6, 719)
@@ -18913,7 +19345,8 @@ function MainFarm:_EnsureBaseServices()
         context.Compatibility,
         function(message, kind)
             self:_SetStatus(message, kind)
-        end
+        end,
+        context.Config and context.Config.FarmSettings
     )
     return true
 end
@@ -21773,72 +22206,7 @@ function MainFarm:_EndQuestDiagnosticWait(reason, now)
     self.QuestDiagnosticReport = nil
 end
 
-function MainFarm:_GetLowHealthCombatRise(target)
-    if not target or not self.EnemyService or not self.EnemyService:IsAlive(target) then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = nil
-        return 0
-    end
-
-    local farmSettings = self.Context and self.Context.Config
-        and self.Context.Config.FarmSettings or {}
-    if farmSettings.LowHealthRiseEnabled ~= true then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = nil
-        return 0
-    end
-
-    local compatibility = self.Context and self.Context.Compatibility
-    local humanoid, playerRoot
-    if compatibility then
-        local _, currentHumanoid, currentRoot = compatibility:GetCharacterParts()
-        humanoid = currentHumanoid
-        playerRoot = currentRoot
-    end
-    local health = humanoid and humanoid.Health
-    local maxHealth = humanoid and humanoid.MaxHealth
-    local targetRoot = target:FindFirstChild("HumanoidRootPart")
-    if type(health) ~= "number" or type(maxHealth) ~= "number"
-        or maxHealth <= 0 or not playerRoot or not targetRoot
-    then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = nil
-        return 0
-    end
-    if self.LowHealthRetreatTarget ~= target then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = target
-    end
-
-    local threshold = math.clamp(
-        tonumber(farmSettings.LowHealthRiseThreshold) or 40,
-        tonumber(farmSettings.LowHealthRiseThresholdMin) or 5,
-        tonumber(farmSettings.LowHealthRiseThresholdMax) or 80
-    )
-    local healthPercent = health / maxHealth * 100
-    local horizontalDistance = (
-        Vector3.new(playerRoot.Position.X, 0, playerRoot.Position.Z)
-        - Vector3.new(targetRoot.Position.X, 0, targetRoot.Position.Z)
-    ).Magnitude
-    if healthPercent <= threshold
-        and horizontalDistance <= LOW_HEALTH_RISE_ACTIVATION_DISTANCE
-    then
-        self.LowHealthCombatRetreatActive = true
-    elseif healthPercent >= 80 then
-        self.LowHealthCombatRetreatActive = false
-    end
-
-    if not self.LowHealthCombatRetreatActive then
-        return 0
-    end
-    return math.clamp(
-        tonumber(farmSettings.LowHealthRiseHeight) or 800,
-        tonumber(farmSettings.LowHealthRiseHeightMin) or 100,
-        tonumber(farmSettings.LowHealthRiseHeightMax) or 2000
-    )
-end
-
-function MainFarm:_MoveTo(destination, session, threshold, keepSession, label, combatTarget)
+function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
     if not self.MovementService then
         return false
     end
@@ -21857,16 +22225,10 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession, label, c
             return true, routeResult
         end
     end
-    local movementDestination = destination
-    local riseHeight = self:_GetLowHealthCombatRise(combatTarget)
-    if riseHeight > 0 then
-        movementDestination = destination + Vector3.new(0, riseHeight, 0)
-    end
-    return self.MovementService:MoveTo(movementDestination, {
+    return self.MovementService:MoveTo(destination, {
         Speed = 190,
         Threshold = threshold,
         KeepSession = keepSession == true,
-        SkipSpecialRoute = riseHeight > 0,
         IsCurrent = function()
             return self:_IsCurrent(session)
         end,
@@ -22240,7 +22602,7 @@ function MainFarm:_MoveToFarmAttackPosition(
     if not destination then
         return false, "target has no attack-position root"
     end
-    return self:_MoveTo(destination, session, threshold, keepSession, nil, target)
+    return self:_MoveTo(destination, session, threshold, keepSession)
 end
 
 function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
@@ -24451,6 +24813,15 @@ end
 function MainFarm:_Run(session)
     while self:_IsCurrent(session) do
         local ok, err = pcall(function()
+            if self.MovementService
+                and self.MovementService.LowHealthRetreatInProgress
+                and (self.MainFarmEnabled or self.ActiveStackTask)
+            then
+                if self.CombatService then
+                    self.CombatService:Cancel()
+                end
+                return
+            end
             self:_QueueEligibleSeaProgression()
             if self:_StepStackTasks(session) then
                 return
@@ -24477,7 +24848,9 @@ function MainFarm:_Run(session)
                 end
                 self:_Step(session)
             else
-                if self.MovementService then
+                if self.MovementService
+                    and not self.MovementService.LowHealthRetreatInProgress
+                then
                     self.MovementService:Cancel()
                 end
                 local progression = self:_GetProgressionSettings()
@@ -25477,11 +25850,13 @@ function MainFarm:Handle(actionId, payload)
             return false
         end
         farmSettings.LowHealthRiseEnabled = payload
-        if not payload then
-            self.LowHealthCombatRetreatActive = false
+        if self.MovementService
+            and type(self.MovementService.RefreshLowHealthRetreat) == "function"
+        then
+            self.MovementService:RefreshLowHealthRetreat()
         end
         self:_SetStatus(
-            "Low-health combat retreat " .. (payload and "enabled" or "disabled"),
+            "Low-health vertical lift " .. (payload and "enabled" or "disabled"),
             "success"
         )
         return true
@@ -25503,6 +25878,11 @@ function MainFarm:Handle(actionId, payload)
             minimum,
             maximum
         )
+        if self.MovementService
+            and type(self.MovementService.RefreshLowHealthRetreat) == "function"
+        then
+            self.MovementService:RefreshLowHealthRetreat()
+        end
         self:_SetStatus(
             "Low-health retreat threshold: "
                 .. tostring(farmSettings.LowHealthRiseThreshold)
@@ -25529,7 +25909,7 @@ function MainFarm:Handle(actionId, payload)
             maximum
         )
         self:_SetStatus(
-            "Height above enemy: "
+            "Low-health lift height: "
                 .. tostring(farmSettings.LowHealthRiseHeight)
                 .. " studs",
             "success"

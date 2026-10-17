@@ -9,9 +9,13 @@ local FeatureManager = {}
 FeatureManager.__index = FeatureManager
 
 function FeatureManager.new(state, compatibility, config, settingsPersistence)
-    local movementService = MovementService.new(compatibility, function(message, kind)
-        state:SetStatus(message, kind or "info")
-    end)
+    local movementService = MovementService.new(
+        compatibility,
+        function(message, kind)
+            state:SetStatus(message, kind or "info")
+        end,
+        config and config.FarmSettings
+    )
     local taskCoordinator = TaskCoordinator.new()
     return setmetatable({
         State = state,
@@ -243,6 +247,12 @@ function FeatureManager:Dispatch(actionId, payload)
             return false, tostring(handled)
         end
         if handled then
+            local movementService = self.Context and self.Context.MovementService
+            if movementService
+                and type(movementService.RefreshLowHealthRetreat) == "function"
+            then
+                movementService:RefreshLowHealthRetreat()
+            end
             self:_ScheduleSettingsSave()
             return true
         end
@@ -264,6 +274,10 @@ function FeatureManager:Cleanup()
     end
     if self.Context and self.Context.TaskCoordinator then
         self.Context.TaskCoordinator:Cleanup()
+    end
+    local movementService = self.Context and self.Context.MovementService
+    if movementService and type(movementService.Destroy) == "function" then
+        movementService:Destroy()
     end
 end
 

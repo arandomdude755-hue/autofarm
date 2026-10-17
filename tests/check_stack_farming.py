@@ -12,8 +12,14 @@ QUEUE = (
 TELEPORT = (
     ROOT / "src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua"
 ).read_text(encoding="utf-8")
+GATEWAYS = (
+    ROOT / "src/ReplicatedStorage/CustomHub/Features/MapGatewayService.lua"
+).read_text(encoding="utf-8")
 HOP = (
     ROOT / "src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua"
+).read_text(encoding="utf-8")
+MOVEMENT = (
+    ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua"
 ).read_text(encoding="utf-8")
 
 
@@ -38,24 +44,26 @@ move_function_end = MAIN_FARM.index("function MainFarm:_HoldPosition", move_func
 combat_move_function = MAIN_FARM[move_function_start:move_function_end]
 require(
     "LowHealthRiseEnabled = false" in CONFIG
-    and 'Label = "Move above enemy at low health"' in CONFIG
+    and 'Label = "Rise straight up at low health"' in CONFIG
     and 'Action = "farm.settings.lowHealthRise"' in CONFIG
     and 'Label = "Retreat below health"' in CONFIG
-    and 'Label = "Height above enemy"' in CONFIG
-    and "function MainFarm:_GetLowHealthCombatRise(target)" in MAIN_FARM
-    and "self.EnemyService:IsAlive(target)" in MAIN_FARM
-    and "healthPercent >= 80" in MAIN_FARM
-    and "LOW_HEALTH_RISE_ACTIVATION_DISTANCE = 300" in MAIN_FARM
-    and "SkipSpecialRoute = riseHeight > 0" in MAIN_FARM
-    and "if options.SkipSpecialRoute ~= true then" in (
-        ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua"
-    ).read_text(encoding="utf-8")
-    and "self:_GetLowHealthCombatRise(combatTarget)" in combat_move_function
-    and combat_move_function.index("if routed then")
-    < combat_move_function.index("self:_GetLowHealthCombatRise(combatTarget)")
-    and "return self:_MoveTo(destination, session, threshold, keepSession, nil, target)"
-    in MAIN_FARM,
-    "low-health height retreat must be opt-in, hysteresis-controlled, live-enemy-only, and applied only after gateway travel is ruled out",
+    and 'Label = "Rise height"' in CONFIG
+    and '"Health is low; rising vertically before resuming the current task."' in MOVEMENT
+    and "function MovementService:RefreshLowHealthRetreat()" in MOVEMENT
+    and "humanoid.HealthChanged:Connect" in MOVEMENT
+    and "GoalY = root.Position.Y + height" in MOVEMENT
+    and "function MovementService:_StepLowHealthRetreat" in MOVEMENT
+    and "healthPercent >= 80" in MOVEMENT
+    and "BeginLowHealthRetreatDeferral" in MOVEMENT
+    and "and self.LowHealthRetreat.Character == character" in MOVEMENT
+    and "self.CombatService:Cancel()" in MAIN_FARM
+    and "deadline += 0.1" in TELEPORT
+    and "BeginLowHealthRetreatDeferral" in GATEWAYS
+    and "endRetreatDeferral()" in GATEWAYS
+    and "self:_GetLowHealthCombatRise" not in MAIN_FARM
+    and "LOW_HEALTH_RISE_ACTIVATION_DISTANCE" not in MAIN_FARM
+    and "SkipSpecialRoute" not in MOVEMENT,
+    "low-health rise must be global, start vertically from the player, defer safely around gateways, and resume current movement",
 )
 settings_page = CONFIG[
     CONFIG.index('Title = "Main settings"') : CONFIG.index('Title = "Farm settings"')

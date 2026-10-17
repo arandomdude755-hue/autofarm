@@ -453,7 +453,7 @@ require(
     and "self:_HoldPosition(session)" in skill_movement
     and "holding briefly after Gun M1" in skill_movement
     and "GUN_KNOCKBACK_HOLD_SECONDS = 0.3" in MAIN_FARM
-    and "self:_MoveTo(destination, session, threshold, keepSession, nil, target)"
+    and "self:_MoveTo(destination, session, threshold, keepSession)"
     in skill_movement
     and MAIN_FARM.count(
         "masteryCategory ~= nil\n            )"

@@ -133,7 +133,7 @@ require(
     "changing the Island dropdown during island travel must restart the active trip without turning its toggle off",
 )
 require(
-    "MovementService.new(compatibility" in MANAGER
+    "MovementService.new(" in MANAGER
     and "MovementService = movementService" in MANAGER
     and "MovementService = context.MovementService" in FEATURE,
     "Farm and Travel must share one movement controller",

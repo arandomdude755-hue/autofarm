@@ -39,7 +39,6 @@ local MAX_EMPTY_SPAWN_CYCLES = 2
 local STACK_TASK_LOAD_TIMEOUT = 8
 local INDRA_COLOR_REQUEST_TIMEOUT = 6
 local MAX_INDRA_COLOR_REQUEST_ATTEMPTS = 2
-local LOW_HEALTH_RISE_ACTIVATION_DISTANCE = 300
 local SEA_PROGRESS_POLL_INTERVAL = 1
 local SEA_PROGRESS_MOVE_THRESHOLD = 8
 local MILITARY_DETECTIVE_POSITION = CFrame.new(4852, 6, 719)
@@ -255,7 +254,8 @@ function MainFarm:_EnsureBaseServices()
         context.Compatibility,
         function(message, kind)
             self:_SetStatus(message, kind)
-        end
+        end,
+        context.Config and context.Config.FarmSettings
     )
     return true
 end
@@ -3115,72 +3115,7 @@ function MainFarm:_EndQuestDiagnosticWait(reason, now)
     self.QuestDiagnosticReport = nil
 end
 
-function MainFarm:_GetLowHealthCombatRise(target)
-    if not target or not self.EnemyService or not self.EnemyService:IsAlive(target) then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = nil
-        return 0
-    end
-
-    local farmSettings = self.Context and self.Context.Config
-        and self.Context.Config.FarmSettings or {}
-    if farmSettings.LowHealthRiseEnabled ~= true then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = nil
-        return 0
-    end
-
-    local compatibility = self.Context and self.Context.Compatibility
-    local humanoid, playerRoot
-    if compatibility then
-        local _, currentHumanoid, currentRoot = compatibility:GetCharacterParts()
-        humanoid = currentHumanoid
-        playerRoot = currentRoot
-    end
-    local health = humanoid and humanoid.Health
-    local maxHealth = humanoid and humanoid.MaxHealth
-    local targetRoot = target:FindFirstChild("HumanoidRootPart")
-    if type(health) ~= "number" or type(maxHealth) ~= "number"
-        or maxHealth <= 0 or not playerRoot or not targetRoot
-    then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = nil
-        return 0
-    end
-    if self.LowHealthRetreatTarget ~= target then
-        self.LowHealthCombatRetreatActive = false
-        self.LowHealthRetreatTarget = target
-    end
-
-    local threshold = math.clamp(
-        tonumber(farmSettings.LowHealthRiseThreshold) or 40,
-        tonumber(farmSettings.LowHealthRiseThresholdMin) or 5,
-        tonumber(farmSettings.LowHealthRiseThresholdMax) or 80
-    )
-    local healthPercent = health / maxHealth * 100
-    local horizontalDistance = (
-        Vector3.new(playerRoot.Position.X, 0, playerRoot.Position.Z)
-        - Vector3.new(targetRoot.Position.X, 0, targetRoot.Position.Z)
-    ).Magnitude
-    if healthPercent <= threshold
-        and horizontalDistance <= LOW_HEALTH_RISE_ACTIVATION_DISTANCE
-    then
-        self.LowHealthCombatRetreatActive = true
-    elseif healthPercent >= 80 then
-        self.LowHealthCombatRetreatActive = false
-    end
-
-    if not self.LowHealthCombatRetreatActive then
-        return 0
-    end
-    return math.clamp(
-        tonumber(farmSettings.LowHealthRiseHeight) or 800,
-        tonumber(farmSettings.LowHealthRiseHeightMin) or 100,
-        tonumber(farmSettings.LowHealthRiseHeightMax) or 2000
-    )
-end
-
-function MainFarm:_MoveTo(destination, session, threshold, keepSession, label, combatTarget)
+function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
     if not self.MovementService then
         return false
     end
@@ -3199,16 +3134,10 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession, label, c
             return true, routeResult
         end
     end
-    local movementDestination = destination
-    local riseHeight = self:_GetLowHealthCombatRise(combatTarget)
-    if riseHeight > 0 then
-        movementDestination = destination + Vector3.new(0, riseHeight, 0)
-    end
-    return self.MovementService:MoveTo(movementDestination, {
+    return self.MovementService:MoveTo(destination, {
         Speed = 190,
         Threshold = threshold,
         KeepSession = keepSession == true,
-        SkipSpecialRoute = riseHeight > 0,
         IsCurrent = function()
             return self:_IsCurrent(session)
         end,
@@ -3582,7 +3511,7 @@ function MainFarm:_MoveToFarmAttackPosition(
     if not destination then
         return false, "target has no attack-position root"
     end
-    return self:_MoveTo(destination, session, threshold, keepSession, nil, target)
+    return self:_MoveTo(destination, session, threshold, keepSession)
 end
 
 function MainFarm:_IsAtFarmAttackPosition(target, playerRoot, weaponCategory)
@@ -5793,6 +5722,15 @@ end
 function MainFarm:_Run(session)
     while self:_IsCurrent(session) do
         local ok, err = pcall(function()
+            if self.MovementService
+                and self.MovementService.LowHealthRetreatInProgress
+                and (self.MainFarmEnabled or self.ActiveStackTask)
+            then
+                if self.CombatService then
+                    self.CombatService:Cancel()
+                end
+                return
+            end
             self:_QueueEligibleSeaProgression()
             if self:_StepStackTasks(session) then
                 return
@@ -5819,7 +5757,9 @@ function MainFarm:_Run(session)
                 end
                 self:_Step(session)
             else
-                if self.MovementService then
+                if self.MovementService
+                    and not self.MovementService.LowHealthRetreatInProgress
+                then
                     self.MovementService:Cancel()
                 end
                 local progression = self:_GetProgressionSettings()
@@ -6819,11 +6759,13 @@ function MainFarm:Handle(actionId, payload)
             return false
         end
         farmSettings.LowHealthRiseEnabled = payload
-        if not payload then
-            self.LowHealthCombatRetreatActive = false
+        if self.MovementService
+            and type(self.MovementService.RefreshLowHealthRetreat) == "function"
+        then
+            self.MovementService:RefreshLowHealthRetreat()
         end
         self:_SetStatus(
-            "Low-health combat retreat " .. (payload and "enabled" or "disabled"),
+            "Low-health vertical lift " .. (payload and "enabled" or "disabled"),
             "success"
         )
         return true
@@ -6845,6 +6787,11 @@ function MainFarm:Handle(actionId, payload)
             minimum,
             maximum
         )
+        if self.MovementService
+            and type(self.MovementService.RefreshLowHealthRetreat) == "function"
+        then
+            self.MovementService:RefreshLowHealthRetreat()
+        end
         self:_SetStatus(
             "Low-health retreat threshold: "
                 .. tostring(farmSettings.LowHealthRiseThreshold)
@@ -6871,7 +6818,7 @@ function MainFarm:Handle(actionId, payload)
             maximum
         )
         self:_SetStatus(
-            "Height above enemy: "
+            "Low-health lift height: "
                 .. tostring(farmSettings.LowHealthRiseHeight)
                 .. " studs",
             "success"

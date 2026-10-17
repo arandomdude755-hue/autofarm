@@ -261,7 +261,8 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
     if not moved then
         return false, tostring(moveResult)
     end
-    if moveResult == "arrived" then
+    local needsRestartAfterRetreat = moveResult == "arrived"
+    if moveResult == "arrived" and not self.MovementService.LowHealthRetreatInProgress then
         return true
     end
 
@@ -286,6 +287,31 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
             return false, "Character changed during travel"
         end
         local remaining = (destination.Position - currentRoot.Position).Magnitude
+        if self.MovementService.LowHealthRetreatInProgress then
+            deadline += 0.1
+            task.wait(0.1)
+            continue
+        end
+        if needsRestartAfterRetreat then
+            needsRestartAfterRetreat = false
+            local retryCallOk, retryMoved, retryResult = startMovement()
+            if not retryCallOk then
+                self:_StopMovementSession()
+                return false, tostring(retryMoved)
+            end
+            if not retryMoved then
+                return false, tostring(retryResult)
+            end
+            if retryResult == "arrived"
+                and not self.MovementService.LowHealthRetreatInProgress
+            then
+                return true
+            end
+            if retryResult == "arrived" then
+                needsRestartAfterRetreat = true
+            end
+            continue
+        end
         if not self.MovementService.Active then
             if remaining <= 14 then
                 return true
@@ -321,8 +347,15 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
                 if not retryMoved then
                     return false, tostring(retryResult)
                 end
-                if retryResult == "arrived" then
+                if retryResult == "arrived"
+                    and not self.MovementService.LowHealthRetreatInProgress
+                then
                     return true
+                end
+                if retryResult == "arrived"
+                    and self.MovementService.LowHealthRetreatInProgress
+                then
+                    needsRestartAfterRetreat = true
                 end
                 continue
             end
@@ -344,10 +377,16 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
                     if transitionCharacter ~= character or not transitionRoot then
                         return false, "Character changed during map transition"
                     end
+                    if self.MovementService.LowHealthRetreatInProgress then
+                        transitionDeadline += 0.1
+                        task.wait(0.1)
+                        continue
+                    end
                     if (destination.Position - transitionRoot.Position).Magnitude <= 14 then
                         return true
                     end
-                    if (transitionRoot.Position - startRoot.Position).Magnitude >= 200 then
+                    local transitionOffset = transitionRoot.Position - startRoot.Position
+                    if Vector3.new(transitionOffset.X, 0, transitionOffset.Z).Magnitude >= 200 then
                         return false, "Map transition completed; continue toward the destination"
                     end
                     task.wait(0.1)
@@ -1809,7 +1848,10 @@ function TeleportFeature:Initialize(context)
     self.ActiveFarmTravel = nil
     self.LastFarmGatewayPlanCheck = nil
     self.MovementService = context.MovementService
-    self.GatewayService = MapGatewayService.new(context.Compatibility)
+    self.GatewayService = MapGatewayService.new(
+        context.Compatibility,
+        self.MovementService
+    )
     if self.MovementService then
         self.MovementService.OnCancel = function()
             self:CancelFarmTravel(true)

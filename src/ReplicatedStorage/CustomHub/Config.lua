@@ -1188,14 +1188,14 @@ local Config = {
                 },
                 {
                     Kind = "sectionHeader",
-                    Label = "Low-health combat retreat",
+                    Label = "Low-health retreat",
                 },
                 {
                     Kind = "settingToggle",
-                    Label = "Move above enemy at low health",
+                    Label = "Rise straight up at low health",
                     Action = "farm.settings.lowHealthRise",
                     Setting = "LowHealthRiseEnabled",
-                    Description = "Only changes movement while pursuing a live enemy.",
+                    Description = "Temporarily pauses movement, then continues the current task.",
                 },
                 {
                     Kind = "settingSlider",
@@ -1209,7 +1209,7 @@ local Config = {
                 },
                 {
                     Kind = "settingSlider",
-                    Label = "Height above enemy",
+                    Label = "Rise height",
                     Action = "farm.lowHealthRise.height.set",
                     Setting = "LowHealthRiseHeight",
                     Min = 100,

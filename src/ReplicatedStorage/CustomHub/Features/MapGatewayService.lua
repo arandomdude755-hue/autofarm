@@ -148,9 +148,10 @@ local function getNoAccessCacheKey(compatibility, source)
     }, "|")
 end
 
-function MapGatewayService.new(compatibility)
+function MapGatewayService.new(compatibility, movementService)
     return setmetatable({
         Compatibility = compatibility,
+        MovementService = movementService,
         FailedUntil = {},
         LastFailures = {},
         TikiNoAccessCache = {},
@@ -834,6 +835,15 @@ function MapGatewayService:Use(route, isCurrent)
         root.AssemblyAngularVelocity = Vector3.zero
     end)
 
+    local retreatDeferral = self.MovementService
+        and self.MovementService:BeginLowHealthRetreatDeferral()
+    local function endRetreatDeferral()
+        if retreatDeferral then
+            self.MovementService:EndLowHealthRetreatDeferral(retreatDeferral)
+            retreatDeferral = nil
+        end
+    end
+
     local activationStartPosition = root.Position
     self:RecordTravelPhase("activating gateway", route, {
         PositionBeforeActivation = root.Position,
@@ -934,6 +944,7 @@ function MapGatewayService:Use(route, isCurrent)
                 TouchTriggerStatus = "not loaded",
                 TouchTriggerLoadAttempts = touchLoadAttempts,
             })
+            endRetreatDeferral()
             return false, failure
         end
 
@@ -957,6 +968,7 @@ function MapGatewayService:Use(route, isCurrent)
             self:RecordTravelPhase("gateway touch failed", route, {
                 Failure = touchError,
             })
+            endRetreatDeferral()
             return false, touchError
         end
     else
@@ -967,6 +979,7 @@ function MapGatewayService:Use(route, isCurrent)
                 Failure = remoteError,
                 RemoteCallStatus = "not started",
             })
+            endRetreatDeferral()
             return false, remoteError
         end
     end
@@ -982,6 +995,7 @@ function MapGatewayService:Use(route, isCurrent)
                 PositionAfterActivation = currentRoot and currentRoot.Position or nil,
                 Failure = "Character changed during gateway travel",
             })
+            endRetreatDeferral()
             return false, "Character changed during gateway travel"
         end
         if diagnostic and diagnostic.LastAttempt
@@ -1014,6 +1028,7 @@ function MapGatewayService:Use(route, isCurrent)
                 DistanceAfterActivation = destinationDistance,
                 ActivationDisplacement = activationDisplacement,
             })
+            endRetreatDeferral()
             return true
         end
         if remote and distance(currentRoot.Position, route.Stand) <= GATEWAY_ARRIVAL_RADIUS then
@@ -1030,6 +1045,7 @@ function MapGatewayService:Use(route, isCurrent)
         self:RecordTravelPhase("gateway activation cancelled", route, {
             Failure = "Travel was cancelled",
         })
+        endRetreatDeferral()
         return false, "Travel was cancelled"
     end
     local _, _, finalRoot = compatibility:GetCharacterParts()
@@ -1042,6 +1058,7 @@ function MapGatewayService:Use(route, isCurrent)
             .. tostring(GATEWAY_ACTIVATION_TIMEOUT)
             .. " seconds",
     })
+    endRetreatDeferral()
     return false, "Gateway did not confirm arrival"
 end
 
