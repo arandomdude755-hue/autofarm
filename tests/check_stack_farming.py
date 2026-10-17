@@ -33,6 +33,30 @@ require(
     'Title = "Main Farming"' in CONFIG and 'Title = "Stack Farming"' in CONFIG,
     "both Farm subsection pages must have clear page titles",
 )
+move_function_start = MAIN_FARM.index("function MainFarm:_MoveTo(destination")
+move_function_end = MAIN_FARM.index("function MainFarm:_HoldPosition", move_function_start)
+combat_move_function = MAIN_FARM[move_function_start:move_function_end]
+require(
+    "LowHealthRiseEnabled = false" in CONFIG
+    and 'Label = "Move above enemy at low health"' in CONFIG
+    and 'Action = "farm.settings.lowHealthRise"' in CONFIG
+    and 'Label = "Retreat below health"' in CONFIG
+    and 'Label = "Height above enemy"' in CONFIG
+    and "function MainFarm:_GetLowHealthCombatRise(target)" in MAIN_FARM
+    and "self.EnemyService:IsAlive(target)" in MAIN_FARM
+    and "healthPercent >= 80" in MAIN_FARM
+    and "LOW_HEALTH_RISE_ACTIVATION_DISTANCE = 300" in MAIN_FARM
+    and "SkipSpecialRoute = riseHeight > 0" in MAIN_FARM
+    and "if options.SkipSpecialRoute ~= true then" in (
+        ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua"
+    ).read_text(encoding="utf-8")
+    and "self:_GetLowHealthCombatRise(combatTarget)" in combat_move_function
+    and combat_move_function.index("if routed then")
+    < combat_move_function.index("self:_GetLowHealthCombatRise(combatTarget)")
+    and "return self:_MoveTo(destination, session, threshold, keepSession, nil, target)"
+    in MAIN_FARM,
+    "low-health height retreat must be opt-in, hysteresis-controlled, live-enemy-only, and applied only after gateway travel is ruled out",
+)
 settings_page = CONFIG[
     CONFIG.index('Title = "Main settings"') : CONFIG.index('Title = "Farm settings"')
 ]

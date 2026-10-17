@@ -571,7 +571,10 @@ function MovementService:MoveTo(destination, options)
         return false, "Movement retry cooldown after a stall"
     end
 
-    local route = self:_GetRoute(destination, root.Position)
+    local route
+    if options.SkipSpecialRoute ~= true then
+        route = self:_GetRoute(destination, root.Position)
+    end
     local goal = route and route.Stage or destination
     local threshold = route and 8 or (tonumber(options.Threshold) or 2.5)
     local isCurrent = options.IsCurrent or function()
