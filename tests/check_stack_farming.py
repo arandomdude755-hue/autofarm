@@ -265,6 +265,16 @@ require(
     "summon preparation should use held summon items, cocoa inventory, and the referenced Indra pad flow",
 )
 require(
+    '"DoughKingSpawnerProgress"' in MAIN_FARM
+    and '"CakePrinceSpawner",\n                true' in MAIN_FARM
+    and 'string.find(\n                string.lower(response),\n                "open the portal"' in MAIN_FARM
+    and '"DoughKingPortal"' in MAIN_FARM
+    and '("Farming Cake Land enemies; " .. tostring(remaining) .. " left")' in MAIN_FARM
+    and 'local cocoaProfile = table.clone(profile)' in MAIN_FARM
+    and 'cocoaProfile.BossName = nil' in MAIN_FARM,
+    "Dough King preparation should read the server's 500-enemy progress and only summon when the portal is ready",
+)
+require(
     "if payload and stackSettings[parentSetting] ~= true then" in MAIN_FARM
     and "PrioritizeRipIndra = false" in MAIN_FARM
     and "PrioritizeDoughKing = false" in MAIN_FARM

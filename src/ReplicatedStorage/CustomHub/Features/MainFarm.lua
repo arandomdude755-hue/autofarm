@@ -1859,22 +1859,40 @@ function MainFarm:_StepStackPreparation(session, root, prep)
         end
         if prep.Phase ~= "waitingBoss" then
             local request = self:_StartStackRemoteRequest(
+                "DoughKingSpawnerProgress",
+                2,
                 "CakePrinceSpawner",
-                4,
-                "CakePrinceSpawner"
+                true
             )
-            if request.LastOk and type(request.LastValue) == "string"
-                and string.find(string.lower(request.LastValue), "open the portal now", 1, true)
-            then
-                self:_StartStackRemoteRequest(
+            local response = request.LastOk and type(request.LastValue) == "string"
+                and request.LastValue or ""
+            local portalReady = string.find(
+                string.lower(response),
+                "open the portal",
+                1,
+                true
+            ) ~= nil
+            if portalReady then
+                local summonRequest = self:_StartStackRemoteRequest(
                     "DoughKingPortal",
                     1,
                     "CakePrinceSpawner"
                 )
-                prep.Phase = "waitingBoss"
-                prep.SummonIssued = true
-            elseif prep.Phase ~= "farmCakeMobs" then
+                if summonRequest.Pending or summonRequest.LastOk then
+                    prep.Phase = "waitingBoss"
+                    prep.SummonIssued = true
+                    self:_SetStatus("Opening the Dough King portal", "info")
+                end
+            else
                 prep.Phase = "farmCakeMobs"
+                local cleanResponse = response:gsub("<[^>]+>", "")
+                local remaining = tonumber(cleanResponse:match("(%d+)"))
+                self:_SetStatus(
+                    remaining
+                        and ("Farming Cake Land enemies; " .. tostring(remaining) .. " left")
+                        or "Farming Cake Land enemies for Dough King",
+                    "info"
+                )
             end
             if prep.SweetChaliceSeen
                 and not self:_GetStackTool("Sweet Chalice")
