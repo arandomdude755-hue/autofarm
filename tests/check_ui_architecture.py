@@ -26,7 +26,7 @@ entry = project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["CustomHubMobil
 require(entry["$path"] == SCRIPT_PATH, "Rojo mapping does not point to the standalone LocalScript")
 require("ReplicatedStorage" not in project["tree"], "Standalone project should not depend on modules")
 
-for tab in ("Main", "Farm", "Teleport", "Status", "Settings"):
+for tab in ("Farm", "Teleport", "Status", "Settings"):
     require(f"{tab} = {{" in SCRIPT, f"Standalone page is missing: {tab}")
     require(f'"{tab}"' in CONFIG, f"production UI is missing the {tab} tab")
 
@@ -294,9 +294,11 @@ require(
     and "self:_SetMinimized(true)" in mount_method,
     "the initial launch should show the floating restore bubble before the main window",
 )
-require(UI_MODULE.count("UserInputService.InputChanged") == 1
-        and UI_MODULE.count("UserInputService.InputEnded") == 1,
-        "restore drag input listeners are duplicated")
+require(
+    UI_MODULE.count("UserInputService.InputChanged") == 2
+    and UI_MODULE.count("UserInputService.InputEnded") == 2,
+    "window dragging and notification swiping each use one input listener",
+)
 minimize_start = UI_MODULE.index("function UI:_SetMinimized(minimized)")
 minimize_end = UI_MODULE.index("\nfunction UI:_Refresh", minimize_start)
 minimize_method = UI_MODULE[minimize_start:minimize_end]

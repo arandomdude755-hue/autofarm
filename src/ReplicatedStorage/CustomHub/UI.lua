@@ -146,6 +146,8 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         NotificationTween = nil,
         NotificationGeneration = 0,
         LastNotificationId = 0,
+        DismissedNotificationId = nil,
+        NotificationSwipe = nil,
         CurrentNotificationPersistent = false,
         TabButtons = {},
         TabLabels = {},
@@ -677,9 +679,13 @@ function UI:_Refresh(snapshot)
         entry.ValueLabel.Text = tostring(snapshot.statusValues[entry.Key] or "—")
     end
     if snapshot.notification then
-        self:_ShowNotification(snapshot.notification)
+        if self.DismissedNotificationId ~= snapshot.notification.Id then
+            self:_ShowNotification(snapshot.notification)
+        end
     elseif self.NotificationFrame and self.NotificationFrame.Visible then
         self:_HideNotification()
+    else
+        self.DismissedNotificationId = nil
     end
 
     for tabName, button in pairs(self.TabButtons) do
@@ -832,6 +838,7 @@ function UI:_ShowNotification(notification)
         return
     end
     self.LastNotificationId = notification.Id
+    self.DismissedNotificationId = nil
     self.NotificationGeneration += 1
     local generation = self.NotificationGeneration
     if self.NotificationTween then
@@ -894,8 +901,119 @@ function UI:_ShowNotification(notification)
     end)
 end
 
-function UI:_HideNotification()
+function UI:_DismissNotification()
+    local frame = self.NotificationFrame
+    if not frame or not frame.Visible then
+        return false
+    end
+    self.DismissedNotificationId = self.LastNotificationId
+    self.NotificationSwipe = nil
     self.NotificationGeneration += 1
+    local generation = self.NotificationGeneration
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
+    local tween = TweenService:Create(
+        frame,
+        TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+        { Position = UDim2.new(1, frame.AbsoluteSize.X + 32, 1, -16) }
+    )
+    self.NotificationTween = tween
+    tween:Play()
+    task.delay(0.18, function()
+        if self.NotificationGeneration == generation and self.NotificationFrame == frame then
+            frame.Visible = false
+            self.NotificationTween = nil
+        end
+    end)
+    return true
+end
+
+function UI:_BindNotificationSwipe()
+    local frame = self.NotificationFrame
+    if not frame then
+        return
+    end
+    frame.Active = true
+    self:_Connect(self.PersistentConnections, frame.InputBegan, function(input)
+        local inputType = input.UserInputType
+        if not frame.Visible
+            or (inputType ~= Enum.UserInputType.Touch
+                and inputType ~= Enum.UserInputType.MouseButton1)
+        then
+            return
+        end
+        if self.NotificationTween then
+            self.NotificationTween:Cancel()
+            self.NotificationTween = nil
+        end
+        self.NotificationSwipe = {
+            Input = input,
+            InputType = inputType,
+            Start = input.Position,
+            StartPosition = frame.Position,
+        }
+    end)
+    self:_Connect(
+        self.PersistentConnections,
+        UserInputService.InputChanged,
+        function(input)
+            local swipe = self.NotificationSwipe
+            if not swipe then
+                return
+            end
+            local isTouchMove = swipe.InputType == Enum.UserInputType.Touch
+                and input == swipe.Input
+            local isMouseMove = swipe.InputType == Enum.UserInputType.MouseButton1
+                and input.UserInputType == Enum.UserInputType.MouseMovement
+            if not isTouchMove and not isMouseMove then
+                return
+            end
+            local deltaX = math.max(0, input.Position.X - swipe.Start.X)
+            frame.Position = UDim2.new(
+                swipe.StartPosition.X.Scale,
+                swipe.StartPosition.X.Offset + deltaX,
+                swipe.StartPosition.Y.Scale,
+                swipe.StartPosition.Y.Offset
+            )
+        end
+    )
+    self:_Connect(
+        self.PersistentConnections,
+        UserInputService.InputEnded,
+        function(input)
+            local swipe = self.NotificationSwipe
+            if not swipe then
+                return
+            end
+            local ended = input == swipe.Input
+                or (swipe.InputType == Enum.UserInputType.MouseButton1
+                    and input.UserInputType == Enum.UserInputType.MouseButton1)
+            if not ended then
+                return
+            end
+            self.NotificationSwipe = nil
+            local deltaX = input.Position.X - swipe.Start.X
+            local deltaY = input.Position.Y - swipe.Start.Y
+            if deltaX >= 72 and deltaX > math.abs(deltaY) * 1.2 then
+                self:_DismissNotification()
+                return
+            end
+            local tween = TweenService:Create(
+                frame,
+                TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Position = UDim2.new(1, -16, 1, -16) }
+            )
+            self.NotificationTween = tween
+            tween:Play()
+        end
+    )
+end
+
+function UI:_HideNotification(keepDismissed)
+    self.NotificationGeneration += 1
+    self.NotificationSwipe = nil
     if self.NotificationTween then
         self.NotificationTween:Cancel()
         self.NotificationTween = nil
@@ -904,6 +1022,9 @@ function UI:_HideNotification()
         self.NotificationFrame.Visible = false
     end
     self.CurrentNotificationPersistent = false
+    if not keepDismissed then
+        self.DismissedNotificationId = nil
+    end
 end
 
 function UI:_ClearPage()
@@ -3305,6 +3426,7 @@ function UI:Mount()
         TextYAlignment = Enum.TextYAlignment.Top,
         ZIndex = 52,
     }, self.NotificationFrame)
+    self:_BindNotificationSwipe()
 
     self.Scroll = create("ScrollingFrame", {
         Name = "Page",

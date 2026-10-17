@@ -427,7 +427,7 @@ local Config = {
     IsTravelNpcPositionInCurrentSea = isTravelNpcPositionInCurrentSea,
     TravelNpcsForCurrentSea = travelNpcsForCurrentSea,
     Defaults = {
-        SelectedTab = "Main",
+        SelectedTab = "Farm",
         Compact = true,
         UiSize = "Large",
         StatusMaxCharacters = 88,
@@ -606,7 +606,6 @@ local Config = {
         },
     },
     Tabs = {
-        "Main",
         "Farm",
         "Teleport",
         "Status",
@@ -630,15 +629,6 @@ local Config = {
         farmSkillKeys = true,
     },
     Pages = {
-        Main = {
-            Controls = {
-                {
-                    Kind = "button",
-                    Label = "Run UI self-check",
-                    Action = "main.selfCheck",
-                },
-            },
-        },
         Farm = {
             Title = "Main Farming",
             Controls = {
@@ -1048,6 +1038,11 @@ local Config = {
                 { Kind = "statusValue", Key = "money", Label = "Money" },
                 {
                     Kind = "sectionHeader",
+                    Label = "Current task",
+                },
+                { Kind = "statusValue", Key = "currentTask", Label = "Task" },
+                {
+                    Kind = "sectionHeader",
                     Label = "Farm",
                 },
                 { Kind = "statusValue", Key = "autoFarm", Label = "Auto Farm" },
@@ -1061,8 +1056,6 @@ local Config = {
                 { Kind = "statusValue", Key = "questTitle", Label = "Quest" },
                 { Kind = "statusValue", Key = "questTarget", Label = "Target" },
                 { Kind = "statusValue", Key = "questProgress", Label = "Progress" },
-                { Kind = "statusValue", Key = "questReader", Label = "Quest reader" },
-                { Kind = "statusValue", Key = "questDialogue", Label = "Quest dialogue" },
                 {
                     Kind = "sectionHeader",
                     Label = "Server",

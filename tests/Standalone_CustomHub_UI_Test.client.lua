@@ -61,18 +61,8 @@ local Theme = {
     MonoFont = Enum.Font.Code,
 }
 
-local Tabs = { "Main", "Farm", "Teleport", "Status", "Settings" }
+local Tabs = { "Farm", "Teleport", "Status", "Settings" }
 local Pages = {
-    Main = {
-        Controls = {
-            {
-                Kind = "button",
-                Label = "Run UI self-check",
-                Action = "main.selfCheck",
-                Badge = "CHECK",
-            },
-        },
-    },
     Farm = {
         Controls = {
             {
@@ -126,7 +116,7 @@ local Pages = {
 local touchEnabled = UserInputService.TouchEnabled
 local compactDefault = true
 local state = {
-    selectedTab = "Main",
+    selectedTab = "Farm",
     compact = compactDefault,
     farmPreview = false,
     status = "UI shell ready; gameplay features are disconnected.",
@@ -664,9 +654,7 @@ end
 local renderTab
 
 local function dispatch(action, value)
-    if action == "main.selfCheck" then
-        setStatus("UI action path is connected; no gameplay action was run.", "success")
-    elseif action == "preview.farm" then
+    if action == "preview.farm" then
         state.farmPreview = value == true
         setStatus(state.farmPreview and "Farm preview ON; no farming code was started."
             or "Farm preview OFF; no farming code was started.", "info")
@@ -679,12 +667,12 @@ local function dispatch(action, value)
         updateSize()
         setStatus(state.compact and "Compact UI enabled." or "Expanded UI enabled.", "success")
     elseif action == "settings.reset" then
-        state.selectedTab = "Main"
+        state.selectedTab = "Farm"
         state.compact = compactDefault
         state.farmPreview = false
         updateSize()
         setStatus("Local UI settings reset.", "success")
-        renderTab("Main")
+        renderTab("Farm")
     else
         setStatus("Unknown UI action: " .. tostring(action), "error")
         return false
@@ -1522,7 +1510,7 @@ task.spawn(function()
     end)
 
     test("native window, compact control rows, and scrolling surfaces exist", function()
-        selectTab("Main")
+        selectTab("Farm")
         local row = controlsContainer and controlsContainer:FindFirstChildWhichIsA("TextButton")
         return titlebar ~= nil and titlebar:IsA("Frame")
             and scroll ~= nil and scroll:IsA("ScrollingFrame")
@@ -1538,7 +1526,7 @@ task.spawn(function()
             and bubbleHalo ~= nil
             and bubblePing ~= nil
             and bubbleRing:FindFirstChild("Dash_12") ~= nil
-            and tabButtons.Main:FindFirstChildOfClass("UIScale") ~= nil
+            and tabButtons.Farm:FindFirstChildOfClass("UIScale") ~= nil
             and bubbleButton:FindFirstChildOfClass("UIScale") ~= nil
             and not bubbleHint.Visible
     end)
@@ -1565,7 +1553,7 @@ task.spawn(function()
                 return false
             end
         end
-        selectTab("Main")
+        selectTab("Farm")
         return true
     end)
 
@@ -1576,7 +1564,7 @@ task.spawn(function()
         local enabled = state.farmPreview and toggleEntries[1].Value.Text == "ON"
         activateControl(control)
         local disabled = not state.farmPreview and toggleEntries[1].Value.Text == "OFF"
-        selectTab("Main")
+        selectTab("Farm")
         return enabled and disabled
     end)
 
@@ -1596,7 +1584,7 @@ task.spawn(function()
         local landscape = viewport.X > viewport.Y
         local minHeight = landscape and 300 or 320
         local maxHeight = math.min(landscape and 420 or 740, math.max(1, viewport.Y - 32))
-        selectTab("Main")
+        selectTab("Farm")
         return expanded and compact
             and expandedWidth >= compactWidth
             and expandedHeight >= minHeight
@@ -1623,14 +1611,11 @@ task.spawn(function()
 
     test("placeholder actions only update status", function()
         state.farmPreview = false
-        selectTab("Main")
-        activateControl(Pages.Main.Controls[1])
-        local mainOk = string.find(state.status, "no gameplay action", 1, true) ~= nil
         selectTab("Teleport")
         activateControl(Pages.Teleport.Controls[1])
         local travelOk = string.find(state.status, "no movement or remote was invoked", 1, true) ~= nil
-        selectTab("Main")
-        return mainOk and travelOk and not state.farmPreview
+        selectTab("Farm")
+        return travelOk and not state.farmPreview
     end)
 
     test("status error state is visible", function()
@@ -1669,7 +1654,7 @@ task.spawn(function()
         local columnsFitWidth = controlGridLayout.FillDirectionMaxCells
             == getColumnCount(controlsContainer.AbsoluteSize.X, #Pages.Settings.Controls, landscape)
         local noOverlap = title.AbsolutePosition.X + title.AbsoluteSize.X <= value.AbsolutePosition.X
-        selectTab("Main")
+        selectTab("Farm")
         return noOverlap and columnsFitWidth
     end)
 
@@ -1679,7 +1664,7 @@ task.spawn(function()
         table.insert(settingsControls, {
             Kind = "button",
             Label = "Temporary scroll check " .. tostring(index),
-            Action = "main.selfCheck",
+            Action = "teleport.status",
         })
     end
     selectTab("Settings")
@@ -1695,7 +1680,7 @@ task.spawn(function()
     for index = 1, 8 do
         table.remove(settingsControls)
     end
-    selectTab("Main")
+    selectTab("Farm")
     test("scroll view supports overflow", function()
         return scrollOverflow == true
     end)

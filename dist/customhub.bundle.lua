@@ -456,7 +456,7 @@ local Config = {
     IsTravelNpcPositionInCurrentSea = isTravelNpcPositionInCurrentSea,
     TravelNpcsForCurrentSea = travelNpcsForCurrentSea,
     Defaults = {
-        SelectedTab = "Main",
+        SelectedTab = "Farm",
         Compact = true,
         UiSize = "Large",
         StatusMaxCharacters = 88,
@@ -635,7 +635,6 @@ local Config = {
         },
     },
     Tabs = {
-        "Main",
         "Farm",
         "Teleport",
         "Status",
@@ -659,15 +658,6 @@ local Config = {
         farmSkillKeys = true,
     },
     Pages = {
-        Main = {
-            Controls = {
-                {
-                    Kind = "button",
-                    Label = "Run UI self-check",
-                    Action = "main.selfCheck",
-                },
-            },
-        },
         Farm = {
             Title = "Main Farming",
             Controls = {
@@ -1077,6 +1067,11 @@ local Config = {
                 { Kind = "statusValue", Key = "money", Label = "Money" },
                 {
                     Kind = "sectionHeader",
+                    Label = "Current task",
+                },
+                { Kind = "statusValue", Key = "currentTask", Label = "Task" },
+                {
+                    Kind = "sectionHeader",
                     Label = "Farm",
                 },
                 { Kind = "statusValue", Key = "autoFarm", Label = "Auto Farm" },
@@ -1090,8 +1085,6 @@ local Config = {
                 { Kind = "statusValue", Key = "questTitle", Label = "Quest" },
                 { Kind = "statusValue", Key = "questTarget", Label = "Target" },
                 { Kind = "statusValue", Key = "questProgress", Label = "Progress" },
-                { Kind = "statusValue", Key = "questReader", Label = "Quest reader" },
-                { Kind = "statusValue", Key = "questDialogue", Label = "Quest dialogue" },
                 {
                     Kind = "sectionHeader",
                     Label = "Server",
@@ -4652,6 +4645,8 @@ function UI.new(playerGui, state, compatibility, config, dispatch, onClose)
         NotificationTween = nil,
         NotificationGeneration = 0,
         LastNotificationId = 0,
+        DismissedNotificationId = nil,
+        NotificationSwipe = nil,
         CurrentNotificationPersistent = false,
         TabButtons = {},
         TabLabels = {},
@@ -5183,9 +5178,13 @@ function UI:_Refresh(snapshot)
         entry.ValueLabel.Text = tostring(snapshot.statusValues[entry.Key] or "—")
     end
     if snapshot.notification then
-        self:_ShowNotification(snapshot.notification)
+        if self.DismissedNotificationId ~= snapshot.notification.Id then
+            self:_ShowNotification(snapshot.notification)
+        end
     elseif self.NotificationFrame and self.NotificationFrame.Visible then
         self:_HideNotification()
+    else
+        self.DismissedNotificationId = nil
     end
 
     for tabName, button in pairs(self.TabButtons) do
@@ -5338,6 +5337,7 @@ function UI:_ShowNotification(notification)
         return
     end
     self.LastNotificationId = notification.Id
+    self.DismissedNotificationId = nil
     self.NotificationGeneration += 1
     local generation = self.NotificationGeneration
     if self.NotificationTween then
@@ -5400,8 +5400,119 @@ function UI:_ShowNotification(notification)
     end)
 end
 
-function UI:_HideNotification()
+function UI:_DismissNotification()
+    local frame = self.NotificationFrame
+    if not frame or not frame.Visible then
+        return false
+    end
+    self.DismissedNotificationId = self.LastNotificationId
+    self.NotificationSwipe = nil
     self.NotificationGeneration += 1
+    local generation = self.NotificationGeneration
+    if self.NotificationTween then
+        self.NotificationTween:Cancel()
+        self.NotificationTween = nil
+    end
+    local tween = TweenService:Create(
+        frame,
+        TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+        { Position = UDim2.new(1, frame.AbsoluteSize.X + 32, 1, -16) }
+    )
+    self.NotificationTween = tween
+    tween:Play()
+    task.delay(0.18, function()
+        if self.NotificationGeneration == generation and self.NotificationFrame == frame then
+            frame.Visible = false
+            self.NotificationTween = nil
+        end
+    end)
+    return true
+end
+
+function UI:_BindNotificationSwipe()
+    local frame = self.NotificationFrame
+    if not frame then
+        return
+    end
+    frame.Active = true
+    self:_Connect(self.PersistentConnections, frame.InputBegan, function(input)
+        local inputType = input.UserInputType
+        if not frame.Visible
+            or (inputType ~= Enum.UserInputType.Touch
+                and inputType ~= Enum.UserInputType.MouseButton1)
+        then
+            return
+        end
+        if self.NotificationTween then
+            self.NotificationTween:Cancel()
+            self.NotificationTween = nil
+        end
+        self.NotificationSwipe = {
+            Input = input,
+            InputType = inputType,
+            Start = input.Position,
+            StartPosition = frame.Position,
+        }
+    end)
+    self:_Connect(
+        self.PersistentConnections,
+        UserInputService.InputChanged,
+        function(input)
+            local swipe = self.NotificationSwipe
+            if not swipe then
+                return
+            end
+            local isTouchMove = swipe.InputType == Enum.UserInputType.Touch
+                and input == swipe.Input
+            local isMouseMove = swipe.InputType == Enum.UserInputType.MouseButton1
+                and input.UserInputType == Enum.UserInputType.MouseMovement
+            if not isTouchMove and not isMouseMove then
+                return
+            end
+            local deltaX = math.max(0, input.Position.X - swipe.Start.X)
+            frame.Position = UDim2.new(
+                swipe.StartPosition.X.Scale,
+                swipe.StartPosition.X.Offset + deltaX,
+                swipe.StartPosition.Y.Scale,
+                swipe.StartPosition.Y.Offset
+            )
+        end
+    )
+    self:_Connect(
+        self.PersistentConnections,
+        UserInputService.InputEnded,
+        function(input)
+            local swipe = self.NotificationSwipe
+            if not swipe then
+                return
+            end
+            local ended = input == swipe.Input
+                or (swipe.InputType == Enum.UserInputType.MouseButton1
+                    and input.UserInputType == Enum.UserInputType.MouseButton1)
+            if not ended then
+                return
+            end
+            self.NotificationSwipe = nil
+            local deltaX = input.Position.X - swipe.Start.X
+            local deltaY = input.Position.Y - swipe.Start.Y
+            if deltaX >= 72 and deltaX > math.abs(deltaY) * 1.2 then
+                self:_DismissNotification()
+                return
+            end
+            local tween = TweenService:Create(
+                frame,
+                TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Position = UDim2.new(1, -16, 1, -16) }
+            )
+            self.NotificationTween = tween
+            tween:Play()
+        end
+    )
+end
+
+function UI:_HideNotification(keepDismissed)
+    self.NotificationGeneration += 1
+    self.NotificationSwipe = nil
     if self.NotificationTween then
         self.NotificationTween:Cancel()
         self.NotificationTween = nil
@@ -5410,6 +5521,9 @@ function UI:_HideNotification()
         self.NotificationFrame.Visible = false
     end
     self.CurrentNotificationPersistent = false
+    if not keepDismissed then
+        self.DismissedNotificationId = nil
+    end
 end
 
 function UI:_ClearPage()
@@ -7811,6 +7925,7 @@ function UI:Mount()
         TextYAlignment = Enum.TextYAlignment.Top,
         ZIndex = 52,
     }, self.NotificationFrame)
+    self:_BindNotificationSwipe()
 
     self.Scroll = create("ScrollingFrame", {
         Name = "Page",
@@ -9296,31 +9411,21 @@ function StatusFeature:_ReadValues()
         Target = nil,
         Title = "Unavailable",
         Progress = "Unavailable",
-        Reader = "Quest service unavailable",
     }
-    local questDialogue = "Unavailable"
     local questService = context.MainFarm and context.MainFarm.QuestService
     if questService then
         local detailsOk, details = pcall(questService.GetActiveQuestDetails, questService)
         if detailsOk and type(details) == "table" then
             questDetails = details
         else
-            local stateOk, state, target, reader = pcall(
+            local stateOk, state, target = pcall(
                 questService.GetActiveQuestState,
                 questService
             )
             if stateOk then
                 questDetails.State = state or "unknown"
                 questDetails.Target = target
-                questDetails.Reader = reader or "Quest reader unavailable"
             end
-        end
-        local dialogueOk, dialogueOpen = pcall(
-            questService.IsQuestGiverDialogueOpen,
-            questService
-        )
-        if dialogueOk then
-            questDialogue = dialogueOpen and "Open" or "Closed"
         end
     end
     local questStateLabels = {
@@ -9331,6 +9436,14 @@ function StatusFeature:_ReadValues()
     }
     local remoteEvents = self.RemoteEventStatus or {}
     local worldEvents = readWorldEventValues(context, self)
+    local currentTask = "Idle"
+    local coordinator = context.TaskCoordinator
+    local currentLease = coordinator and coordinator:GetCurrent()
+    if currentLease and type(currentLease.Label) == "string" then
+        currentTask = currentLease.Label
+    elseif context.MainFarm and context.MainFarm.MainFarmEnabled == true then
+        currentTask = snapshot.status ~= "" and snapshot.status or "Main Farming"
+    end
 
     return {
         sea = getSea(compatibility),
@@ -9346,8 +9459,7 @@ function StatusFeature:_ReadValues()
         questTarget = questDetails.Target
             or (questDetails.State == "none" and "None" or "Unavailable"),
         questProgress = questDetails.Progress or "Unavailable",
-        questReader = questDetails.Reader or "Quest reader unavailable",
-        questDialogue = questDialogue,
+        currentTask = currentTask,
         serverAge = worldEvents.serverAge,
         legendaryItemTimer = worldEvents.legendaryItemTimer,
         moon = worldEvents.moon,
@@ -9381,8 +9493,7 @@ function StatusFeature:_BuildReport(values)
         "Quest title: " .. values.questTitle,
         "Quest target: " .. values.questTarget,
         "Quest progress: " .. values.questProgress,
-        "Quest reader: " .. values.questReader,
-        "Quest dialogue: " .. values.questDialogue,
+        "Current task: " .. values.currentTask,
         "Server age: " .. values.serverAge,
         "Chalice / Fist status: " .. values.legendaryItemTimer,
         "Moon: " .. values.moon,
@@ -9527,7 +9638,6 @@ function PlaceholderFeatures:Handle(actionId, payload, context)
     local state = context.State
 
     local messages = {
-        ["main.selfCheck"] = "UI action path is connected; no gameplay action was run.",
         ["player.status"] = "Player feature is a placeholder; no character data was read.",
     }
     local message = messages[actionId]

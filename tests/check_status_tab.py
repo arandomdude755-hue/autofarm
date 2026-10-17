@@ -37,7 +37,7 @@ require(
     and 'EventStatus = {\n            Title = "Event Status"' in CONFIG
     and 'Action = "status.refresh"' in CONFIG
     and 'Action = "status.copy"' in CONFIG
-    and 'local Tabs = { "Main", "Farm", "Teleport", "Status", "Settings" }' in STANDALONE_UI_TEST
+    and 'local Tabs = { "Farm", "Teleport", "Status", "Settings" }' in STANDALONE_UI_TEST
     and 'Status = {\n        Controls = {' in STANDALONE_UI_TEST,
     "Status is a top-level tab with Event Status first and Server Status second",
 )
@@ -54,19 +54,24 @@ require(
         for key in (
             "fragments",
             "money",
+            "currentTask",
             "questState",
             "questTitle",
             "questTarget",
             "questProgress",
-            "questReader",
-            "questDialogue",
         )
     )
+    and 'Key = "questReader"' not in CONFIG
+    and 'Key = "questDialogue"' not in CONFIG
+    and "questReader" not in FEATURE
+    and "questDialogue" not in FEATURE
+    and 'Label = "Current task"' in CONFIG
+    and "currentTask = currentTask" in FEATURE
     and "function QuestService:GetActiveQuestDetails()" in QUEST_SERVICE
     and "self:GetActiveQuestState()" in QUEST_SERVICE
     and "parseTrackedQuestProgress" in QUEST_SERVICE
     and "titleContainsTarget(title, targetName, true)" in QUEST_SERVICE,
-    "Server Status replaces health/alive with currency and reuses validated quest details",
+    "Server Status shows current work and validated quest details without reader diagnostics",
 )
 require(
     all(

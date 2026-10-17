@@ -9,7 +9,6 @@ function PlaceholderFeatures:Handle(actionId, payload, context)
     local state = context.State
 
     local messages = {
-        ["main.selfCheck"] = "UI action path is connected; no gameplay action was run.",
         ["player.status"] = "Player feature is a placeholder; no character data was read.",
     }
     local message = messages[actionId]

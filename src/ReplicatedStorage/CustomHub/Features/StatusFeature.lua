@@ -1297,31 +1297,21 @@ function StatusFeature:_ReadValues()
         Target = nil,
         Title = "Unavailable",
         Progress = "Unavailable",
-        Reader = "Quest service unavailable",
     }
-    local questDialogue = "Unavailable"
     local questService = context.MainFarm and context.MainFarm.QuestService
     if questService then
         local detailsOk, details = pcall(questService.GetActiveQuestDetails, questService)
         if detailsOk and type(details) == "table" then
             questDetails = details
         else
-            local stateOk, state, target, reader = pcall(
+            local stateOk, state, target = pcall(
                 questService.GetActiveQuestState,
                 questService
             )
             if stateOk then
                 questDetails.State = state or "unknown"
                 questDetails.Target = target
-                questDetails.Reader = reader or "Quest reader unavailable"
             end
-        end
-        local dialogueOk, dialogueOpen = pcall(
-            questService.IsQuestGiverDialogueOpen,
-            questService
-        )
-        if dialogueOk then
-            questDialogue = dialogueOpen and "Open" or "Closed"
         end
     end
     local questStateLabels = {
@@ -1332,6 +1322,14 @@ function StatusFeature:_ReadValues()
     }
     local remoteEvents = self.RemoteEventStatus or {}
     local worldEvents = readWorldEventValues(context, self)
+    local currentTask = "Idle"
+    local coordinator = context.TaskCoordinator
+    local currentLease = coordinator and coordinator:GetCurrent()
+    if currentLease and type(currentLease.Label) == "string" then
+        currentTask = currentLease.Label
+    elseif context.MainFarm and context.MainFarm.MainFarmEnabled == true then
+        currentTask = snapshot.status ~= "" and snapshot.status or "Main Farming"
+    end
 
     return {
         sea = getSea(compatibility),
@@ -1347,8 +1345,7 @@ function StatusFeature:_ReadValues()
         questTarget = questDetails.Target
             or (questDetails.State == "none" and "None" or "Unavailable"),
         questProgress = questDetails.Progress or "Unavailable",
-        questReader = questDetails.Reader or "Quest reader unavailable",
-        questDialogue = questDialogue,
+        currentTask = currentTask,
         serverAge = worldEvents.serverAge,
         legendaryItemTimer = worldEvents.legendaryItemTimer,
         moon = worldEvents.moon,
@@ -1382,8 +1379,7 @@ function StatusFeature:_BuildReport(values)
         "Quest title: " .. values.questTitle,
         "Quest target: " .. values.questTarget,
         "Quest progress: " .. values.questProgress,
-        "Quest reader: " .. values.questReader,
-        "Quest dialogue: " .. values.questDialogue,
+        "Current task: " .. values.currentTask,
         "Server age: " .. values.serverAge,
         "Chalice / Fist status: " .. values.legendaryItemTimer,
         "Moon: " .. values.moon,

@@ -43,7 +43,11 @@ require(
     and "Size = UDim2.new(0.82, 0, 0, 64)" in UI
     and "self:_ShowNotification(snapshot.notification)" in UI
     and "task.delay(4.5" in UI
-    and "function UI:_HideNotification()" in UI
+    and "function UI:_HideNotification(keepDismissed)" in UI
+    and "function UI:_BindNotificationSwipe()" in UI
+    and "deltaX >= 72" in UI
+    and "self.DismissedNotificationId ~= snapshot.notification.Id" in UI
+    and "function UI:_DismissNotification()" in UI
     and "if self.CurrentNotificationPersistent then" in UI
     and "theme.Error" in UI,
     "the error toast must use the hub theme, appear bottom-right, and support persistent resolution-aware alerts",
