@@ -2628,6 +2628,7 @@ function UI:Mount()
         Size = UDim2.fromOffset(350, 360),
         BackgroundColor3 = theme.Background,
         BorderSizePixel = 0,
+        Visible = false,
     }, self.Gui)
     self.RootScale = create("UIScale", {
         Scale = 1,
@@ -3392,6 +3393,7 @@ function UI:Mount()
     self:_ApplySize(self.State:GetSnapshot())
     self:_RenderTab(self.State:GetSnapshot().selectedTab)
     self:_ClampRestoreButton()
+    self:_SetMinimized(true)
     return true
 end
 

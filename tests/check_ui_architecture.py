@@ -283,6 +283,15 @@ require(UI_MODULE.count('Name = "Minimize"') == 1,
         "production UI creates duplicate minimize buttons")
 require(UI_MODULE.count('Name = "Restore"') == 1,
         "production UI creates duplicate restore buttons")
+mount_start = UI_MODULE.index("function UI:Mount()")
+mount_end = UI_MODULE.index("\nfunction UI:Destroy()", mount_start)
+mount_method = UI_MODULE[mount_start:mount_end]
+require(
+    'Name = "Window"' in mount_method
+    and "Visible = false" in mount_method
+    and "self:_SetMinimized(true)" in mount_method,
+    "the initial launch should show the floating restore bubble before the main window",
+)
 require(UI_MODULE.count("UserInputService.InputChanged") == 1
         and UI_MODULE.count("UserInputService.InputEnded") == 1,
         "restore drag input listeners are duplicated")
