@@ -1926,6 +1926,17 @@ function MainFarm:_StepStackTasks(session)
         return false
     end
 
+    -- A Stack lease represents active work, not enabled-but-idle toggles.
+    -- Recover the worker if a task/preparation ended without releasing its lease,
+    -- so manual Travel and other background work are not blocked indefinitely.
+    if not self.ActiveStackTask and not self.ActiveStackPrep and self.ActiveStackLease then
+        local coordinator = self.Context and self.Context.TaskCoordinator
+        if coordinator then
+            coordinator:Release(self.ActiveStackLease)
+        end
+        self.ActiveStackLease = nil
+    end
+
     local coordinator = self.Context and self.Context.TaskCoordinator
     if coordinator then
         local canRun, blockingTask = coordinator:CanRunStack(self.ActiveStackLease)

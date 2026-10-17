@@ -12221,10 +12221,11 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     )
     if not coordinatorLease then
         self:_SetFeatureEnabled(actionId, false)
+        local blockingLabel = tostring(blockingTask and blockingTask.Label or "the current task")
         self:_SetStatus(
-            "Travel is waiting for " .. tostring(blockingTask and blockingTask.Label or "current work"),
+            "Travel was turned off while " .. blockingLabel .. " is active.",
             "warning",
-            "Let the current task finish before starting another trip."
+            "Wait for " .. blockingLabel .. " to finish, then turn Travel on again."
         )
         return false, "Another task is active"
     end
@@ -20503,6 +20504,17 @@ function MainFarm:_StepStackTasks(session)
     local queue = self.StackTaskQueue
     if not queue or not queue:HasEnabledTasks() then
         return false
+    end
+
+    -- A Stack lease represents active work, not enabled-but-idle toggles.
+    -- Recover the worker if a task/preparation ended without releasing its lease,
+    -- so manual Travel and other background work are not blocked indefinitely.
+    if not self.ActiveStackTask and not self.ActiveStackPrep and self.ActiveStackLease then
+        local coordinator = self.Context and self.Context.TaskCoordinator
+        if coordinator then
+            coordinator:Release(self.ActiveStackLease)
+        end
+        self.ActiveStackLease = nil
     end
 
     local coordinator = self.Context and self.Context.TaskCoordinator

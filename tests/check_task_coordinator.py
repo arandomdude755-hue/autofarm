@@ -51,6 +51,16 @@ require(
     "manual travel must hold a low-priority lease and stop cleanly when preempted",
 )
 require(
+    "if not self.ActiveStackTask and not self.ActiveStackPrep and self.ActiveStackLease then" in MAIN_FARM
+    and "coordinator:Release(self.ActiveStackLease)" in MAIN_FARM,
+    "enabled-but-idle Stack toggles must not leave a lease that blocks manual Travel",
+)
+require(
+    'self:_SetFeatureEnabled(actionId, false)' in TELEPORT
+    and '"Travel was turned off while " .. blockingLabel .. " is active."' in TELEPORT,
+    "manual Travel must turn itself off and explain when an active higher-priority task blocks it",
+)
+require(
     'self.Coordinator:TryAcquire(\n            "StackFarming"' in SERVER_HOP
     and "function ServerHopService:OwnsLease(lease)" in SERVER_HOP
     and "self:_ReleaseCoordinatorLease()" in SERVER_HOP,

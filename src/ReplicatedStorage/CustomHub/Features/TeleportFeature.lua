@@ -1470,10 +1470,11 @@ function TeleportFeature:_StartTravel(destination, destinationLabel, actionId)
     )
     if not coordinatorLease then
         self:_SetFeatureEnabled(actionId, false)
+        local blockingLabel = tostring(blockingTask and blockingTask.Label or "the current task")
         self:_SetStatus(
-            "Travel is waiting for " .. tostring(blockingTask and blockingTask.Label or "current work"),
+            "Travel was turned off while " .. blockingLabel .. " is active.",
             "warning",
-            "Let the current task finish before starting another trip."
+            "Wait for " .. blockingLabel .. " to finish, then turn Travel on again."
         )
         return false, "Another task is active"
     end
