@@ -12,7 +12,7 @@ STACK_QUEUE = (ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/StackTaskQu
 
 assert '{ Label = "Stack Farming", Page = "StackFarming" }' in CONFIG
 assert 'Page = "FarmOther"' not in CONFIG
-stack_page = CONFIG.split("StackFarming = {", 1)[1].split("\n        Player = {", 1)[0]
+stack_page = CONFIG.split("StackFarming = {", 1)[1].split("\n        Teleport = {", 1)[0]
 assert '"Auto unlock Sea 2"' in stack_page and '"Auto unlock Sea 3"' in stack_page
 assert 'Action = "progression.trevor.offerFruit"' in CONFIG
 assert "Offer selected fruit to Trevor (consumes it)" in CONFIG

@@ -48,7 +48,7 @@ farm_page_start = CONFIG.index(
     '        Farm = {\n            Title = "Main Farming",\n            Controls = {',
     pages_start,
 )
-farm_page_end = CONFIG.index("        Player = {", farm_page_start)
+farm_page_end = CONFIG.index("        StackFarming = {", farm_page_start)
 farm_page = CONFIG[farm_page_start:farm_page_end]
 farm_settings_start = CONFIG.index(
     '        FarmSettings = {\n            Title = "Farm settings"',

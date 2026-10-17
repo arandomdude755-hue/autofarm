@@ -78,7 +78,9 @@ require(
     settings_page.index('Label = "Hub settings"')
     < settings_page.index('Label = "Team to auto-select"')
     < settings_page.index('Label = "Auto Execute"')
-    < settings_page.index('Label = "Interface"'),
+    < settings_page.index('Label = "Player settings"')
+    < settings_page.index('Label = "Tween speed"')
+    < settings_page.index('Label = "UI settings"'),
     "team selection and Auto Execute should be grouped under Hub settings",
 )
 require(

@@ -129,21 +129,25 @@ main_farm_source = (
 movement_source = (
     ROOT / "src/ReplicatedStorage/CustomHub/Features/Farm/MovementService.lua"
 ).read_text(encoding="utf-8")
-require("Speed = 190," in main_farm_source, "MainFarm does not pass movement speed 190")
 require(
-    "Speed = route and 190 or (tonumber(options.Speed) or 300)," in movement_source,
-    "MovementService route speed is not 190",
+    "Speed = self.MovementService:GetTweenSpeed()," in main_farm_source,
+    "MainFarm does not use the configured movement speed",
 )
 require(
-    "Speed = 190," in bundle
-    and "Speed = route and 190 or (tonumber(options.Speed) or 300)," in bundle,
-    "bundled active movement speed is not 190 on all MainFarm paths",
+    "Speed = self:_GetMovementSpeed(options.Speed)," in movement_source
+    and "function MovementService:GetTweenSpeed()" in movement_source,
+    "MovementService does not use the configurable movement speed",
 )
-require("route and 350" not in movement_source and "Speed = 300," not in main_farm_source,
-        "old MainFarm speed override remains")
+require(
+    "Speed = self.MovementService:GetTweenSpeed()," in bundle
+    and "Speed = self:_GetMovementSpeed(options.Speed)," in bundle,
+    "bundled movement speed is not configurable across MainFarm paths",
+)
+require("route and 190" not in movement_source and "Speed = 300," not in main_farm_source,
+        "old hard-coded movement speed override remains")
 
 print(f"PASS: all {len(MODULE_IDS)} internal modules and the LocalScript entrypoint are bundled")
 print(f"PASS: all named internal references resolve; external runtime requires are exactly {sorted(external_require_arguments)}")
 print("PASS: initialization, caching, and LocalScript cleanup are present")
-print("PASS: MainFarm normal and staging movement speeds are 190 in source and bundle")
+print("PASS: MainFarm normal and staging movement speeds use the configured speed in source and bundle")
 print("PASS: bundle exactly matches the checked-out source modules")

@@ -18,7 +18,7 @@ def function_body(source, signature, next_signature):
     return source[start:end]
 
 
-farm_page = CONFIG[CONFIG.index("        Farm = {"):CONFIG.index("        Player = {")]
+farm_page = CONFIG[CONFIG.index("        Farm = {"):CONFIG.index("        StackFarming = {")]
 require(
     '"Farm Materials"' not in CONFIG[CONFIG.index("local farmModes = {"):CONFIG.index("local farmMaterialTargets = {")]
     and farm_page.index('Label = "Farm Materials"') > farm_page.index('Label = "Mastery health threshold"')

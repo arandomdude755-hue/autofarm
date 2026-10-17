@@ -310,8 +310,8 @@ require(
     and ":_MoveTo(" not in spawn_diagnostic,
     "report formatting must not repeat scans, availability checks, or movement",
 )
-require("Speed = 190" in FARM and "route and 190" in MOVEMENT,
-        "movement speed must remain 190")
+require("GetTweenSpeed()" in FARM and "_GetMovementSpeed(options.Speed)" in MOVEMENT,
+        "movement speed must use the user-configured setting")
 
 print("PASS: quest requests retry only within the bounded confirmation window")
 print("PASS: normal quest transitions preserve a held movement session; explicit cleanup remains")

@@ -3122,7 +3122,7 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
     local teleportFeature = self.Context and self.Context.TeleportFeature
     if teleportFeature and teleportFeature.MoveFarmTo then
         local routed, routeResult = teleportFeature:MoveFarmTo(destination, {
-            Speed = 190,
+            Speed = self.MovementService:GetTweenSpeed(),
             Threshold = threshold,
             KeepSession = keepSession == true,
             Label = label or "farm target",
@@ -3135,7 +3135,7 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
         end
     end
     return self.MovementService:MoveTo(destination, {
-        Speed = 190,
+        Speed = self.MovementService:GetTweenSpeed(),
         Threshold = threshold,
         KeepSession = keepSession == true,
         IsCurrent = function()
@@ -6768,6 +6768,22 @@ function MainFarm:Handle(actionId, payload)
             "Low-health vertical lift " .. (payload and "enabled" or "disabled"),
             "success"
         )
+        return true
+    end
+    if actionId == "player.tweenSpeed.set" then
+        if not farmSettings or not self.MovementService
+            or type(self.MovementService.SetTweenSpeed) ~= "function"
+        then
+            self:_SetStatus("Tween speed setting is unavailable", "error")
+            return false
+        end
+        local value, speedOrError = self.MovementService:SetTweenSpeed(payload)
+        if not value then
+            self:_SetStatus(tostring(speedOrError or "Tween speed is invalid"), "error")
+            return false
+        end
+        farmSettings.TweenSpeed = speedOrError
+        self:_SetStatus("Tween speed: " .. tostring(speedOrError) .. " studs/s", "success")
         return true
     end
     if actionId == "farm.lowHealthRise.threshold.set" then

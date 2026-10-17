@@ -24,7 +24,10 @@ def function_body(source, signature, next_signature):
     return source[start:end]
 
 
-farm_config = CONFIG[CONFIG.index("Farm = {"):CONFIG.index("Player = {")]
+farm_config = CONFIG[
+    CONFIG.index('        Farm = {\n            Title = "Main Farming"'):
+    CONFIG.index("        StackFarming = {")
+]
 require('Kind = "featureToggle"' in farm_config,
         "Farm page must expose Main Farm as an actual feature toggle")
 require('Label = "Start Farm"' in farm_config,
@@ -118,9 +121,9 @@ require('Label = "Bring mobs"' in farm_settings_config
         and 'BringMobCount = 2' in CONFIG
         and 'Min = 2' in farm_settings_config
         and 'Max = 6' in farm_settings_config
-        and 'Label = "Auto turn on Buso"' in farm_settings_config
-        and 'Action = "farm.settings.autoBuso"' in farm_settings_config
-        and 'Setting = "AutoBuso"' in farm_settings_config
+        and 'Label = "Auto turn on Buso"' in settings_config
+        and 'Action = "farm.settings.autoBuso"' in settings_config
+        and 'Setting = "AutoBuso"' in settings_config
         and "AutoBuso = true" in CONFIG
         and 'Label = "Use skills while farming"' in CONFIG
         and 'Action = "farm.skills.enabled"' in CONFIG
@@ -133,7 +136,7 @@ require('Label = "Bring mobs"' in farm_settings_config
         and 'Action = "farm.skills.fastRelease"' in CONFIG
         and 'Action = "farm.skills." .. category.Token .. "." .. keyName' in CONFIG
         and 'Setting = settingName' in CONFIG,
-        "Farm settings must expose opt-in Bring mobs and default-enabled Auto Buso controls")
+        "Farm controls and Player settings must expose Bring mobs and default-enabled Auto Buso")
 require(
     'Label = "Instant accept quest (RISK)"' in farm_settings_config
     and 'Action = "farm.settings.instantQuest"' in farm_settings_config

@@ -488,6 +488,10 @@ local Config = {
         LowHealthRiseHeightMin = 100,
         LowHealthRiseHeightMax = 2000,
         LowHealthRiseHeightStep = 50,
+        TweenSpeed = 190,
+        TweenSpeedMin = 50,
+        TweenSpeedMax = 350,
+        TweenSpeedStep = 10,
         AutoModeQuest = false,
         DoubleQuestEnabled = false,
         InstantAcceptQuest = false,
@@ -633,7 +637,6 @@ local Config = {
     Tabs = {
         "Main",
         "Farm",
-        "Player",
         "Teleport",
         "Status",
         "Settings",
@@ -974,15 +977,6 @@ local Config = {
                 },
             },
         },
-        Player = {
-            Controls = {
-                {
-                    Kind = "button",
-                    Label = "Character status",
-                    Action = "player.status",
-                },
-            },
-        },
         Teleport = {
             SingleColumn = true,
             Controls = {
@@ -1173,7 +1167,64 @@ local Config = {
                 },
                 {
                     Kind = "sectionHeader",
-                    Label = "Interface",
+                    Label = "Player settings",
+                },
+                {
+                    Kind = "button",
+                    Label = "Character status",
+                    Action = "player.status",
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Tween speed",
+                    Action = "player.tweenSpeed.set",
+                    Setting = "TweenSpeed",
+                    SettingsKey = "FarmSettings",
+                    Min = 50,
+                    Max = 350,
+                    Step = 10,
+                    Unit = "studs/s",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Auto turn on Buso",
+                    Action = "farm.settings.autoBuso",
+                    Setting = "AutoBuso",
+                    SettingsKey = "FarmSettings",
+                },
+                {
+                    Kind = "settingToggle",
+                    Label = "Rise straight up at low health",
+                    Action = "farm.settings.lowHealthRise",
+                    Setting = "LowHealthRiseEnabled",
+                    SettingsKey = "FarmSettings",
+                    Description = "Temporarily pauses movement, then continues the current task.",
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Retreat below health",
+                    Action = "farm.lowHealthRise.threshold.set",
+                    Setting = "LowHealthRiseThreshold",
+                    SettingsKey = "FarmSettings",
+                    Min = 5,
+                    Max = 80,
+                    Step = 5,
+                    Unit = "%",
+                },
+                {
+                    Kind = "settingSlider",
+                    Label = "Rise height",
+                    Action = "farm.lowHealthRise.height.set",
+                    Setting = "LowHealthRiseHeight",
+                    SettingsKey = "FarmSettings",
+                    Min = 100,
+                    Max = 2000,
+                    Step = 50,
+                    Unit = "studs",
+                },
+                {
+                    Kind = "sectionHeader",
+                    Label = "UI settings",
                 },
                 {
                     Kind = "settingDropdown",
@@ -1216,37 +1267,6 @@ local Config = {
                     Setting = "InstantAcceptQuest",
                 },
                 {
-                    Kind = "sectionHeader",
-                    Label = "Low-health retreat",
-                },
-                {
-                    Kind = "settingToggle",
-                    Label = "Rise straight up at low health",
-                    Action = "farm.settings.lowHealthRise",
-                    Setting = "LowHealthRiseEnabled",
-                    Description = "Temporarily pauses movement, then continues the current task.",
-                },
-                {
-                    Kind = "settingSlider",
-                    Label = "Retreat below health",
-                    Action = "farm.lowHealthRise.threshold.set",
-                    Setting = "LowHealthRiseThreshold",
-                    Min = 5,
-                    Max = 80,
-                    Step = 5,
-                    Unit = "%",
-                },
-                {
-                    Kind = "settingSlider",
-                    Label = "Rise height",
-                    Action = "farm.lowHealthRise.height.set",
-                    Setting = "LowHealthRiseHeight",
-                    Min = 100,
-                    Max = 2000,
-                    Step = 50,
-                    Unit = "studs",
-                },
-                {
                     Kind = "settingToggle",
                     Label = "Bring mobs",
                     Action = "farm.settings.bringMobs",
@@ -1261,12 +1281,6 @@ local Config = {
                     Max = 6,
                     Step = 1,
                     Unit = "mobs",
-                },
-                {
-                    Kind = "settingToggle",
-                    Label = "Auto turn on Buso",
-                    Action = "farm.settings.autoBuso",
-                    Setting = "AutoBuso",
                 },
             },
         },
@@ -11069,7 +11083,7 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
     local function startMovement()
         return pcall(function()
             return self.MovementService:MoveTo(destination, {
-                Speed = 190,
+                Speed = self.MovementService:GetTweenSpeed(),
                 Threshold = 8,
                 IsCurrent = function()
                     return self:_IsTravelCurrent(request, character)
@@ -12208,7 +12222,7 @@ function TeleportFeature:MoveFarmTo(destination, options)
         RouteStartPosition = root.Position,
         RoutePlanDestination = gatewayDestination.Position,
         IsCurrent = isCurrent,
-        Speed = tonumber(options.Speed) or 190,
+        Speed = tonumber(options.Speed) or self.MovementService:GetTweenSpeed(),
         Threshold = tonumber(options.Threshold) or 8,
         KeepSession = options.KeepSession == true,
         StallRetries = 0,
@@ -14785,6 +14799,50 @@ function MovementService:SetLowHealthRetreatSettings(settings)
     self:RefreshLowHealthRetreat()
 end
 
+function MovementService:_GetMovementSpeed(requestedSpeed)
+    local settings = self.LowHealthRetreatSettings or {}
+    local minimum = tonumber(settings.TweenSpeedMin) or 50
+    local maximum = math.min(tonumber(settings.TweenSpeedMax) or 350, 350)
+    local speed = tonumber(requestedSpeed) or tonumber(settings.TweenSpeed) or 190
+    if speed ~= speed or math.abs(speed) == math.huge then
+        speed = 190
+    end
+    return math.clamp(speed, minimum, maximum)
+end
+
+function MovementService:GetTweenSpeed()
+    return self:_GetMovementSpeed()
+end
+
+function MovementService:SetTweenSpeed(value)
+    local settings = self.LowHealthRetreatSettings or {}
+    local numericValue = tonumber(value)
+    local minimum = tonumber(settings.TweenSpeedMin) or 50
+    local maximum = math.min(tonumber(settings.TweenSpeedMax) or 350, 350)
+    local step = tonumber(settings.TweenSpeedStep) or 10
+    if not numericValue
+        or numericValue ~= numericValue
+        or math.abs(numericValue) == math.huge
+        or numericValue < minimum
+        or numericValue > maximum
+        or step <= 0
+    then
+        return false, "Tween speed is outside the allowed range"
+    end
+
+    local selected = math.clamp(
+        minimum + math.floor((numericValue - minimum) / step + 0.5) * step,
+        minimum,
+        maximum
+    )
+    settings.TweenSpeed = selected
+    self.LowHealthRetreatSettings = settings
+    if self.Active then
+        self.Active.Speed = selected
+    end
+    return true, selected
+end
+
 function MovementService:BeginLowHealthRetreatDeferral()
     if self.Destroyed then
         return nil
@@ -15602,7 +15660,7 @@ function MovementService:MoveTo(destination, options)
         local wasHolding = active.Holding or active.HoldingForSearch
         active.Goal = goal
         active.Threshold = threshold
-        active.Speed = tonumber(options.Speed) or active.Speed
+        active.Speed = self:_GetMovementSpeed(options.Speed)
         active.IsCurrent = isCurrent
         active.Holding = false
         active.HoldingForSearch = false
@@ -15682,7 +15740,7 @@ function MovementService:MoveTo(destination, options)
         RouteName = route and route.Name,
         Route = route,
         Threshold = threshold,
-        Speed = route and 190 or (tonumber(options.Speed) or 300),
+        Speed = self:_GetMovementSpeed(options.Speed),
         IsCurrent = isCurrent,
         Generation = generation,
         CollisionOriginals = collisionOriginals,
@@ -22229,7 +22287,7 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
     local teleportFeature = self.Context and self.Context.TeleportFeature
     if teleportFeature and teleportFeature.MoveFarmTo then
         local routed, routeResult = teleportFeature:MoveFarmTo(destination, {
-            Speed = 190,
+            Speed = self.MovementService:GetTweenSpeed(),
             Threshold = threshold,
             KeepSession = keepSession == true,
             Label = label or "farm target",
@@ -22242,7 +22300,7 @@ function MainFarm:_MoveTo(destination, session, threshold, keepSession, label)
         end
     end
     return self.MovementService:MoveTo(destination, {
-        Speed = 190,
+        Speed = self.MovementService:GetTweenSpeed(),
         Threshold = threshold,
         KeepSession = keepSession == true,
         IsCurrent = function()
@@ -25875,6 +25933,22 @@ function MainFarm:Handle(actionId, payload)
             "Low-health vertical lift " .. (payload and "enabled" or "disabled"),
             "success"
         )
+        return true
+    end
+    if actionId == "player.tweenSpeed.set" then
+        if not farmSettings or not self.MovementService
+            or type(self.MovementService.SetTweenSpeed) ~= "function"
+        then
+            self:_SetStatus("Tween speed setting is unavailable", "error")
+            return false
+        end
+        local value, speedOrError = self.MovementService:SetTweenSpeed(payload)
+        if not value then
+            self:_SetStatus(tostring(speedOrError or "Tween speed is invalid"), "error")
+            return false
+        end
+        farmSettings.TweenSpeed = speedOrError
+        self:_SetStatus("Tween speed: " .. tostring(speedOrError) .. " studs/s", "success")
         return true
     end
     if actionId == "farm.lowHealthRise.threshold.set" then

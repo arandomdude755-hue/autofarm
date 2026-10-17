@@ -61,7 +61,7 @@ local Theme = {
     MonoFont = Enum.Font.Code,
 }
 
-local Tabs = { "Main", "Farm", "Player", "Teleport", "Status", "Settings" }
+local Tabs = { "Main", "Farm", "Teleport", "Status", "Settings" }
 local Pages = {
     Main = {
         Controls = {
@@ -79,16 +79,6 @@ local Pages = {
                 Kind = "previewToggle",
                 Label = "Auto farm preview",
                 Action = "preview.farm",
-            },
-        },
-    },
-    Player = {
-        Controls = {
-            {
-                Kind = "button",
-                Label = "Character status",
-                Action = "player.status",
-                Badge = "INFO",
             },
         },
     },
@@ -1636,14 +1626,11 @@ task.spawn(function()
         selectTab("Main")
         activateControl(Pages.Main.Controls[1])
         local mainOk = string.find(state.status, "no gameplay action", 1, true) ~= nil
-        selectTab("Player")
-        activateControl(Pages.Player.Controls[1])
-        local playerOk = string.find(state.status, "no character data was read", 1, true) ~= nil
         selectTab("Teleport")
         activateControl(Pages.Teleport.Controls[1])
         local travelOk = string.find(state.status, "no movement or remote was invoked", 1, true) ~= nil
         selectTab("Main")
-        return mainOk and playerOk and travelOk and not state.farmPreview
+        return mainOk and travelOk and not state.farmPreview
     end)
 
     test("status error state is visible", function()

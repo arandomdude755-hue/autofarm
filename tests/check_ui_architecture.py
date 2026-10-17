@@ -26,7 +26,7 @@ entry = project["tree"]["StarterPlayer"]["StarterPlayerScripts"]["CustomHubMobil
 require(entry["$path"] == SCRIPT_PATH, "Rojo mapping does not point to the standalone LocalScript")
 require("ReplicatedStorage" not in project["tree"], "Standalone project should not depend on modules")
 
-for tab in ("Main", "Farm", "Player", "Teleport", "Settings"):
+for tab in ("Main", "Farm", "Teleport", "Status", "Settings"):
     require(f"{tab} = {{" in SCRIPT, f"Standalone page is missing: {tab}")
     require(f'"{tab}"' in CONFIG, f"production UI is missing the {tab} tab")
 
@@ -141,17 +141,19 @@ require('Label = "UI size"' in settings_page
         and 'Action = "settings.uiSize.select"' in settings_page
         and 'Setting = "UiSize"' in settings_page
         and 'Options = { "Small", "Medium", "Large" }' in settings_page
+        and 'Label = "Player settings"' in settings_page
+        and 'Label = "Tween speed"' in settings_page
         and 'Label = "Compact layout"' in settings_page
         and 'Label = "Reset UI settings"' in settings_page
         and 'Label = "Farm weapon"' not in settings_page,
-        "Main settings must contain UI controls only, not Farm settings")
+        "Main settings must group Hub, Player, and UI settings separately from Farm settings")
 require('Title = "Farm settings"' in farm_settings_page
         and 'SingleColumn = true' in farm_settings_page
         and 'Label = "Farm weapon"' in farm_settings_page
         and 'Label = "Bring mobs"' in farm_settings_page
-        and 'Label = "Auto turn on Buso"' in farm_settings_page
+        and 'Label = "Auto turn on Buso"' not in farm_settings_page
         and 'Kind = "collapsibleHeader"' not in farm_settings_page,
-        "Farm settings must have its own page instead of a nested section on Main settings")
+        "Farm settings must keep farm-only controls on its own page")
 require('Label = "Combat skills"' in CONFIG
         and 'Label = "Available skill keys"' in CONFIG
         and 'GroupId = "farmSkillKeys"' in CONFIG

@@ -142,6 +142,50 @@ function MovementService:SetLowHealthRetreatSettings(settings)
     self:RefreshLowHealthRetreat()
 end
 
+function MovementService:_GetMovementSpeed(requestedSpeed)
+    local settings = self.LowHealthRetreatSettings or {}
+    local minimum = tonumber(settings.TweenSpeedMin) or 50
+    local maximum = math.min(tonumber(settings.TweenSpeedMax) or 350, 350)
+    local speed = tonumber(requestedSpeed) or tonumber(settings.TweenSpeed) or 190
+    if speed ~= speed or math.abs(speed) == math.huge then
+        speed = 190
+    end
+    return math.clamp(speed, minimum, maximum)
+end
+
+function MovementService:GetTweenSpeed()
+    return self:_GetMovementSpeed()
+end
+
+function MovementService:SetTweenSpeed(value)
+    local settings = self.LowHealthRetreatSettings or {}
+    local numericValue = tonumber(value)
+    local minimum = tonumber(settings.TweenSpeedMin) or 50
+    local maximum = math.min(tonumber(settings.TweenSpeedMax) or 350, 350)
+    local step = tonumber(settings.TweenSpeedStep) or 10
+    if not numericValue
+        or numericValue ~= numericValue
+        or math.abs(numericValue) == math.huge
+        or numericValue < minimum
+        or numericValue > maximum
+        or step <= 0
+    then
+        return false, "Tween speed is outside the allowed range"
+    end
+
+    local selected = math.clamp(
+        minimum + math.floor((numericValue - minimum) / step + 0.5) * step,
+        minimum,
+        maximum
+    )
+    settings.TweenSpeed = selected
+    self.LowHealthRetreatSettings = settings
+    if self.Active then
+        self.Active.Speed = selected
+    end
+    return true, selected
+end
+
 function MovementService:BeginLowHealthRetreatDeferral()
     if self.Destroyed then
         return nil
@@ -959,7 +1003,7 @@ function MovementService:MoveTo(destination, options)
         local wasHolding = active.Holding or active.HoldingForSearch
         active.Goal = goal
         active.Threshold = threshold
-        active.Speed = tonumber(options.Speed) or active.Speed
+        active.Speed = self:_GetMovementSpeed(options.Speed)
         active.IsCurrent = isCurrent
         active.Holding = false
         active.HoldingForSearch = false
@@ -1039,7 +1083,7 @@ function MovementService:MoveTo(destination, options)
         RouteName = route and route.Name,
         Route = route,
         Threshold = threshold,
-        Speed = route and 190 or (tonumber(options.Speed) or 300),
+        Speed = self:_GetMovementSpeed(options.Speed),
         IsCurrent = isCurrent,
         Generation = generation,
         CollisionOriginals = collisionOriginals,

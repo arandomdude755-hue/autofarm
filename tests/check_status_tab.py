@@ -37,7 +37,7 @@ require(
     and 'EventStatus = {\n            Title = "Event Status"' in CONFIG
     and 'Action = "status.refresh"' in CONFIG
     and 'Action = "status.copy"' in CONFIG
-    and 'local Tabs = { "Main", "Farm", "Player", "Teleport", "Status", "Settings" }' in STANDALONE_UI_TEST
+    and 'local Tabs = { "Main", "Farm", "Teleport", "Status", "Settings" }' in STANDALONE_UI_TEST
     and 'Status = {\n        Controls = {' in STANDALONE_UI_TEST,
     "Status is a top-level tab with Event Status first and Server Status second",
 )

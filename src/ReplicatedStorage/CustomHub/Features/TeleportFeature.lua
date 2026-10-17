@@ -245,7 +245,7 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
     local function startMovement()
         return pcall(function()
             return self.MovementService:MoveTo(destination, {
-                Speed = 190,
+                Speed = self.MovementService:GetTweenSpeed(),
                 Threshold = 8,
                 IsCurrent = function()
                     return self:_IsTravelCurrent(request, character)
@@ -1384,7 +1384,7 @@ function TeleportFeature:MoveFarmTo(destination, options)
         RouteStartPosition = root.Position,
         RoutePlanDestination = gatewayDestination.Position,
         IsCurrent = isCurrent,
-        Speed = tonumber(options.Speed) or 190,
+        Speed = tonumber(options.Speed) or self.MovementService:GetTweenSpeed(),
         Threshold = tonumber(options.Threshold) or 8,
         KeepSession = options.KeepSession == true,
         StallRetries = 0,
