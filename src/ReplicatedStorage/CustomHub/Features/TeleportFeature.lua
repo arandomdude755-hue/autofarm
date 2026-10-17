@@ -262,6 +262,7 @@ function TeleportFeature:_MoveAndWait(request, character, destination, shouldAbo
         return false, tostring(moveResult)
     end
     local needsRestartAfterRetreat = moveResult == "arrived"
+        or moveResult == "low-health retreat is holding position"
     if moveResult == "arrived" and not self.MovementService.LowHealthRetreatInProgress then
         return true
     end

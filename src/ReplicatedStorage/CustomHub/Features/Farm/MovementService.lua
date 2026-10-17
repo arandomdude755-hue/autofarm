@@ -237,12 +237,17 @@ function MovementService:_FinishLowHealthRetreat()
     local recovered = humanoid
         and humanoid.MaxHealth > 0
         and humanoid.Health / humanoid.MaxHealth * 100 >= 80
-    if retreat.ResetLatchAfterLift or recovered then
+    if recovered then
         self.LowHealthRetreatLatched = false
         self.LowHealthRetreatPending = false
     end
     if self.Report then
-        self.Report("Low-health lift complete; resuming the current task.", "info")
+        self.Report(
+            recovered
+                and "Health recovered; resuming the current task."
+                or "Low-health retreat ended; resuming the current task.",
+            "info"
+        )
     end
 end
 
@@ -262,10 +267,11 @@ function MovementService:_StartLowHealthRetreat(character, humanoid, root)
         Humanoid = humanoid,
         Root = root,
         GoalY = root.Position.Y + height,
-        LastHorizontalPosition = Vector3.new(root.Position.X, 0, root.Position.Z),
+        HoldX = root.Position.X,
+        HoldZ = root.Position.Z,
+        Ascending = true,
         CollisionOriginals = {},
         PartConnections = {},
-        ResetLatchAfterLift = false,
     }
     self.LowHealthRetreat = retreat
     self.LowHealthRetreatInProgress = true
@@ -288,7 +294,10 @@ function MovementService:_StartLowHealthRetreat(character, humanoid, root)
         end
     end)
     if self.Report then
-        self.Report("Health is low; rising vertically before resuming the current task.", "warning")
+        self.Report(
+            "Health is low; rising quickly and holding position until recovery.",
+            "warning"
+        )
     end
     return true
 end
@@ -310,34 +319,38 @@ function MovementService:_StepLowHealthRetreat(retreat, deltaTime)
         self:_FinishLowHealthRetreat()
         return
     end
+    if humanoid.MaxHealth > 0
+        and humanoid.Health / humanoid.MaxHealth * 100 >= 80
+    then
+        self.LowHealthRetreatLatched = false
+        self.LowHealthRetreatPending = false
+        self:_FinishLowHealthRetreat()
+        return
+    end
     if root.Anchored then
         return
     end
 
-    local horizontalPosition = Vector3.new(root.Position.X, 0, root.Position.Z)
-    if (horizontalPosition - retreat.LastHorizontalPosition).Magnitude > 100 then
-        retreat.GoalY = root.Position.Y
-            + math.clamp(
-                tonumber(self.LowHealthRetreatSettings.LowHealthRiseHeight) or 800,
-                tonumber(self.LowHealthRetreatSettings.LowHealthRiseHeightMin) or 100,
-                tonumber(self.LowHealthRetreatSettings.LowHealthRiseHeightMax) or 2000
-            )
-        retreat.LastHorizontalPosition = horizontalPosition
-    end
-
-    local remainingY = retreat.GoalY - root.Position.Y
-    if remainingY <= 1 then
-        root.CFrame = root.CFrame + Vector3.new(0, remainingY, 0)
-        self:_FinishLowHealthRetreat()
-        return
-    end
-    local frameTime = math.clamp(tonumber(deltaTime) or 0, 0, 0.1)
-    local step = math.min(190 * frameTime, 18, remainingY)
-    if step > 0 then
-        root.CFrame = root.CFrame + Vector3.new(0, step, 0)
+    if retreat.Ascending then
+        local remainingY = retreat.GoalY - root.Position.Y
+        local frameTime = math.clamp(tonumber(deltaTime) or 0, 0, 0.1)
+        local step = math.min(300 * frameTime, 30, math.max(remainingY, 0))
+        local nextY = root.Position.Y + step
+        if remainingY <= 1 or nextY >= retreat.GoalY then
+            nextY = retreat.GoalY
+            retreat.Ascending = false
+        end
+        local risePosition = Vector3.new(retreat.HoldX, nextY, retreat.HoldZ)
+        root.CFrame = root.CFrame + (risePosition - root.Position)
         root.AssemblyLinearVelocity = Vector3.zero
         root.AssemblyAngularVelocity = Vector3.zero
+        return
     end
+
+    local holdPosition = Vector3.new(retreat.HoldX, retreat.GoalY, retreat.HoldZ)
+    root.CFrame = root.CFrame + (holdPosition - root.Position)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
 end
 
 function MovementService:RefreshLowHealthRetreat()
@@ -359,10 +372,9 @@ function MovementService:RefreshLowHealthRetreat()
     local healthPercent = humanoid.Health / humanoid.MaxHealth * 100
     if healthPercent >= 80 then
         self.LowHealthRetreatPending = false
+        self.LowHealthRetreatLatched = false
         if self.LowHealthRetreatInProgress then
-            self.LowHealthRetreat.ResetLatchAfterLift = true
-        else
-            self.LowHealthRetreatLatched = false
+            self:_FinishLowHealthRetreat()
         end
         return false
     end
@@ -901,6 +913,9 @@ function MovementService:MoveTo(destination, options)
     options = options or {}
     if typeof(destination) ~= "CFrame" then
         return false, "Movement destination must be a CFrame"
+    end
+    if self.LowHealthRetreatInProgress then
+        return true, "low-health retreat is holding position"
     end
 
     local character, humanoid, root = self.Compatibility:GetCharacterParts()

@@ -14,3 +14,4 @@
 - [Sidebar submenu overflow](sidebar-submenu-overflow.md) — expanded child rows should auto-scroll into view using generic viewport checks, not tab-specific offsets.
 - [Server-hop handshake](server-hop-handshake.md) — use the game's server-browser remote for both instance discovery and joining; direct client teleport calls lack a valid token here.
 - [Team-selection confirmation](team-selection-confirmation.md) — a non-nil Team is not enough; selection is complete only once the chooser closes.
+- [Low-health retreat](low-health-retreat.md) — rise from the current spot, hold in the air, and resume movement only at 80% health.

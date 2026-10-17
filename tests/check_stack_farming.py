@@ -48,12 +48,18 @@ require(
     and 'Action = "farm.settings.lowHealthRise"' in CONFIG
     and 'Label = "Retreat below health"' in CONFIG
     and 'Label = "Rise height"' in CONFIG
-    and '"Health is low; rising vertically before resuming the current task."' in MOVEMENT
+    and '"Health is low; rising quickly and holding position until recovery."' in MOVEMENT
     and "function MovementService:RefreshLowHealthRetreat()" in MOVEMENT
     and "humanoid.HealthChanged:Connect" in MOVEMENT
     and "GoalY = root.Position.Y + height" in MOVEMENT
+    and "HoldX = root.Position.X" in MOVEMENT
+    and "HoldZ = root.Position.Z" in MOVEMENT
+    and "local step = math.min(300 * frameTime, 30, math.max(remainingY, 0))" in MOVEMENT
+    and "local holdPosition = Vector3.new(retreat.HoldX, retreat.GoalY, retreat.HoldZ)" in MOVEMENT
     and "function MovementService:_StepLowHealthRetreat" in MOVEMENT
     and "healthPercent >= 80" in MOVEMENT
+    and "low-health retreat is holding position" in MOVEMENT
+    and 'moveResult == "low-health retreat is holding position"' in TELEPORT
     and "BeginLowHealthRetreatDeferral" in MOVEMENT
     and "and self.LowHealthRetreat.Character == character" in MOVEMENT
     and "self.CombatService:Cancel()" in MAIN_FARM
@@ -63,7 +69,7 @@ require(
     and "self:_GetLowHealthCombatRise" not in MAIN_FARM
     and "LOW_HEALTH_RISE_ACTIVATION_DISTANCE" not in MAIN_FARM
     and "SkipSpecialRoute" not in MOVEMENT,
-    "low-health rise must be global, start vertically from the player, defer safely around gateways, and resume current movement",
+    "low-health retreat must rise quickly from the player, hold position until recovery, defer safely around gateways, and resume current movement",
 )
 settings_page = CONFIG[
     CONFIG.index('Title = "Main settings"') : CONFIG.index('Title = "Farm settings"')
