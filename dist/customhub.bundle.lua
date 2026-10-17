@@ -18652,6 +18652,8 @@ local SPAWN_LOAD_GRACE = 1
 local SPAWN_CYCLE_RETRY_INTERVAL = 2
 local MAX_EMPTY_SPAWN_CYCLES = 2
 local STACK_TASK_LOAD_TIMEOUT = 8
+local INDRA_COLOR_REQUEST_TIMEOUT = 6
+local MAX_INDRA_COLOR_REQUEST_ATTEMPTS = 2
 local SEA_PROGRESS_POLL_INTERVAL = 1
 local SEA_PROGRESS_MOVE_THRESHOLD = 8
 local MILITARY_DETECTIVE_POSITION = CFrame.new(4852, 6, 719)
@@ -20069,14 +20071,38 @@ function MainFarm:_RefreshIndraColors()
     local now = os.clock()
     local state = self.IndraColorState
     if not state then
-        state = { NextAt = 0, Pending = false, Unlocked = nil }
+        state = { NextAt = 0, Pending = false, Unlocked = nil, Attempts = 0 }
         self.IndraColorState = state
     end
-    if state.Pending or now < state.NextAt then
+    if state.Failed and now - (state.FailedAt or now) >= 30 then
+        state.Failed = false
+        state.Attempts = 0
+        state.LastError = nil
+        state.FailedAt = nil
+    end
+    if state.Pending then
+        if now - (state.PendingAt or now) < INDRA_COLOR_REQUEST_TIMEOUT then
+            return state
+        end
+        state.Pending = false
+        state.LastError = "Haki color check timed out"
+        state.CompletedAt = now
+        state.NextAt = now + 1
+        if (state.Attempts or 0) >= MAX_INDRA_COLOR_REQUEST_ATTEMPTS then
+            state.Failed = true
+            state.FailedAt = now
+        end
         return state
     end
+    if state.Failed or now < state.NextAt then
+        return state
+    end
+    state.Attempts = (state.Attempts or 0) + 1
     state.Pending = true
-    state.NextAt = now + 5
+    state.PendingAt = now
+    state.NextAt = now + INDRA_COLOR_REQUEST_TIMEOUT
+    state.RequestId = (state.RequestId or 0) + 1
+    local requestId = state.RequestId
     task.spawn(function()
         local compatibility = self.Context and self.Context.Compatibility
         local commF = compatibility and compatibility:GetCommF()
@@ -20087,19 +20113,53 @@ function MainFarm:_RefreshIndraColors()
             return commF:InvokeServer("getColors")
         end)
         local unlocked = {}
+        local found = {}
         if ok and type(colors) == "table" then
-            for _, color in ipairs(colors) do
-                if type(color) == "table" and color.Unlocked == true then
-                    unlocked[color.HiddenName] = true
+            for _, color in pairs(colors) do
+                if type(color) == "table" and type(color.HiddenName) == "string" then
+                    for _, requiredColor in ipairs(INDRA_HAKI_COLORS) do
+                        if color.HiddenName == requiredColor.HiddenName
+                            and type(color.Unlocked) == "boolean"
+                        then
+                            found[color.HiddenName] = true
+                            unlocked[color.HiddenName] = color.Unlocked
+                            break
+                        end
+                    end
                 end
             end
-            state.Unlocked = unlocked
-            state.LastError = nil
-        else
-            state.LastError = tostring(colors)
+            local allReported = true
+            for _, color in ipairs(INDRA_HAKI_COLORS) do
+                if not found[color.HiddenName] then
+                    allReported = false
+                    break
+                end
+            end
+            if allReported then
+                ok = true
+            else
+                ok = false
+                colors = "Haki color response was incomplete"
+            end
+        end
+        if state.RequestId ~= requestId or not state.Pending then
+            return
         end
         state.Pending = false
         state.CompletedAt = os.clock()
+        if ok then
+            state.Unlocked = unlocked
+            state.LastError = nil
+            state.Failed = false
+            state.Attempts = 0
+        else
+            state.LastError = tostring(colors)
+            state.NextAt = state.CompletedAt + 1
+            if (state.Attempts or 0) >= MAX_INDRA_COLOR_REQUEST_ATTEMPTS then
+                state.Failed = true
+                state.FailedAt = state.CompletedAt
+            end
+        end
     end)
     return state
 end
@@ -20235,9 +20295,12 @@ function MainFarm:_ChooseStackPreparation()
             return "DoughKing", hasSweet and "Sweet Chalice" or "God's Chalice"
         end
         local colors = self:_RefreshIndraColors()
+        if colors.Failed then
+            return nil
+        end
         if hasGods and type(colors.Unlocked) ~= "table" then
-            -- Keep this as an active Stack preparation. Returning nil here lets
-            -- the lower-priority hop worker run while the Haki query is pending.
+            -- Reserve Stack priority while the Haki query is pending so lower-
+            -- priority work cannot start before the Chalice path is selected.
             return "ChaliceChoice", "God's Chalice"
         end
         if hasGods and type(colors.Unlocked) == "table" then
@@ -20303,6 +20366,12 @@ function MainFarm:_StepStackPreparation(session, root, prep)
         end
 
         local colorState = self:_RefreshIndraColors()
+        if colorState.Failed then
+            self:_CancelStackPreparation(
+                "Couldn't verify your Haki colors. Choose an Indra or Dough King priority to continue."
+            )
+            return true
+        end
         if type(colorState.Unlocked) ~= "table" then
             self:_HoldPosition(session)
             self:_SetStatus(

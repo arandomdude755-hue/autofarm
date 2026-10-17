@@ -176,10 +176,15 @@ require(
     "return \"ChaliceChoice\", \"God's Chalice\"" in MAIN_FARM
     and 'if prep.Kind == "ChaliceChoice" then' in MAIN_FARM
     and '"Checking Haki colors to choose Indra or Dough King"' in MAIN_FARM
+    and "INDRA_COLOR_REQUEST_TIMEOUT = 6" in MAIN_FARM
+    and "MAX_INDRA_COLOR_REQUEST_ATTEMPTS = 2" in MAIN_FARM
+    and "for _, color in pairs(colors) do" in MAIN_FARM
+    and "if colorState.Failed then" in MAIN_FARM
+    and "Choose an Indra or Dough King priority to continue." in MAIN_FARM
     and 'if not entry and self.ActiveStackPrep then' in MAIN_FARM
     and MAIN_FARM.index('if not entry and self.ActiveStackPrep then')
     < MAIN_FARM.index("if not entry then\n        local hopService = self.ServerHopService"),
-    "a held God's Chalice must reserve Stack priority while Indra/Dough King selection is pending, ahead of hopping",
+    "a held God's Chalice must reserve Stack priority while color lookup is pending, time out safely, and avoid guessing after lookup failure",
 )
 require(
     "function MainFarm:_ShouldDeferServerHop()" in MAIN_FARM
