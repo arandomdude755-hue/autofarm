@@ -30,7 +30,8 @@ function ServerHopService.new(
     settingsPersistence,
     setStatus,
     coordinator,
-    notifyUser
+    notifyUser,
+    shouldDeferHop
 )
     return setmetatable({
         Compatibility = compatibility,
@@ -38,6 +39,7 @@ function ServerHopService.new(
         SetStatus = setStatus,
         Coordinator = coordinator,
         NotifyUser = notifyUser,
+        ShouldDeferHop = shouldDeferHop,
         CoordinatorLease = nil,
         Settings = nil,
         Session = nil,
@@ -53,6 +55,14 @@ function ServerHopService.new(
         TeleportFailureConnection = nil,
         LastErrorStatus = nil,
     }, ServerHopService)
+end
+
+function ServerHopService:_ShouldDeferHop()
+    if type(self.ShouldDeferHop) ~= "function" then
+        return false
+    end
+    local ok, shouldDefer = pcall(self.ShouldDeferHop)
+    return ok and shouldDefer == true
 end
 
 function ServerHopService:_SetStatus(message, kind)
@@ -483,6 +493,15 @@ function ServerHopService:_BeginFetch()
         end
 
         self.LastErrorStatus = nil
+        if self:_ShouldDeferHop() then
+            self.NextAttemptAt = os.clock() + 2
+            self:_SetStatus(
+                "A Stack task is ready; finishing it before looking for another server",
+                "info"
+            )
+            self:_ReleaseCoordinatorLease()
+            return
+        end
         local candidates = {}
         for _, server in ipairs(result.Servers or {}) do
             local jobId = type(server) == "table" and server.id
@@ -569,6 +588,20 @@ end
 
 function ServerHopService:Step()
     if self.Destroyed or not self:_HasEnabledMode() then
+        return false
+    end
+    if not self.InFlight and self:_ShouldDeferHop() then
+        self.NextAttemptAt = math.max(
+            self.NextAttemptAt or 0,
+            os.clock() + 2
+        )
+        if not self.Fetching and not self.InFlight then
+            self:_ReleaseCoordinatorLease()
+        end
+        self:_SetStatus(
+            "A Stack task is ready; finishing it before looking for another server",
+            "info"
+        )
         return false
     end
     if self.InFlight then

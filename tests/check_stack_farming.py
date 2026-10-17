@@ -12,6 +12,9 @@ QUEUE = (
 TELEPORT = (
     ROOT / "src/ReplicatedStorage/CustomHub/Features/TeleportFeature.lua"
 ).read_text(encoding="utf-8")
+HOP = (
+    ROOT / "src/ReplicatedStorage/CustomHub/Features/ServerHopService.lua"
+).read_text(encoding="utf-8")
 
 
 def require(condition, message):
@@ -168,6 +171,34 @@ require(
     and "function MainFarm:_StepStackPreparation(session, root, prep)" in MAIN_FARM
     and "self.StackTaskQueue:TakePendingKind(bossQueueKind)" in MAIN_FARM,
     "summon preparation should claim its own spawned boss without reordering unrelated queued jobs",
+)
+require(
+    "return \"ChaliceChoice\", \"God's Chalice\"" in MAIN_FARM
+    and 'if prep.Kind == "ChaliceChoice" then' in MAIN_FARM
+    and '"Checking Haki colors to choose Indra or Dough King"' in MAIN_FARM
+    and 'if not entry and self.ActiveStackPrep then' in MAIN_FARM
+    and MAIN_FARM.index('if not entry and self.ActiveStackPrep then')
+    < MAIN_FARM.index("if not entry then\n        local hopService = self.ServerHopService"),
+    "a held God's Chalice must reserve Stack priority while Indra/Dough King selection is pending, ahead of hopping",
+)
+require(
+    "function MainFarm:_ShouldDeferServerHop()" in MAIN_FARM
+    and "if self.ActiveStackTask or self.ActiveStackPrep then" in MAIN_FARM
+    and "if queue and type(queue.Pending) == \"table\" and #queue.Pending > 0 then" in MAIN_FARM
+    and "return self:_ShouldDeferServerHop()" in MAIN_FARM
+    and "shouldDeferHop" in HOP
+    and "if not self.InFlight and self:_ShouldDeferHop() then" in HOP
+    and 'A Stack task is ready; finishing it before looking for another server' in HOP,
+    "server hopping must yield to any active or queued Stack task before searching or joining",
+)
+require(
+    '["Soul Reaper"] = "SoulReaper"' in QUEUE
+    and "self:_Queue(kind, instance)" in QUEUE
+    and 'self:_Queue("CastleRaid", instance)' in QUEUE
+    and "function StackTaskQueue:_ObserveCastleRaid(instance)" in QUEUE
+    and "self:_ObserveSpawnedBoss(instance)" in QUEUE
+    and "self:_ObserveCastleRaid(instance)" in QUEUE,
+    "Soul Reaper and Castle Raid detections must enter the same pending Stack queue that pauses hopping",
 )
 require(
     "CakePrince = 3" in MAIN_FARM
